@@ -35,6 +35,12 @@
   letter-spacing: -0.01em;
 }
 
+.brand-logo {
+  display: block;
+  height: clamp(52px, 7vw, 72px);
+  width: auto;
+}
+
 .brand-sub {
   font-size: 0.9rem;
   font-weight: 500;
@@ -53,7 +59,7 @@
 .nav-link {
   position: relative;
   padding: 2px 0;
-  font-size: 0.86rem;
+  font-size: 1rem;
   font-weight: 500;
   letter-spacing: 0.01em;
   color: rgba(17, 17, 17, 0.7);

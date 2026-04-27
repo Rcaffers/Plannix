@@ -8,7 +8,7 @@ export default function Header() {
       <div className="container nav-shell">
         <a className="brand" href="#top" aria-label="New Genre Home">
           <span className="brand-mark">
-            <span className="brand-main">Plannix</span>
+            <img className="brand-logo" src="/Plannix_logo.png" alt="Plannix" />
           </span>
         </a>
 
