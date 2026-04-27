@@ -1,0 +1,81 @@
+.cta-section {
+  padding-top: 22px;
+  padding-bottom: 58px;
+}
+
+.cta-kicker {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(17, 17, 17, 0.52);
+}
+
+.cta-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) auto;
+  gap: 24px;
+  align-items: center;
+  padding: 32px;
+  border-radius: calc(var(--radius) + 6px);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.66), rgba(230, 226, 219, 0.82));
+  border: 1px solid var(--stroke);
+  box-shadow: var(--shadow);
+}
+
+.cta-card h2 {
+  margin: 6px 0 0;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-size: clamp(1.8rem, 3vw, 3.15rem);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+.cta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 148px;
+  padding: 14px 18px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-weight: 600;
+}
+
+.button:hover {
+  transform: translateY(-2px);
+}
+
+.button-primary {
+  background: var(--text);
+  color: var(--white);
+}
+
+.button-secondary {
+  background: rgba(255, 255, 255, 0.58);
+  border-color: var(--stroke);
+}
+
+@media (max-width: 1024px) {
+  .cta-card {
+    grid-template-columns: 1fr;
+  }
+
+  .cta-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .cta-card {
+    padding: 24px;
+  }
+}

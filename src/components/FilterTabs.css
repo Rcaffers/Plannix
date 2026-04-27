@@ -1,0 +1,27 @@
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 0 28px;
+}
+
+.filter-pill {
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  color: rgba(17, 17, 17, 0.78);
+}
+
+.filter-pill:hover {
+  transform: translateY(-1px);
+  border-color: rgba(17, 17, 17, 0.18);
+}
+
+.filter-pill.is-active {
+  background: var(--text);
+  color: var(--white);
+  border-color: var(--text);
+  box-shadow: 0 10px 22px rgba(17, 17, 17, 0.18);
+}

@@ -1,0 +1,91 @@
+.project-card {
+  display: grid;
+  min-height: 420px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  box-shadow: var(--shadow);
+}
+
+.project-card:hover {
+  transform: translateY(-6px);
+}
+
+.project-visual {
+  position: relative;
+  min-height: 300px;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.project-visual::after {
+  content: '';
+  position: absolute;
+  inset: auto 16px 16px auto;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+}
+
+.project-visual::before {
+  content: '↗';
+  position: absolute;
+  right: 32px;
+  bottom: 29px;
+  z-index: 1;
+  font-size: 1.1rem;
+  color: var(--text);
+}
+
+.project-monogram {
+  position: absolute;
+  left: 22px;
+  bottom: 18px;
+  font-size: clamp(2.2rem, 4.2vw, 4rem);
+  font-weight: 800;
+  letter-spacing: -0.08em;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.project-copy {
+  display: grid;
+  gap: 8px;
+  padding: 20px 20px 22px;
+}
+
+.project-meta {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(17, 17, 17, 0.5);
+}
+
+.project-copy h3 {
+  margin: 0;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-size: 1.9rem;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+
+.project-copy p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+@media (max-width: 720px) {
+  .project-card {
+    min-height: 380px;
+  }
+
+  .project-visual {
+    min-height: 260px;
+  }
+}

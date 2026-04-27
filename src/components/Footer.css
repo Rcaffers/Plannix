@@ -1,0 +1,119 @@
+.site-footer {
+  padding-bottom: 40px;
+}
+
+.footer-kicker {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(17, 17, 17, 0.52);
+}
+
+.footer-title {
+  margin: 6px 0 0;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-size: clamp(1.8rem, 3vw, 3.15rem);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+.footer-shell {
+  padding: 34px;
+  border-radius: calc(var(--radius) + 6px);
+  background: #111111;
+  color: var(--white);
+  box-shadow: 0 24px 64px rgba(10, 10, 10, 0.18);
+}
+
+.footer-top,
+.footer-bottom {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.footer-links,
+.social-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+}
+
+.footer-links a,
+.social-list a,
+.office-card a {
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.footer-links a:hover,
+.social-list a:hover,
+.office-card a:hover {
+  color: var(--white);
+}
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  padding: 30px 0 28px;
+}
+
+.office-card {
+  display: grid;
+  gap: 10px;
+  padding: 22px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.office-card h3 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.office-card p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.68);
+  line-height: 1.6;
+}
+
+.office-time {
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.social-card {
+  align-content: start;
+}
+
+.footer-bottom {
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.95rem;
+}
+
+@media (max-width: 1024px) {
+  .footer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .footer-top,
+  .footer-bottom {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 720px) {
+  .footer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .footer-shell {
+    padding: 24px;
+  }
+}
