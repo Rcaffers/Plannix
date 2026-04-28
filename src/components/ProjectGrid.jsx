@@ -1,12 +1,16 @@
 import ProjectCard from './ProjectCard';
 import './ProjectGrid.css';
 
-export default function ProjectGrid({ projects }) {
+const timetableProject = {
+  title: 'Weekly Timetable',
+  subtitle: 'Teaching Schedule',
+  href: '#',
+};
+
+export default function ProjectGrid() {
   return (
     <div className="projects-grid">
-      {projects.map((project) => (
-        <ProjectCard key={project.title} project={project} />
-      ))}
+      <ProjectCard project={timetableProject} />
     </div>
   );
 }

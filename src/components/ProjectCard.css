@@ -1,91 +1,142 @@
 .project-card {
-  display: grid;
-  min-height: 420px;
-  border-radius: var(--radius);
+  display: block;
+  min-height: 460px;
+  border-radius: 10px;
   overflow: hidden;
   background: var(--card);
   border: 1px solid var(--stroke);
   box-shadow: var(--shadow);
-}
-
-.project-card:hover {
-  transform: translateY(-6px);
-}
-
-.project-visual {
-  position: relative;
-  min-height: 300px;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: cover;
-}
-
-.project-visual::after {
-  content: '';
-  position: absolute;
-  inset: auto 16px 16px auto;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
-}
-
-.project-visual::before {
-  content: '↗';
-  position: absolute;
-  right: 32px;
-  bottom: 29px;
-  z-index: 1;
-  font-size: 1.1rem;
   color: var(--text);
 }
 
-.project-monogram {
-  position: absolute;
-  left: 22px;
-  bottom: 18px;
-  font-size: clamp(2.2rem, 4.2vw, 4rem);
-  font-weight: 800;
-  letter-spacing: -0.08em;
-  color: rgba(255, 255, 255, 0.88);
+.project-card:hover {
+  transform: translateY(-4px);
 }
 
-.project-copy {
+.schedule-card {
   display: grid;
-  gap: 8px;
-  padding: 20px 20px 22px;
+  grid-template-rows: auto auto 1fr;
+  background: #fcfaf6;
 }
 
-.project-meta {
+.schedule-titlebar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #3f7f78;
+  color: #f5f1ea;
   font-size: 0.78rem;
+}
+
+.schedule-titlebar strong {
+  font-size: 0.9rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(17, 17, 17, 0.5);
+  letter-spacing: 0.02em;
 }
 
-.project-copy h3 {
-  margin: 0;
-  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
-  font-size: 1.9rem;
-  font-weight: 500;
-  letter-spacing: -0.03em;
+.schedule-titlebar span {
+  opacity: 0.92;
 }
 
-.project-copy p {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.55;
+.schedule-head {
+  display: grid;
+  grid-template-columns: 80px repeat(5, minmax(100px, 1fr));
+  border-bottom: 1px solid #e6dfd4;
+  background: #f6f1e8;
+}
+
+.time-head,
+.day-head {
+  padding: 10px 8px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+  color: #111111;
+  border-right: 1px solid #d8d1c7;
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: 80px repeat(5, minmax(100px, 1fr));
+  min-height: 320px;
+}
+
+.time-col {
+  display: grid;
+  grid-template-rows: repeat(5, 1fr);
+  background: #f8f3ea;
+  border-right: 1px solid #e6dfd4;
+}
+
+.time-label {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #3f3f3f;
+  border-bottom: 1px solid #ece4d9;
+}
+
+.day-col {
+  display: grid;
+  grid-template-rows: repeat(5, 1fr);
+  border-right: 1px solid #e6dfd4;
+}
+
+.slot {
+  position: relative;
+  border-bottom: 1px solid #ece4d9;
+  padding: 6px;
+}
+
+.lesson-card {
+  display: grid;
+  gap: 2px;
+  font-size: 0.68rem;
+  line-height: 1.25;
+  color: #111111;
+  text-decoration: none;
+  background: #e8f6e8;
+  border: 1px solid #b9dcb9;
+  border-radius: 6px;
+  padding: 6px;
+  min-height: 100%;
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+.lesson-card:hover,
+.lesson-card:focus-visible {
+  border-color: #8bbf8b;
+  box-shadow: 0 2px 10px rgba(139, 191, 139, 0.32);
+  transform: translateY(-1px);
+}
+
+.lesson-card:focus-visible {
+  outline: 2px solid #8bbf8b;
+  outline-offset: 1px;
+}
+
+.session-title {
+  font-weight: 700;
+}
+
+.day-col:last-child,
+.day-head:last-child {
+  border-right: 0;
 }
 
 @media (max-width: 720px) {
   .project-card {
-    min-height: 380px;
+    min-height: 420px;
   }
 
-  .project-visual {
-    min-height: 260px;
+  .schedule-head,
+  .schedule-grid {
+    grid-template-columns: 64px repeat(5, minmax(82px, 1fr));
   }
 }
