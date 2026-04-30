@@ -3,15 +3,16 @@ import './Hero.css';
 export default function Hero() {
   return (
     <section className="section hero-section" id="top">
-      <div className="container hero-grid">
-        <div className="eyebrow">Studio Work</div>
-        <h1 className="hero-title">Our work</h1>
-        <p className="hero-subtitle">From idea to exit</p>
-        <p className="hero-copy">
-          A React/Vite boilerplate inspired by a premium studio portfolio: sticky nav,
-          oversized editorial typography, filterable case studies, and a contact-driven
-          footer ready for real content.
-        </p>
+      <div className="container hero-shell">
+        <div className="hero-grid">
+          <p className="hero-kicker">Planning Suite</p>
+          <h1 className="hero-title">Next Level Planning</h1>
+          <p className="hero-subtitle">From planning to sharing</p>
+          <p className="hero-copy">
+            We are here to organise your teaching schedule and enable you to share your teaching schedule with your
+            students.
+          </p>
+        </div>
       </div>
     </section>
   );
