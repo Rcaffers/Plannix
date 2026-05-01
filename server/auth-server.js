@@ -51,6 +51,26 @@ function getSessionUser(req) {
   return users.find((user) => user.id === userId) || null;
 }
 
+function validateSignupPayload({ name, email, password }) {
+  if (!name || !name.trim()) {
+    return 'Full name is required.';
+  }
+
+  if (!email || !email.trim()) {
+    return 'Email is required.';
+  }
+
+  if (!password) {
+    return 'Password is required.';
+  }
+
+  if (password.length < 8) {
+    return 'Password must be at least 8 characters.';
+  }
+
+  return null;
+}
+
 app.get('/auth/me', (req, res) => {
   const user = getSessionUser(req);
   if (!user) {
@@ -89,6 +109,44 @@ app.post('/auth/login', async (req, res) => {
   });
 
   return res.json({ user: toPublicUser(user) });
+});
+
+app.post('/auth/signup', async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+
+  const validationError = validateSignupPayload({ name, email, password });
+  if (validationError) {
+    return res.status(400).json({ message: validationError });
+  }
+
+  const existingUser = users.find((candidate) => candidate.email.toLowerCase() === email);
+  if (existingUser) {
+    return res.status(409).json({ message: 'An account already exists for this email.' });
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const newUser = {
+    id: `u_individual_${crypto.randomUUID()}`,
+    name,
+    email,
+    passwordHash,
+  };
+
+  users.push(newUser);
+
+  const sessionId = crypto.randomUUID();
+  sessions.set(sessionId, newUser.id);
+
+  res.cookie(SESSION_COOKIE, sessionId, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: false,
+    maxAge: 1000 * 60 * 60 * 24,
+  });
+
+  return res.status(201).json({ user: toPublicUser(newUser) });
 });
 
 app.post('/auth/logout', (req, res) => {

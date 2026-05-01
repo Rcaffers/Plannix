@@ -3,52 +3,114 @@ import './Header.css';
 
 const navItems = ['Home', 'Features', 'News', 'About', 'Join', 'Contact'];
 
-export default function Header({ user, isAuthLoading, onLogin, onLogout }) {
+export default function Header({ user, isAuthLoading, onLogin, onLogout, onSignup }) {
   const [isLoginOpen, setIsLoginOpen] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSignupOpen, setIsSignupOpen] = useState(false);
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '' });
+  const [isLoginSubmitting, setIsLoginSubmitting] = useState(false);
+  const [isSignupSubmitting, setIsSignupSubmitting] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [signupError, setSignupError] = useState('');
   const [loginSuccess, setLoginSuccess] = useState('');
+  const [signupSuccess, setSignupSuccess] = useState('');
 
   useEffect(() => {
-    if (!isLoginOpen) {
+    if (!isLoginOpen && !isSignupOpen) {
       return undefined;
     }
 
     const onKeyDown = (event) => {
       if (event.key === 'Escape') {
         setIsLoginOpen(false);
+        setIsSignupOpen(false);
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isLoginOpen]);
+  }, [isLoginOpen, isSignupOpen]);
+
+  const closeLogin = () => {
+    setIsLoginOpen(false);
+    setLoginError('');
+    setLoginSuccess('');
+  };
+
+  const closeSignup = () => {
+    setIsSignupOpen(false);
+    setSignupError('');
+    setSignupSuccess('');
+  };
+
+  const openLogin = () => {
+    setIsSignupOpen(false);
+    setSignupError('');
+    setSignupSuccess('');
+    setIsLoginOpen(true);
+  };
+
+  const openSignup = () => {
+    setIsLoginOpen(false);
+    setLoginError('');
+    setLoginSuccess('');
+    setIsSignupOpen(true);
+  };
 
   const handleLoginSubmit = async (event) => {
     event.preventDefault();
     setLoginError('');
     setLoginSuccess('');
 
-    if (!email.trim() || !password.trim()) {
+    const email = loginForm.email.trim();
+    const password = loginForm.password;
+
+    if (!email || !password.trim()) {
       setLoginError('Please enter both email and password.');
       return;
     }
 
-    setIsSubmitting(true);
+    setIsLoginSubmitting(true);
     try {
-      const loggedInUser = await onLogin({ email: email.trim(), password });
+      const loggedInUser = await onLogin({ email, password });
       setLoginSuccess(`Welcome${loggedInUser?.name ? `, ${loggedInUser.name}` : ''}.`);
-      setPassword('');
+      setLoginForm((current) => ({ ...current, password: '' }));
       setTimeout(() => {
-        setIsLoginOpen(false);
-        setLoginSuccess('');
+        closeLogin();
       }, 400);
     } catch (error) {
       setLoginError(error.message || 'Login failed. Please try again.');
     } finally {
-      setIsSubmitting(false);
+      setIsLoginSubmitting(false);
+    }
+  };
+
+  const handleSignupSubmit = async (event) => {
+    event.preventDefault();
+    setSignupError('');
+    setSignupSuccess('');
+
+    const name = signupForm.name.trim();
+    const email = signupForm.email.trim();
+    const password = signupForm.password;
+
+    if (!name || !email || !password) {
+      setSignupError('Please fill in name, email, and password.');
+      return;
+    }
+
+    setIsSignupSubmitting(true);
+    try {
+      const createdUser = await onSignup({ name, email, password });
+      setSignupSuccess(`Account created${createdUser?.name ? ` for ${createdUser.name}` : ''}.`);
+      setSignupForm({ name: '', email: '', password: '' });
+      setTimeout(() => {
+        closeSignup();
+      }, 500);
+    } catch (error) {
+      setSignupError(error.message || 'Sign up failed. Please try again.');
+    } finally {
+      setIsSignupSubmitting(false);
     }
   };
 
@@ -77,15 +139,25 @@ export default function Header({ user, isAuthLoading, onLogin, onLogout }) {
           </div>
 
           <div className="nav-actions">
-            <a href="#signup" className="nav-signup">
+            <button
+              type="button"
+              className="nav-signup"
+              onClick={openSignup}
+              disabled={isAuthLoading}
+            >
               Sign up
-            </a>
+            </button>
           {user ? (
             <button type="button" className="nav-login nav-logout" onClick={onLogout} disabled={isAuthLoading}>
               Logout
             </button>
           ) : (
-            <button type="button" className="nav-login" onClick={() => setIsLoginOpen(true)} disabled={isAuthLoading}>
+            <button
+              type="button"
+              className="nav-login"
+              onClick={openLogin}
+              disabled={isAuthLoading}
+            >
               {isAuthLoading ? 'Checking...' : 'Login'}
             </button>
           )}
@@ -94,7 +166,7 @@ export default function Header({ user, isAuthLoading, onLogin, onLogout }) {
       </header>
 
       {isLoginOpen ? (
-        <div className="login-modal-backdrop" onClick={() => setIsLoginOpen(false)}>
+        <div className="login-modal-backdrop" onClick={closeLogin}>
           <div
             className="login-modal"
             role="dialog"
@@ -106,7 +178,7 @@ export default function Header({ user, isAuthLoading, onLogin, onLogout }) {
               type="button"
               className="login-close"
               aria-label="Close login"
-              onClick={() => setIsLoginOpen(false)}
+              onClick={closeLogin}
             >
               ×
             </button>
@@ -121,10 +193,10 @@ export default function Header({ user, isAuthLoading, onLogin, onLogout }) {
                 type="email"
                 name="email"
                 placeholder="you@school.edu"
-                value={email}
+                value={loginForm.email}
                 autoComplete="email"
-                onChange={(event) => setEmail(event.target.value)}
-                disabled={isSubmitting}
+                onChange={(event) => setLoginForm((current) => ({ ...current, email: event.target.value }))}
+                disabled={isLoginSubmitting}
               />
 
               <label htmlFor="login-password">Password</label>
@@ -133,18 +205,101 @@ export default function Header({ user, isAuthLoading, onLogin, onLogout }) {
                 type="password"
                 name="password"
                 placeholder="Enter your password"
-                value={password}
+                value={loginForm.password}
                 autoComplete="current-password"
-                onChange={(event) => setPassword(event.target.value)}
-                disabled={isSubmitting}
+                onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))}
+                disabled={isLoginSubmitting}
               />
 
               {loginError ? <p className="login-message error">{loginError}</p> : null}
               {loginSuccess ? <p className="login-message success">{loginSuccess}</p> : null}
 
-              <button type="submit" className="login-submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Logging in...' : 'Login'}
+              <button type="submit" className="login-submit" disabled={isLoginSubmitting}>
+                {isLoginSubmitting ? 'Logging in...' : 'Login'}
               </button>
+
+              <p className="login-switch">
+                New to Plannix?{' '}
+                <button type="button" className="login-switch-link" onClick={openSignup} disabled={isLoginSubmitting}>
+                  Create an account
+                </button>
+              </p>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isSignupOpen ? (
+        <div className="login-modal-backdrop" onClick={closeSignup}>
+          <div
+            className="login-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="signup-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="login-close"
+              aria-label="Close sign up"
+              onClick={closeSignup}
+            >
+              ×
+            </button>
+
+            <p className="login-kicker">New to Plannix</p>
+            <h2 id="signup-modal-title">Create your individual account</h2>
+
+            <form className="login-form" onSubmit={handleSignupSubmit}>
+              <label htmlFor="signup-name">Full name</label>
+              <input
+                id="signup-name"
+                type="text"
+                name="name"
+                placeholder="Jane Doe"
+                value={signupForm.name}
+                autoComplete="name"
+                onChange={(event) => setSignupForm((current) => ({ ...current, name: event.target.value }))}
+                disabled={isSignupSubmitting}
+              />
+
+              <label htmlFor="signup-email">Email</label>
+              <input
+                id="signup-email"
+                type="email"
+                name="email"
+                placeholder="you@school.edu"
+                value={signupForm.email}
+                autoComplete="email"
+                onChange={(event) => setSignupForm((current) => ({ ...current, email: event.target.value }))}
+                disabled={isSignupSubmitting}
+              />
+
+              <label htmlFor="signup-password">Password</label>
+              <input
+                id="signup-password"
+                type="password"
+                name="password"
+                placeholder="At least 8 characters"
+                value={signupForm.password}
+                autoComplete="new-password"
+                onChange={(event) => setSignupForm((current) => ({ ...current, password: event.target.value }))}
+                disabled={isSignupSubmitting}
+              />
+
+              {signupError ? <p className="login-message error">{signupError}</p> : null}
+              {signupSuccess ? <p className="login-message success">{signupSuccess}</p> : null}
+
+              <button type="submit" className="login-submit" disabled={isSignupSubmitting}>
+                {isSignupSubmitting ? 'Creating account...' : 'Create account'}
+              </button>
+
+              <p className="login-switch">
+                Already have an account?{' '}
+                <button type="button" className="login-switch-link" onClick={openLogin} disabled={isSignupSubmitting}>
+                  Log in
+                </button>
+              </p>
             </form>
           </div>
         </div>

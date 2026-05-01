@@ -124,6 +124,11 @@
   cursor: not-allowed;
 }
 
+.nav-signup:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .nav-signup {
   background: rgba(255, 255, 255, 0.58);
   border-color: var(--stroke);
@@ -264,6 +269,28 @@
 .login-submit:disabled {
   opacity: 0.78;
   cursor: progress;
+}
+
+.login-switch {
+  margin: 8px 0 0;
+  font-size: 0.9rem;
+  color: rgba(17, 17, 17, 0.72);
+}
+
+.login-switch-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #2f645e;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.login-switch-link:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 @media (max-width: 720px) {

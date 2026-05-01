@@ -102,9 +102,35 @@ export default function App() {
     }
   };
 
+  const handleSignup = async ({ name, email, password }) => {
+    const response = await fetch(`${API_BASE_URL}/auth/signup`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ name, email, password }),
+    });
+
+    const payload = await parseJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(payload?.message || 'Unable to create your account right now.');
+    }
+
+    const createdUser = payload?.user ?? payload ?? null;
+    setUser(createdUser);
+    return createdUser;
+  };
+
   return (
     <div className="page-shell">
-      <Header user={user} isAuthLoading={isAuthLoading} onLogin={handleLogin} onLogout={handleLogout} />
+      <Header
+        user={user}
+        isAuthLoading={isAuthLoading}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
+        onSignup={handleSignup}
+      />
       <main>
         <Hero />
         <section className="section content-section" id="work">
