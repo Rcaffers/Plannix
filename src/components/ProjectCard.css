@@ -95,10 +95,15 @@
 }
 
 .lesson-card {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 2px;
+  width: 100%;
+  margin: 0;
+  font: inherit;
   font-size: 0.68rem;
   line-height: 1.25;
+  text-align: left;
   color: #111111;
   text-decoration: none;
   background: #e8f6e8;
@@ -106,6 +111,7 @@
   border-radius: 6px;
   padding: 6px;
   min-height: 100%;
+  cursor: pointer;
   transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
 }
 
@@ -121,13 +127,155 @@
   outline-offset: 1px;
 }
 
-.session-title {
+.session-class {
   font-weight: 700;
+}
+
+.session-lesson-title {
+  margin-top: auto;
+  padding-top: 4px;
+  font-weight: 500;
+  font-size: 0.64rem;
+  color: rgba(17, 17, 17, 0.78);
+  line-height: 1.2;
 }
 
 .day-col:last-child,
 .day-head:last-child {
   border-right: 0;
+}
+
+.lesson-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(17, 17, 17, 0.44);
+  backdrop-filter: blur(5px);
+}
+
+.lesson-modal {
+  position: relative;
+  width: min(400px, 100%);
+  padding: 26px 22px 22px;
+  border-radius: 10px;
+  border: 1px solid rgba(63, 127, 120, 0.24);
+  background: linear-gradient(140deg, rgba(250, 247, 241, 0.98), rgba(236, 244, 241, 0.96));
+  box-shadow: 0 24px 52px rgba(20, 20, 20, 0.2);
+}
+
+.lesson-modal-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(17, 17, 17, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--text);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.lesson-modal-kicker {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(17, 17, 17, 0.52);
+}
+
+.lesson-modal h2 {
+  margin: 8px 0 12px;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-size: clamp(1.35rem, 3.5vw, 1.65rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.lesson-modal-context {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  border-radius: 8px;
+  background: rgba(232, 246, 232, 0.65);
+  border: 1px solid rgba(185, 220, 185, 0.6);
+  color: rgba(17, 17, 17, 0.85);
+}
+
+.lesson-modal-class {
+  font-weight: 700;
+}
+
+.lesson-modal-meta,
+.lesson-modal-teacher {
+  font-size: 0.78rem;
+  color: rgba(17, 17, 17, 0.72);
+}
+
+.lesson-modal-form {
+  display: grid;
+  gap: 8px;
+}
+
+.lesson-modal-form label {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: rgba(17, 17, 17, 0.78);
+}
+
+.lesson-modal-form input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(63, 127, 120, 0.26);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.lesson-modal-form input:focus-visible {
+  outline: 2px solid rgba(63, 127, 120, 0.56);
+  outline-offset: 1px;
+}
+
+.lesson-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.lesson-modal-cancel {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(17, 17, 17, 0.16);
+  background: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lesson-modal-save {
+  min-height: 40px;
+  padding: 0 20px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: #3f7f78;
+  color: var(--white);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lesson-modal-save:hover {
+  background: #346b66;
 }
 
 @media (max-width: 720px) {

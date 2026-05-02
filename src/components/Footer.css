@@ -132,10 +132,17 @@
 
 .footer-legal a {
   color: rgba(255, 255, 255, 0.76);
+  cursor: pointer;
 }
 
 .footer-legal a:hover {
   color: var(--white);
+}
+
+.footer-legal a:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.65);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 @media (max-width: 1024px) {

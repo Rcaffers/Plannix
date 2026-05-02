@@ -1,0 +1,108 @@
+.cookie-consent-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(17, 17, 17, 0.48);
+  backdrop-filter: blur(6px);
+}
+
+.cookie-consent-dialog {
+  width: min(560px, 100%);
+  max-height: min(90vh, 720px);
+  overflow: auto;
+  padding: 24px 22px 22px;
+  border-radius: 14px;
+  border: 1px solid rgba(63, 127, 120, 0.28);
+  background: linear-gradient(145deg, rgba(252, 250, 246, 0.99), rgba(236, 244, 241, 0.97));
+  box-shadow: 0 28px 64px rgba(20, 20, 20, 0.22);
+  color: var(--text);
+}
+
+.cookie-consent-title {
+  margin: 0 0 14px;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-size: clamp(1.35rem, 3.2vw, 1.55rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.cookie-consent-body {
+  display: grid;
+  gap: 12px;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: rgba(17, 17, 17, 0.88);
+}
+
+.cookie-consent-body p {
+  margin: 0;
+}
+
+.cookie-consent-body strong {
+  font-weight: 650;
+  color: var(--text);
+}
+
+.cookie-consent-withdraw {
+  font-size: 0.84rem;
+  color: rgba(17, 17, 17, 0.78);
+}
+
+.cookie-consent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: stretch;
+  margin-top: 20px;
+}
+
+.cookie-consent-reject,
+.cookie-consent-accept {
+  flex: 1 1 140px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  border: 1px solid rgba(17, 17, 17, 0.14);
+}
+
+.cookie-consent-reject {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+}
+
+.cookie-consent-reject:hover {
+  background: rgba(255, 255, 255, 1);
+  border-color: rgba(17, 17, 17, 0.22);
+}
+
+.cookie-consent-accept {
+  border-color: transparent;
+  background: #3f7f78;
+  color: var(--white);
+}
+
+.cookie-consent-accept:hover {
+  background: #346b66;
+}
+
+@media (max-width: 480px) {
+  .cookie-consent-dialog {
+    padding: 20px 16px 18px;
+  }
+
+  .cookie-consent-actions {
+    flex-direction: column;
+  }
+
+  .cookie-consent-reject,
+  .cookie-consent-accept {
+    flex: 1 1 auto;
+  }
+}

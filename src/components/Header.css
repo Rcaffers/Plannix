@@ -204,6 +204,13 @@
   color: rgba(17, 17, 17, 0.52);
 }
 
+.signup-payment-note {
+  margin: 0 0 14px;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: rgba(17, 17, 17, 0.68);
+}
+
 .login-modal h2 {
   margin: 8px 0 18px;
   font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;

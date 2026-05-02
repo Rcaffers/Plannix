@@ -1,4 +1,10 @@
+import { OPEN_COOKIE_SETTINGS_EVENT } from './CookieConsent';
 import './Footer.css';
+
+function openCookieSettings(event) {
+  event.preventDefault();
+  window.dispatchEvent(new CustomEvent(OPEN_COOKIE_SETTINGS_EVENT));
+}
 
 const socialLinks = [
   {
@@ -76,7 +82,9 @@ export default function Footer() {
           <div className="footer-legal">
             <a href="#privacy">Privacy</a>
             <a href="#terms">Terms</a>
-            <a href="#cookies">Cookies</a>
+            <a href="#cookies" onClick={openCookieSettings}>
+              Cookies
+            </a>
           </div>
         </div>
       </div>

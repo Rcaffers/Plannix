@@ -1,9 +1,26 @@
 import { useEffect, useState } from 'react';
+import { Link, NavLink } from 'react-router-dom';
 import './Header.css';
 
-const navItems = ['Home', 'Features', 'News', 'About', 'Join', 'Contact'];
+const navLinks = [
+  { label: 'Home', to: '/' },
+  { label: 'Features', to: '/features' },
+  { label: 'News', href: '#news' },
+  { label: 'About', href: '#about' },
+  { label: 'Join', href: '#join' },
+  { label: 'Contact', href: '#contact' },
+];
 
-export default function Header({ user, isAuthLoading, onLogin, onLogout, onSignup }) {
+export default function Header({
+  user,
+  isAuthLoading,
+  authConfig,
+  openSignupAfterCancel,
+  onOpenSignupAfterCancelHandled,
+  onLogin,
+  onLogout,
+  onSignup,
+}) {
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isSignupOpen, setIsSignupOpen] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
@@ -30,6 +47,19 @@ export default function Header({ user, isAuthLoading, onLogin, onLogout, onSignu
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isLoginOpen, isSignupOpen]);
+
+  useEffect(() => {
+    if (!openSignupAfterCancel) {
+      return undefined;
+    }
+    setIsLoginOpen(false);
+    setLoginError('');
+    setLoginSuccess('');
+    setIsSignupOpen(true);
+    setSignupError('Payment was cancelled. You can try again when you are ready.');
+    setSignupSuccess('');
+    onOpenSignupAfterCancelHandled?.();
+  }, [openSignupAfterCancel, onOpenSignupAfterCancelHandled]);
 
   const closeLogin = () => {
     setIsLoginOpen(false);
@@ -101,7 +131,11 @@ export default function Header({ user, isAuthLoading, onLogin, onLogout, onSignu
 
     setIsSignupSubmitting(true);
     try {
-      const createdUser = await onSignup({ name, email, password });
+      const result = await onSignup({ name, email, password });
+      if (result?.redirecting) {
+        return;
+      }
+      const createdUser = result;
       setSignupSuccess(`Account created${createdUser?.name ? ` for ${createdUser.name}` : ''}.`);
       setSignupForm({ name: '', email: '', password: '' });
       setTimeout(() => {
@@ -119,22 +153,29 @@ export default function Header({ user, isAuthLoading, onLogin, onLogout, onSignu
       <header className="site-header">
         <div className="container nav-shell">
           <div className="nav-left">
-            <a className="brand" href="#top" aria-label="New Genre Home">
+            <Link className="brand" to="/" aria-label="Plannix Home">
               <span className="brand-mark">
                 <img className="brand-logo" src="/Plannix_logo.png" alt="Plannix" />
               </span>
-            </a>
+            </Link>
 
             <nav className="main-nav" aria-label="Primary navigation">
-              {navItems.map((item) => (
-                <a
-                  key={item}
-                  href={item === 'Work' ? '#work' : '#'}
-                  className={item === 'Work' ? 'nav-link active' : 'nav-link'}
-                >
-                  {item}
-                </a>
-              ))}
+              {navLinks.map((item) =>
+                item.href ? (
+                  <a key={item.label} className="nav-link" href={item.href}>
+                    {item.label}
+                  </a>
+                ) : (
+                  <NavLink
+                    key={item.label}
+                    to={item.to}
+                    end={item.to === '/'}
+                    className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+                  >
+                    {item.label}
+                  </NavLink>
+                ),
+              )}
             </nav>
           </div>
 
@@ -249,6 +290,12 @@ export default function Header({ user, isAuthLoading, onLogin, onLogout, onSignu
 
             <p className="login-kicker">New to Plannix</p>
             <h2 id="signup-modal-title">Create your individual account</h2>
+            {authConfig?.signupRequiresPayment ? (
+              <p className="signup-payment-note">
+                After you submit this form, you will be redirected to Stripe to complete payment. Your account is
+                created once payment succeeds.
+              </p>
+            ) : null}
 
             <form className="login-form" onSubmit={handleSignupSubmit}>
               <label htmlFor="signup-name">Full name</label>
