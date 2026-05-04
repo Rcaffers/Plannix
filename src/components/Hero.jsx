@@ -9,8 +9,7 @@ export default function Hero() {
           <h1 className="hero-title">Next Level Planning</h1>
           <p className="hero-subtitle">From planning to sharing</p>
           <p className="hero-copy">
-            We are here to organise your teaching schedule and enable you to share your teaching schedule with your
-            students.
+            We are here to organise your teaching schedule and help you share it with your students.
           </p>
         </div>
       </div>

@@ -40,11 +40,29 @@
   opacity: 0.92;
 }
 
+.schedule-dynamic {
+  --timetable-days: 5;
+  --timetable-periods: 5;
+}
+
+.schedule-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .schedule-head {
   display: grid;
-  grid-template-columns: 80px repeat(5, minmax(100px, 1fr));
+  grid-template-columns: 80px repeat(var(--timetable-days, 5), minmax(min(100px, 16vw), 1fr));
+  min-width: calc(80px + var(--timetable-days, 5) * 72px);
   border-bottom: 1px solid #e6dfd4;
   background: #f6f1e8;
+}
+
+.schedule-head--compact .day-head,
+.schedule-head--compact .time-head {
+  font-size: 0.62rem;
+  padding: 8px 4px;
+  letter-spacing: 0;
 }
 
 .time-head,
@@ -60,31 +78,46 @@
 
 .schedule-grid {
   display: grid;
-  grid-template-columns: 80px repeat(5, minmax(100px, 1fr));
-  min-height: 320px;
+  grid-template-columns: 80px repeat(var(--timetable-days, 5), minmax(min(100px, 16vw), 1fr));
+  min-width: calc(80px + var(--timetable-days, 5) * 72px);
+  min-height: max(320px, calc(var(--timetable-periods, 5) * 56px));
 }
 
 .time-col {
   display: grid;
-  grid-template-rows: repeat(5, 1fr);
+  grid-template-rows: repeat(var(--timetable-periods, 5), 1fr);
   background: #f8f3ea;
   border-right: 1px solid #e6dfd4;
 }
 
 .time-label {
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 8px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  padding-top: 6px;
   font-size: 0.72rem;
   font-weight: 600;
   color: #3f3f3f;
   border-bottom: 1px solid #ece4d9;
 }
 
+.time-label-start {
+  line-height: 1.2;
+}
+
+.time-label-kind {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(36, 75, 71, 0.75);
+}
+
 .day-col {
   display: grid;
-  grid-template-rows: repeat(5, 1fr);
+  grid-template-rows: repeat(var(--timetable-periods, 5), 1fr);
   border-right: 1px solid #e6dfd4;
 }
 
@@ -92,6 +125,50 @@
   position: relative;
   border-bottom: 1px solid #ece4d9;
   padding: 6px;
+}
+
+.slot--nonlesson {
+  padding: 5px;
+}
+
+.schedule-block-muted {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  min-height: 100%;
+  padding: 6px 4px;
+  border-radius: 6px;
+  border: 1px dashed rgba(63, 127, 120, 0.38);
+  background: rgba(232, 246, 232, 0.45);
+  text-align: center;
+}
+
+.schedule-block-muted--lunch {
+  background: rgba(250, 240, 220, 0.55);
+  border-color: rgba(200, 160, 90, 0.45);
+}
+
+.schedule-block-muted--registration {
+  background: rgba(232, 238, 248, 0.65);
+  border-color: rgba(90, 120, 170, 0.4);
+}
+
+.schedule-block-muted-title {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #244b47;
+}
+
+.schedule-block-muted-range {
+  font-size: 0.58rem;
+  font-weight: 600;
+  color: rgba(17, 17, 17, 0.62);
+  line-height: 1.2;
 }
 
 .lesson-card {

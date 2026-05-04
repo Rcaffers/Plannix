@@ -1,9 +1,9 @@
-import { OPEN_COOKIE_SETTINGS_EVENT } from './CookieConsent';
+import { dispatchOpenCookieSettings } from '../utils/cookieConsent';
 import './Footer.css';
 
 function openCookieSettings(event) {
   event.preventDefault();
-  window.dispatchEvent(new CustomEvent(OPEN_COOKIE_SETTINGS_EVENT));
+  dispatchOpenCookieSettings();
 }
 
 const socialLinks = [

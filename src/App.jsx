@@ -8,16 +8,17 @@ import CTASection from './components/CTASection';
 import Footer from './components/Footer';
 import CookieConsent from './components/CookieConsent';
 import Features from './pages/Features';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
-
-async function parseJsonSafe(response) {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
+import Settings from './pages/Settings';
+import {
+  completePaidSignupSession,
+  fetchAuthConfig,
+  fetchAuthMe,
+  loginWithCredentials,
+  logoutSession,
+  signupAccount,
+} from './utils/api';
+import { TimetableLayoutProvider } from './context/TimetableLayoutContext';
+import { readPaidSignupSessionId, shouldOpenSignupAfterCancel, stripQueryFromLocation } from './utils/authUrl';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -26,17 +27,15 @@ export default function App() {
   const [openSignupAfterCancel, setOpenSignupAfterCancel] = useState(false);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('signup_cancel') === '1') {
+    if (shouldOpenSignupAfterCancel()) {
       setOpenSignupAfterCancel(true);
-      window.history.replaceState({}, '', window.location.pathname || '/');
+      stripQueryFromLocation();
     }
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sessionId = params.get('session_id');
-    if (params.get('signup_complete') !== '1' || !sessionId) {
+    const sessionId = readPaidSignupSessionId();
+    if (!sessionId) {
       return undefined;
     }
 
@@ -44,26 +43,16 @@ export default function App() {
 
     const finishPaidSignup = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/auth/signup/complete`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-          body: JSON.stringify({ session_id: sessionId }),
-        });
-
-        const payload = await parseJsonSafe(response);
+        const { user: completedUser } = await completePaidSignupSession(sessionId);
         if (cancelled) {
           return;
         }
-
-        if (response.ok && payload?.user) {
-          setUser(payload.user);
+        if (completedUser) {
+          setUser(completedUser);
         }
       } finally {
         if (!cancelled) {
-          window.history.replaceState({}, '', window.location.pathname || '/');
+          stripQueryFromLocation();
         }
       }
     };
@@ -79,17 +68,11 @@ export default function App() {
 
     const loadConfig = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/auth/config`, {
-          method: 'GET',
-          credentials: 'include',
-        });
-        if (!isMounted || !response.ok) {
+        const config = await fetchAuthConfig();
+        if (!isMounted || !config) {
           return;
         }
-        const data = await parseJsonSafe(response);
-        if (data && typeof data.signupRequiresPayment === 'boolean') {
-          setAuthConfig({ signupRequiresPayment: data.signupRequiresPayment });
-        }
+        setAuthConfig(config);
       } catch {
         /* ignore */
       }
@@ -106,22 +89,15 @@ export default function App() {
 
     const loadSession = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/auth/me`, {
-          method: 'GET',
-          credentials: 'include',
-        });
-
+        const { ok, user: nextUser } = await fetchAuthMe();
         if (!isMounted) {
           return;
         }
-
-        if (!response.ok) {
+        if (!ok) {
           setUser(null);
           return;
         }
-
-        const data = await parseJsonSafe(response);
-        setUser(data?.user ?? data ?? null);
+        setUser(nextUser);
       } catch {
         if (isMounted) {
           setUser(null);
@@ -140,103 +116,60 @@ export default function App() {
   }, []);
 
   const handleLogin = async ({ email, password }) => {
-    const response = await fetch(`${API_BASE_URL}/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify({ email, password }),
-    });
-
-    const payload = await parseJsonSafe(response);
-
-    if (!response.ok) {
-      throw new Error(payload?.message || 'Unable to log in with those details.');
-    }
-
-    const loggedInUser = payload?.user ?? payload;
-    if (loggedInUser) {
-      setUser(loggedInUser);
-      return loggedInUser;
-    }
-
-    const meResponse = await fetch(`${API_BASE_URL}/auth/me`, {
-      method: 'GET',
-      credentials: 'include',
-    });
-
-    const mePayload = await parseJsonSafe(meResponse);
-    const meUser = mePayload?.user ?? mePayload ?? null;
-    setUser(meUser);
-    return meUser;
+    const loggedInUser = await loginWithCredentials({ email, password });
+    setUser(loggedInUser);
+    return loggedInUser;
   };
 
   const handleLogout = async () => {
     try {
-      await fetch(`${API_BASE_URL}/auth/logout`, {
-        method: 'POST',
-        credentials: 'include',
-      });
+      await logoutSession();
     } finally {
       setUser(null);
     }
   };
 
   const handleSignup = async ({ name, email, password }) => {
-    const response = await fetch(`${API_BASE_URL}/auth/signup`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify({ name, email, password }),
-    });
-
-    const payload = await parseJsonSafe(response);
-    if (!response.ok) {
-      throw new Error(payload?.message || 'Unable to create your account right now.');
-    }
-
-    if (payload?.checkoutUrl) {
-      window.location.assign(payload.checkoutUrl);
+    const { redirecting, user: createdUser } = await signupAccount({ name, email, password });
+    if (redirecting) {
       return { redirecting: true };
     }
-
-    const createdUser = payload?.user ?? payload ?? null;
     setUser(createdUser);
     return createdUser;
   };
 
   return (
-    <div className="page-shell">
-      <Header
-        user={user}
-        isAuthLoading={isAuthLoading}
-        authConfig={authConfig}
-        openSignupAfterCancel={openSignupAfterCancel}
-        onOpenSignupAfterCancelHandled={() => setOpenSignupAfterCancel(false)}
-        onLogin={handleLogin}
-        onLogout={handleLogout}
-        onSignup={handleSignup}
-      />
-      <Routes>
-        <Route
-          path="/"
-          element={
-            <main>
-              <Hero />
-              <section className="section content-section" id="work">
-                <ProjectGrid />
-              </section>
-              <CTASection />
-            </main>
-          }
+    <TimetableLayoutProvider>
+      <div className="page-shell">
+        <Header
+          user={user}
+          isAuthLoading={isAuthLoading}
+          authConfig={authConfig}
+          openSignupAfterCancel={openSignupAfterCancel}
+          onOpenSignupAfterCancelHandled={() => setOpenSignupAfterCancel(false)}
+          onLogin={handleLogin}
+          onLogout={handleLogout}
+          onSignup={handleSignup}
         />
-        <Route path="/features" element={<Features />} />
-      </Routes>
-      <Footer />
-      <CookieConsent />
-    </div>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <main>
+                <Hero />
+                <section className="section content-section" id="work">
+                  <ProjectGrid />
+                </section>
+                <CTASection />
+              </main>
+            }
+          />
+          <Route path="/features" element={<Features />} />
+          <Route path="/settings" element={<Settings />} />
+        </Routes>
+        <Footer />
+        <CookieConsent />
+      </div>
+    </TimetableLayoutProvider>
   );
 }

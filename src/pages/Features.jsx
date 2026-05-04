@@ -1,19 +1,5 @@
+import { featureTiers } from '../utils/featuresData';
 import './Features.css';
-
-const tiers = [
-  {
-    heading: 'Individual',
-    description: 'Plan your week, lessons, and priorities in one place—built for a single teacher’s workflow.',
-  },
-  {
-    heading: 'School',
-    description: 'Shared structure and visibility for departments and teams, with room to grow as your school does.',
-  },
-  {
-    heading: 'School Pro',
-    description: 'Advanced coordination, reporting, and support for larger institutions with complex timetables.',
-  },
-];
 
 export default function Features() {
   return (
@@ -29,7 +15,7 @@ export default function Features() {
         </header>
 
         <ul className="features-cards">
-          {tiers.map((tier) => (
+          {featureTiers.map((tier) => (
             <li key={tier.heading} className="features-card">
               <h2 className="features-card-heading">{tier.heading}</h2>
               <p className="features-card-body">{tier.description}</p>

@@ -176,6 +176,11 @@ function attachSessionCookie(res, userId) {
   res.cookie(SESSION_COOKIE, sessionId, COOKIE_OPTIONS);
 }
 
+function clearSessionCookie(res) {
+  const { httpOnly, sameSite, secure } = COOKIE_OPTIONS;
+  res.clearCookie(SESSION_COOKIE, { httpOnly, sameSite, secure });
+}
+
 app.get('/auth/config', (req, res) => {
   return res.json({
     signupRequiresPayment: Boolean(stripe && stripePriceId),
@@ -312,12 +317,7 @@ app.post('/auth/logout', (req, res) => {
     sessions.delete(sessionId);
   }
 
-  res.clearCookie(SESSION_COOKIE, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: COOKIE_OPTIONS.secure,
-  });
-
+  clearSessionCookie(res);
   return res.status(204).send();
 });
 

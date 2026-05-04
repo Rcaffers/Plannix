@@ -1,11 +1,6 @@
+import { timetableProject } from '../utils/projectsData';
 import ProjectCard from './ProjectCard';
 import './ProjectGrid.css';
-
-const timetableProject = {
-  title: 'Weekly Timetable',
-  subtitle: 'Teaching Schedule',
-  href: '#',
-};
 
 export default function ProjectGrid() {
   return (

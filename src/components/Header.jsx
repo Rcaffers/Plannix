@@ -1,15 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
+import {
+  getLoginValidationError,
+  getSignupValidationError,
+  loginSuccessMessage,
+  signupSuccessMessage,
+} from '../utils/authForms';
+import { SIGNUP_PAYMENT_CANCELLED_MESSAGE } from '../utils/authMessages';
+import { headerNavLinks } from '../utils/headerNav';
 import './Header.css';
-
-const navLinks = [
-  { label: 'Home', to: '/' },
-  { label: 'Features', to: '/features' },
-  { label: 'News', href: '#news' },
-  { label: 'About', href: '#about' },
-  { label: 'Join', href: '#join' },
-  { label: 'Contact', href: '#contact' },
-];
 
 export default function Header({
   user,
@@ -31,9 +30,11 @@ export default function Header({
   const [signupError, setSignupError] = useState('');
   const [loginSuccess, setLoginSuccess] = useState('');
   const [signupSuccess, setSignupSuccess] = useState('');
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
 
   useEffect(() => {
-    if (!isLoginOpen && !isSignupOpen) {
+    if (!isLoginOpen && !isSignupOpen && !isUserMenuOpen) {
       return undefined;
     }
 
@@ -41,12 +42,34 @@ export default function Header({
       if (event.key === 'Escape') {
         setIsLoginOpen(false);
         setIsSignupOpen(false);
+        setIsUserMenuOpen(false);
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isLoginOpen, isSignupOpen]);
+  }, [isLoginOpen, isSignupOpen, isUserMenuOpen]);
+
+  useEffect(() => {
+    if (!isUserMenuOpen) {
+      return undefined;
+    }
+
+    const onPointerDown = (event) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [isUserMenuOpen]);
+
+  useEffect(() => {
+    if (!user) {
+      setIsUserMenuOpen(false);
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!openSignupAfterCancel) {
@@ -56,7 +79,7 @@ export default function Header({
     setLoginError('');
     setLoginSuccess('');
     setIsSignupOpen(true);
-    setSignupError('Payment was cancelled. You can try again when you are ready.');
+    setSignupError(SIGNUP_PAYMENT_CANCELLED_MESSAGE);
     setSignupSuccess('');
     onOpenSignupAfterCancelHandled?.();
   }, [openSignupAfterCancel, onOpenSignupAfterCancelHandled]);
@@ -87,6 +110,10 @@ export default function Header({
     setIsSignupOpen(true);
   };
 
+  const stopModalCloseFromInnerClick = (event) => {
+    event.stopPropagation();
+  };
+
   const handleLoginSubmit = async (event) => {
     event.preventDefault();
     setLoginError('');
@@ -95,15 +122,16 @@ export default function Header({
     const email = loginForm.email.trim();
     const password = loginForm.password;
 
-    if (!email || !password.trim()) {
-      setLoginError('Please enter both email and password.');
+    const loginValidationError = getLoginValidationError({ email, password });
+    if (loginValidationError) {
+      setLoginError(loginValidationError);
       return;
     }
 
     setIsLoginSubmitting(true);
     try {
       const loggedInUser = await onLogin({ email, password });
-      setLoginSuccess(`Welcome${loggedInUser?.name ? `, ${loggedInUser.name}` : ''}.`);
+      setLoginSuccess(loginSuccessMessage(loggedInUser));
       setLoginForm((current) => ({ ...current, password: '' }));
       setTimeout(() => {
         closeLogin();
@@ -124,8 +152,9 @@ export default function Header({
     const email = signupForm.email.trim();
     const password = signupForm.password;
 
-    if (!name || !email || !password) {
-      setSignupError('Please fill in name, email, and password.');
+    const signupValidationError = getSignupValidationError({ name, email, password });
+    if (signupValidationError) {
+      setSignupError(signupValidationError);
       return;
     }
 
@@ -136,7 +165,7 @@ export default function Header({
         return;
       }
       const createdUser = result;
-      setSignupSuccess(`Account created${createdUser?.name ? ` for ${createdUser.name}` : ''}.`);
+      setSignupSuccess(signupSuccessMessage(createdUser));
       setSignupForm({ name: '', email: '', password: '' });
       setTimeout(() => {
         closeSignup();
@@ -160,7 +189,7 @@ export default function Header({
             </Link>
 
             <nav className="main-nav" aria-label="Primary navigation">
-              {navLinks.map((item) =>
+              {headerNavLinks.map((item) =>
                 item.href ? (
                   <a key={item.label} className="nav-link" href={item.href}>
                     {item.label}
@@ -180,28 +209,80 @@ export default function Header({
           </div>
 
           <div className="nav-actions">
-            <button
-              type="button"
-              className="nav-signup"
-              onClick={openSignup}
-              disabled={isAuthLoading}
-            >
-              Sign up
-            </button>
-          {user ? (
-            <button type="button" className="nav-login nav-logout" onClick={onLogout} disabled={isAuthLoading}>
-              Logout
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="nav-login"
-              onClick={openLogin}
-              disabled={isAuthLoading}
-            >
-              {isAuthLoading ? 'Checking...' : 'Login'}
-            </button>
-          )}
+            {user ? (
+              <div className="nav-user-menu" ref={userMenuRef}>
+                <button
+                  type="button"
+                  className="nav-user-trigger"
+                  id="nav-user-menu-button"
+                  aria-expanded={isUserMenuOpen}
+                  aria-haspopup="true"
+                  aria-controls="nav-user-menu-dropdown"
+                  onClick={() => setIsUserMenuOpen((open) => !open)}
+                  disabled={isAuthLoading}
+                >
+                  <span className="nav-user-name">{user.name || user.email || 'Account'}</span>
+                  <span className="nav-user-burger" aria-hidden>
+                    <svg width="18" height="14" viewBox="0 0 18 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path
+                        d="M0 1.25h18M0 7h18M0 12.75h18"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </span>
+                </button>
+                {isUserMenuOpen ? (
+                  <div
+                    id="nav-user-menu-dropdown"
+                    className="nav-user-dropdown"
+                    role="menu"
+                    aria-labelledby="nav-user-menu-button"
+                  >
+                    <Link
+                      className="nav-user-dropdown-item"
+                      role="menuitem"
+                      to="/settings"
+                      onClick={() => setIsUserMenuOpen(false)}
+                    >
+                      Settings
+                    </Link>
+                    <button
+                      type="button"
+                      className="nav-user-dropdown-item nav-user-dropdown-item-button"
+                      role="menuitem"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        onLogout();
+                      }}
+                      disabled={isAuthLoading}
+                    >
+                      Log out
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="nav-signup"
+                  onClick={openSignup}
+                  disabled={isAuthLoading}
+                >
+                  Sign up
+                </button>
+                <button
+                  type="button"
+                  className="nav-login"
+                  onClick={openLogin}
+                  disabled={isAuthLoading}
+                >
+                  {isAuthLoading ? 'Checking...' : 'Login'}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -213,7 +294,7 @@ export default function Header({
             role="dialog"
             aria-modal="true"
             aria-labelledby="login-modal-title"
-            onClick={(event) => event.stopPropagation()}
+            onClick={stopModalCloseFromInnerClick}
           >
             <button
               type="button"
@@ -277,7 +358,7 @@ export default function Header({
             role="dialog"
             aria-modal="true"
             aria-labelledby="signup-modal-title"
-            onClick={(event) => event.stopPropagation()}
+            onClick={stopModalCloseFromInnerClick}
           >
             <button
               type="button"

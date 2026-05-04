@@ -1,34 +1,51 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useTimetableLayout } from '../context/TimetableLayoutContext';
+import { lessonAriaLabel } from '../utils/lessonModal';
+import { findSessionAt } from '../utils/timetable';
+import {
+  buildDefaultSessions,
+  getDayCount,
+  loadSessionsForLayoutKey,
+  makeLayoutKey,
+  pruneSessionsToGrid,
+  saveSessionsForLayoutKey,
+} from '../utils/timetableLayout';
 import './ProjectCard.css';
 
-const dayColumns = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-const timeRows = ['09:00', '10:30', '12:00', '13:30', '15:00'];
-
-const initialSessions = [
-  { day: 0, time: 0, class: '10pg/Ma6', meta: '09:10 - 10:10', teacher: 'RCA', title: '' },
-  { day: 1, time: 0, class: '1sp/Ma6', meta: '09:10 - 10:10', teacher: 'RCA', title: '' },
-  { day: 2, time: 0, class: '7py/Ma6', meta: '09:10 - 10:10', teacher: 'RCA (RE/AHD)', title: '' },
-  { day: 3, time: 1, class: '1ja/Ma1', meta: '10:30 - 11:30', teacher: 'RCA', title: '' },
-  { day: 4, time: 1, class: '11B/Ma2', meta: '10:30 - 11:30', teacher: 'RCA', title: '' },
-  { day: 0, time: 2, class: '1be/Ma6', meta: '11:30 - 12:30', teacher: 'RCA', title: '' },
-  { day: 2, time: 3, class: 'PM Reg', meta: '13:20 - 14:20', teacher: '11a/Ma1', title: '' },
-  { day: 4, time: 4, class: '7py/Ma3', meta: '14:20 - 15:20', teacher: 'RCA', title: '' },
-];
-
 export default function ProjectCard({ project }) {
-  const [sessions, setSessions] = useState(() => initialSessions.map((s) => ({ ...s })));
+  const { layout, dayLabels, rowSegments } = useTimetableLayout();
+  const dayCount = getDayCount(layout);
+  const layoutKey = useMemo(() => makeLayoutKey(layout), [layout]);
+
+  const [sessions, setSessions] = useState(() => {
+    const saved = loadSessionsForLayoutKey(layoutKey);
+    if (saved && saved.length) {
+      return pruneSessionsToGrid(saved, layout);
+    }
+    return buildDefaultSessions(layout);
+  });
+
+  useEffect(() => {
+    const saved = loadSessionsForLayoutKey(layoutKey);
+    if (saved && saved.length) {
+      setSessions(pruneSessionsToGrid(saved, layout));
+      return;
+    }
+    const defaults = buildDefaultSessions(layout);
+    setSessions(defaults);
+    saveSessionsForLayoutKey(layoutKey, defaults);
+  }, [layoutKey, layout]);
+
   const [modalSlot, setModalSlot] = useState(null);
   const [titleDraft, setTitleDraft] = useState('');
 
   const modalSession =
-    modalSlot == null
-      ? null
-      : sessions.find((s) => s.day === modalSlot.day && s.time === modalSlot.time) ?? null;
+    modalSlot == null ? null : findSessionAt(sessions, modalSlot.day, modalSlot.time) ?? null;
 
-  function openLessonModal(dayIndex, timeIndex) {
-    const session = sessions.find((s) => s.day === dayIndex && s.time === timeIndex);
+  function openLessonModal(dayIndex, rowIndex) {
+    const session = findSessionAt(sessions, dayIndex, rowIndex);
     if (!session) return;
-    setModalSlot({ day: dayIndex, time: timeIndex });
+    setModalSlot({ day: dayIndex, time: rowIndex });
     setTitleDraft(session.title);
   }
 
@@ -40,13 +57,24 @@ export default function ProjectCard({ project }) {
   function saveLessonTitle(event) {
     event.preventDefault();
     if (modalSlot == null) return;
-    setSessions((prev) =>
-      prev.map((s) =>
-        s.day === modalSlot.day && s.time === modalSlot.time ? { ...s, title: titleDraft.trim() } : s
-      )
-    );
+    setSessions((prev) => {
+      const next = prev.map((s) =>
+        s.day === modalSlot.day && s.time === modalSlot.time ? { ...s, title: titleDraft.trim() } : s,
+      );
+      saveSessionsForLayoutKey(layoutKey, next);
+      return next;
+    });
     closeLessonModal();
   }
+
+  const stopLessonModalCloseFromInnerClick = (event) => {
+    event.stopPropagation();
+  };
+
+  const scheduleVars = {
+    '--timetable-days': dayCount,
+    '--timetable-periods': rowSegments.length,
+  };
 
   return (
     <article className="project-card">
@@ -55,53 +83,83 @@ export default function ProjectCard({ project }) {
           <strong>{project.title}</strong>
           <span>{project.subtitle}</span>
         </div>
-        <div className="schedule-head">
-          <span className="time-head">Time</span>
-          {dayColumns.map((day) => (
-            <span key={day} className="day-head">
-              {day}
-            </span>
-          ))}
-        </div>
-
-        <div className="schedule-grid">
-          <div className="time-col">
-            {timeRows.map((time) => (
-              <span key={time} className="time-label">
-                {time}
-              </span>
-            ))}
-          </div>
-
-          {dayColumns.map((day, dayIndex) => (
-            <div key={day} className="day-col">
-              {timeRows.map((time, timeIndex) => {
-                const session = sessions.find(
-                  (item) => item.day === dayIndex && item.time === timeIndex
-                );
-
-                return (
-                  <div key={`${day}-${time}`} className="slot">
-                    {session ? (
-                      <button
-                        type="button"
-                        className="lesson-card"
-                        onClick={() => openLessonModal(dayIndex, timeIndex)}
-                        aria-label={`Edit lesson: ${session.class}${session.title.trim() ? `, ${session.title.trim()}` : ''}`}
-                      >
-                        <span className="session-class">{session.class}</span>
-                        <span>{session.meta}</span>
-                        <span>{session.teacher}</span>
-                        {session.title.trim() ? (
-                          <span className="session-lesson-title">{session.title.trim()}</span>
-                        ) : null}
-                      </button>
-                    ) : null}
-                  </div>
-                );
-              })}
+        <div className="schedule-dynamic" style={scheduleVars}>
+          <div className="schedule-scroll">
+            <div className={`schedule-head${dayLabels.length > 5 ? ' schedule-head--compact' : ''}`}>
+              <span className="time-head">Time</span>
+              {dayLabels.map((day) => (
+                <span key={day} className="day-head">
+                  {day}
+                </span>
+              ))}
             </div>
-          ))}
+
+            <div className="schedule-grid">
+              <div className="time-col">
+                {rowSegments.map((seg) => (
+                  <span key={seg.rowIndex} className="time-label">
+                    <span className="time-label-start">{seg.timeLabel}</span>
+                    {seg.kind !== 'lesson' ? (
+                      <span className="time-label-kind">
+                        {seg.kind === 'lunch'
+                          ? 'Lunch'
+                          : seg.kind === 'registration'
+                            ? 'Reg'
+                            : 'Break'}
+                      </span>
+                    ) : null}
+                  </span>
+                ))}
+              </div>
+
+              {dayLabels.map((day, dayIndex) => (
+                <div key={day} className="day-col">
+                  {rowSegments.map((seg) => {
+                    if (seg.kind === 'lesson') {
+                      const session = findSessionAt(sessions, dayIndex, seg.rowIndex);
+                      const trimmedTitle = session ? session.title.trim() : '';
+                      const ariaLabel = lessonAriaLabel(session);
+
+                      return (
+                        <div key={seg.rowIndex} className="slot">
+                          {session ? (
+                            <button
+                              type="button"
+                              className="lesson-card"
+                              onClick={() => openLessonModal(dayIndex, seg.rowIndex)}
+                              aria-label={ariaLabel}
+                            >
+                              <span className="session-class">{session.class}</span>
+                              <span>{session.meta}</span>
+                              <span>{session.teacher}</span>
+                              {trimmedTitle ? (
+                                <span className="session-lesson-title">{trimmedTitle}</span>
+                              ) : null}
+                            </button>
+                          ) : null}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={seg.rowIndex} className="slot slot--nonlesson">
+                        <div className={`schedule-block-muted schedule-block-muted--${seg.kind}`}>
+                          <span className="schedule-block-muted-title">
+                            {seg.kind === 'lunch'
+                              ? 'Lunch'
+                              : seg.kind === 'registration'
+                                ? 'Registration'
+                                : 'Break'}
+                          </span>
+                          <span className="schedule-block-muted-range">{seg.rangeLabel}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -112,7 +170,7 @@ export default function ProjectCard({ project }) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="lesson-modal-title"
-            onClick={(event) => event.stopPropagation()}
+            onClick={stopLessonModalCloseFromInnerClick}
           >
             <button type="button" className="lesson-modal-close" aria-label="Close" onClick={closeLessonModal}>
               ×

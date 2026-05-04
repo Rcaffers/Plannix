@@ -1,0 +1,236 @@
+.settings-page {
+  padding: clamp(32px, 6vw, 72px) 0 80px;
+  color: var(--text);
+}
+
+.settings-inner {
+  max-width: 640px;
+}
+
+.settings-inner--wide {
+  max-width: 720px;
+}
+
+.settings-breadcrumb {
+  margin: 0 0 16px;
+  font-size: 0.88rem;
+  color: rgba(17, 17, 17, 0.55);
+}
+
+.settings-breadcrumb a {
+  color: #2f645e;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.settings-breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.settings-title {
+  margin: 0 0 12px;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.settings-lead {
+  margin: 0 0 36px;
+  font-size: 1rem;
+  line-height: 1.55;
+  color: rgba(17, 17, 17, 0.68);
+}
+
+.settings-timetable-form {
+  display: grid;
+  gap: 22px;
+  padding: 24px 22px;
+  border-radius: calc(var(--radius) - 6px);
+  border: 1px solid rgba(63, 127, 120, 0.24);
+  background: linear-gradient(140deg, rgba(250, 247, 241, 0.98), rgba(236, 244, 241, 0.96));
+  box-shadow: 0 12px 36px rgba(20, 20, 20, 0.08);
+}
+
+.settings-section-title {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #244b47;
+}
+
+.settings-section-title--sub {
+  margin-top: 10px;
+  font-size: 1rem;
+}
+
+.settings-field {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-field label,
+.settings-legend {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: rgba(17, 17, 17, 0.82);
+}
+
+.settings-field input[type='number'],
+.settings-field input[type='time'] {
+  max-width: 220px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(63, 127, 120, 0.26);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+  font: inherit;
+}
+
+.settings-field input:focus-visible {
+  outline: 2px solid rgba(63, 127, 120, 0.56);
+  outline-offset: 1px;
+}
+
+.settings-field--inline {
+  gap: 6px;
+}
+
+.settings-field--inline input[type='time'],
+.settings-field--inline input[type='number'] {
+  max-width: 100%;
+}
+
+.settings-break-card {
+  padding: 14px 14px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(63, 127, 120, 0.2);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.settings-break-heading {
+  margin: 0 0 10px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #244b47;
+}
+
+.settings-break-grid,
+.settings-lunch-grid,
+.settings-registration-grid {
+  display: grid;
+  gap: 12px;
+}
+
+@media (min-width: 520px) {
+  .settings-break-grid,
+  .settings-lunch-grid,
+  .settings-registration-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.settings-hint--tight {
+  margin-top: -8px;
+}
+
+.settings-hint {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: rgba(17, 17, 17, 0.58);
+}
+
+.settings-fieldset {
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: grid;
+  gap: 10px;
+}
+
+.settings-legend {
+  padding: 0;
+  margin-bottom: 2px;
+}
+
+.settings-radio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.94rem;
+  font-weight: 500;
+  color: rgba(17, 17, 17, 0.88);
+  cursor: pointer;
+}
+
+.settings-radio input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: #3f7f78;
+}
+
+.settings-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 0.94rem;
+  font-weight: 600;
+  color: rgba(17, 17, 17, 0.88);
+  cursor: pointer;
+}
+
+.settings-checkbox input {
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-top: 2px;
+  flex-shrink: 0;
+  accent-color: #3f7f78;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.settings-save {
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: #3f7f78;
+  color: var(--white);
+  font-weight: 600;
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-save:hover {
+  background: #346b66;
+}
+
+.settings-reset {
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--text);
+  font-weight: 600;
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-reset:hover {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.settings-saved {
+  margin: 0;
+  width: 100%;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #276749;
+}
