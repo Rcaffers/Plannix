@@ -21,7 +21,7 @@ export default function Classes() {
     setDraft((current) => {
       const entries = [...current.entries];
       entries[index] = { ...entries[index], ...patch };
-      return normalizeClassesPlan({ entries });
+      return { ...current, entries };
     });
   }
 
@@ -77,7 +77,7 @@ export default function Classes() {
           </div>
 
           {draft.entries.map((entry, index) => (
-            <section key={index} className="classes-entry-card">
+            <section key={entry.id || index} className="classes-entry-card">
               <h2 className="classes-entry-title">Class {index + 1}</h2>
               <div className="classes-entry-grid">
                 <div className="classes-field classes-field--inline">

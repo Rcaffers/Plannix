@@ -21,13 +21,19 @@
 
 .schedule-titlebar {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
   padding: 12px 14px;
   background: #3f7f78;
   color: #f5f1ea;
   font-size: 0.78rem;
+}
+
+.schedule-titlebar-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .schedule-titlebar strong {
@@ -38,6 +44,23 @@
 
 .schedule-titlebar span {
   opacity: 0.92;
+}
+
+.schedule-edit-toggle {
+  border-radius: 999px;
+  border: 1px solid rgba(245, 241, 234, 0.7);
+  padding: 4px 10px;
+  background: rgba(245, 241, 234, 0.12);
+  color: #f5f1ea;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.schedule-edit-toggle:hover {
+  background: rgba(245, 241, 234, 0.24);
 }
 
 .schedule-dynamic {
@@ -196,7 +219,6 @@
   justify-content: center;
   align-items: center;
   text-align: center;
-  border-style: dashed;
   color: rgba(17, 17, 17, 0.68);
   background: rgba(255, 255, 255, 0.62);
 }
@@ -204,6 +226,16 @@
 .session-empty-label {
   font-size: 0.74rem;
   font-weight: 600;
+}
+
+/* Edit-mode visuals: dashed border on all lesson cards */
+.project-card--editing .lesson-card {
+  border-style: dashed;
+}
+
+/* Locked mode: return to solid border */
+.project-card:not(.project-card--editing) .lesson-card {
+  border-style: solid;
 }
 
 .lesson-card:hover,

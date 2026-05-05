@@ -30,6 +30,7 @@ function normalizeCadence(value) {
 function normalizeEntry(raw, index) {
   const fallbackName = `Class ${index + 1}`;
   return {
+    id: String(raw?.id || `class-${index + 1}`),
     name: String(raw?.name ?? fallbackName).trim(),
     frequency: clampInt(raw?.frequency ?? 0, LIMITS.frequencyMin, LIMITS.frequencyMax),
   };
@@ -59,6 +60,7 @@ export function setClassEntryCount(plan, count) {
     entries.push(
       normalizeEntry(
         {
+          id: `class-${entries.length + 1}-${Date.now()}`,
           name: '',
           frequency: 0,
         },

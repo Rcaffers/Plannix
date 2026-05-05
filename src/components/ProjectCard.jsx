@@ -41,46 +41,94 @@ export default function ProjectCard({ project }) {
   const [classDraft, setClassDraft] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
   const [availableClasses, setAvailableClasses] = useState([]);
+  const [isEditingClasses, setIsEditingClasses] = useState(() => {
+    try {
+      const raw = localStorage.getItem('plannix_timetable_edit_mode_v1');
+      if (raw === 'locked') return false;
+      if (raw === 'editing') return true;
+    } catch {
+      /* ignore */
+    }
+    return true;
+  });
 
   const modalSession =
     modalSlot == null ? null : findSessionAt(sessions, modalSlot.day, modalSlot.time) ?? null;
   const modalRowSegment = modalSlot == null ? null : rowSegments[modalSlot.time] ?? null;
   const modalDayLabel = modalSlot == null ? '' : dayLabels[modalSlot.day] ?? '';
+  const classesPlan = useMemo(() => loadClassesPlanFromStorage(), [modalSlot, sessions]);
+  const plannedClasses = useMemo(
+    () =>
+      classesPlan.entries
+        .map((entry) => ({
+          id: String(entry.id || ''),
+          name: entry.name.trim(),
+          max: Number(entry.frequency) || 0,
+        }))
+        .filter((entry) => entry.id && entry.name && entry.max > 0),
+    [classesPlan],
+  );
+  const plannedClassById = useMemo(
+    () => new Map(plannedClasses.map((entry) => [entry.id, entry])),
+    [plannedClasses],
+  );
+  const plannedClassByName = useMemo(
+    () => new Map(plannedClasses.map((entry) => [entry.name, entry])),
+    [plannedClasses],
+  );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('plannix_timetable_edit_mode_v1', isEditingClasses ? 'editing' : 'locked');
+    } catch {
+      /* ignore */
+    }
+  }, [isEditingClasses]);
+
+  function toggleEditMode() {
+    setIsEditingClasses((current) => !current);
+  }
+
+  function resolveSessionClass(session) {
+    if (!session) return '';
+    const fromId = session.classId ? plannedClassById.get(session.classId) : null;
+    if (fromId) return fromId.name;
+    return String(session.class || '').trim();
+  }
 
   function classUsageCounts(nextSessions) {
     return nextSessions.reduce((acc, session) => {
-      const key = String(session.class || '').trim();
-      if (!key) return acc;
-      acc.set(key, (acc.get(key) ?? 0) + 1);
+      const fallbackName = String(session.class || '').trim();
+      const entry =
+        (session.classId && plannedClassById.get(session.classId)) || plannedClassByName.get(fallbackName);
+      if (!entry) return acc;
+      acc.set(entry.id, (acc.get(entry.id) ?? 0) + 1);
       return acc;
     }, new Map());
   }
 
   function loadClassOptions(dayIndex, rowIndex) {
-    const plan = loadClassesPlanFromStorage();
-    const planned = plan.entries
-      .map((entry) => ({
-        name: entry.name.trim(),
-        max: Number(entry.frequency) || 0,
-      }))
-      .filter((entry) => entry.name && entry.max > 0);
-    const plannedMap = new Map(planned.map((entry) => [entry.name, entry.max]));
-
     const filteredSessions = sessions.filter((s) => !(s.day === dayIndex && s.time === rowIndex));
     const usedCounts = classUsageCounts(filteredSessions);
     const currentSession = findSessionAt(sessions, dayIndex, rowIndex);
-    const currentClass = currentSession?.class?.trim() ?? '';
+    const currentClassId =
+      (currentSession?.classId && plannedClassById.get(currentSession.classId)?.id) ||
+      plannedClassByName.get(String(currentSession?.class || '').trim())?.id ||
+      '';
 
-    const nextAvailable = planned
+    const nextAvailable = plannedClasses
       .filter((entry) => {
-        if (entry.name === currentClass) return true;
-        const used = usedCounts.get(entry.name) ?? 0;
+        if (entry.id === currentClassId) return true;
+        const used = usedCounts.get(entry.id) ?? 0;
         return used < entry.max;
       })
       .map((entry) => ({
-        name: entry.name,
-        max: plannedMap.get(entry.name) ?? entry.max,
-        used: usedCounts.get(entry.name) ?? 0,
+        id: entry.id,
+        label: entry.name,
+        max: entry.max,
+        used:
+          (usedCounts.get(entry.id) ?? 0) +
+          (currentClassId && currentClassId === entry.id ? 1 : 0),
       }));
 
     setAvailableClasses(nextAvailable);
@@ -90,9 +138,16 @@ export default function ProjectCard({ project }) {
     const seg = rowSegments[rowIndex];
     if (!seg || seg.kind !== 'lesson') return;
     const session = findSessionAt(sessions, dayIndex, rowIndex);
+    if (!isEditingClasses && !session) {
+      return;
+    }
     loadClassOptions(dayIndex, rowIndex);
     setModalSlot({ day: dayIndex, time: rowIndex });
-    setClassDraft(session?.class ?? '');
+    setClassDraft(
+      (session?.classId && plannedClassById.get(session.classId)?.id) ||
+        plannedClassByName.get(String(session?.class || '').trim())?.id ||
+        '',
+    );
     setTitleDraft(session?.title ?? '');
   }
 
@@ -118,10 +173,12 @@ export default function ProjectCard({ project }) {
         return base;
       }
 
+      const selectedClassEntry = plannedClassById.get(selectedClass);
       const nextSession = {
         day: modalSlot.day,
         time: modalSlot.time,
-        class: selectedClass,
+        classId: selectedClass,
+        class: selectedClassEntry?.name ?? selectedClass,
         teacher: existing?.teacher ?? '',
         title: selectedTitle,
         meta: modalRowSegment?.rangeLabel ?? '',
@@ -144,11 +201,20 @@ export default function ProjectCard({ project }) {
   };
 
   return (
-    <article className="project-card">
+    <article className={`project-card${isEditingClasses ? ' project-card--editing' : ''}`}>
       <div className="schedule-card">
         <div className="schedule-titlebar">
-          <strong>{project.title}</strong>
-          <span>{project.subtitle}</span>
+          <div className="schedule-titlebar-main">
+            <strong>{project.title}</strong>
+            <span>{project.subtitle}</span>
+          </div>
+          <button
+            type="button"
+            className="schedule-edit-toggle"
+            onClick={toggleEditMode}
+          >
+            {isEditingClasses ? 'Save class positions' : 'Edit classes'}
+          </button>
         </div>
         <div className="schedule-dynamic" style={scheduleVars}>
           <div className="schedule-scroll">
@@ -184,32 +250,36 @@ export default function ProjectCard({ project }) {
                   {rowSegments.map((seg) => {
                     if (seg.kind === 'lesson') {
                       const session = findSessionAt(sessions, dayIndex, seg.rowIndex);
+                      const sessionClassName = resolveSessionClass(session);
                       const trimmedTitle = session ? session.title.trim() : '';
                       const teacher = session ? session.teacher?.trim() : '';
                       const ariaLabel =
-                        lessonAriaLabel(session) ?? `Assign class for ${day} at ${seg.rangeLabel}`;
+                        lessonAriaLabel(session ? { ...session, class: sessionClassName } : session) ??
+                        `Assign class for ${day} at ${seg.rangeLabel}`;
 
                       return (
                         <div key={seg.rowIndex} className="slot">
-                          <button
-                            type="button"
-                            className={`lesson-card${session ? '' : ' lesson-card--empty'}`}
-                            onClick={() => openLessonModal(dayIndex, seg.rowIndex)}
-                            aria-label={ariaLabel}
-                          >
-                            {session ? (
-                              <>
-                              <span className="session-class">{session.class}</span>
-                              <span>{session.meta}</span>
-                              {teacher ? <span>{teacher}</span> : null}
-                              {trimmedTitle ? (
-                                <span className="session-lesson-title">{trimmedTitle}</span>
-                              ) : null}
-                              </>
-                            ) : (
-                              <span className="session-empty-label">+ Add class</span>
-                            )}
-                          </button>
+                          {session || isEditingClasses ? (
+                            <button
+                              type="button"
+                              className={`lesson-card${session ? '' : ' lesson-card--empty'}`}
+                              onClick={() => openLessonModal(dayIndex, seg.rowIndex)}
+                              aria-label={ariaLabel}
+                            >
+                              {session ? (
+                                <>
+                                  <span className="session-class">{sessionClassName}</span>
+                                  <span>{session.meta}</span>
+                                  {teacher ? <span>{teacher}</span> : null}
+                                  {trimmedTitle ? (
+                                    <span className="session-lesson-title">{trimmedTitle}</span>
+                                  ) : null}
+                                </>
+                              ) : (
+                                <span className="session-empty-label">+ Add class</span>
+                              )}
+                            </button>
+                          ) : null}
                         </div>
                       );
                     }
@@ -253,36 +323,45 @@ export default function ProjectCard({ project }) {
             <p className="lesson-modal-context">
               <span className="lesson-modal-class">{modalDayLabel}</span>
               <span className="lesson-modal-meta">{modalRowSegment?.rangeLabel ?? ''}</span>
-              {modalSession?.class ? <span className="lesson-modal-teacher">{modalSession.class}</span> : null}
+              {modalSession ? (
+                <span className="lesson-modal-teacher">{resolveSessionClass(modalSession)}</span>
+              ) : null}
             </p>
             <form className="lesson-modal-form" onSubmit={saveLessonDetails}>
-              <label htmlFor="lesson-class-input">Class</label>
-              <select
-                id="lesson-class-input"
-                value={classDraft}
-                onChange={(event) => setClassDraft(event.target.value)}
-              >
-                <option value="">No class selected</option>
-                {availableClasses.map((classOption) => (
-                  <option key={classOption.name} value={classOption.name}>
-                    {classOption.name} ({classOption.used}/{classOption.max})
-                  </option>
-                ))}
-              </select>
-              {availableClasses.length === 0 ? (
-                <p className="lesson-modal-note">
-                  No classes found yet. Add classes in <a href="/classes">Classes</a> first.
-                </p>
-              ) : null}
-              <label htmlFor="lesson-title-input">Title</label>
-              <input
-                id="lesson-title-input"
-                type="text"
-                value={titleDraft}
-                onChange={(event) => setTitleDraft(event.target.value)}
-                placeholder="e.g. Introduction to fractions"
-                autoComplete="off"
-              />
+              {isEditingClasses ? (
+                <>
+                  <label htmlFor="lesson-class-input">Class</label>
+                  <select
+                    id="lesson-class-input"
+                    value={classDraft}
+                    onChange={(event) => setClassDraft(event.target.value)}
+                  >
+                    <option value="">No class selected</option>
+                    {availableClasses.map((classOption) => (
+                      <option key={classOption.id} value={classOption.id}>
+                        {classOption.label} ({classOption.used}/{classOption.max})
+                      </option>
+                    ))}
+                  </select>
+                  {availableClasses.length === 0 ? (
+                    <p className="lesson-modal-note">
+                      No classes found yet. Add classes in <a href="/classes">Classes</a> first.
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <label htmlFor="lesson-title-input">Title</label>
+                  <input
+                    id="lesson-title-input"
+                    type="text"
+                    value={titleDraft}
+                    onChange={(event) => setTitleDraft(event.target.value)}
+                    placeholder="e.g. Introduction to fractions"
+                    autoComplete="off"
+                  />
+                </>
+              )}
               <div className="lesson-modal-actions">
                 <button type="button" className="lesson-modal-cancel" onClick={closeLessonModal}>
                   Cancel

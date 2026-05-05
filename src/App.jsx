@@ -10,6 +10,7 @@ import CookieConsent from './components/CookieConsent';
 import Features from './pages/Features';
 import Settings from './pages/Settings';
 import Classes from './pages/Classes';
+import Timetable from './pages/Timetable';
 import {
   completePaidSignupSession,
   fetchAuthConfig,
@@ -158,9 +159,11 @@ export default function App() {
             element={
               <main>
                 <Hero />
-                <section className="section content-section" id="work">
-                  <ProjectGrid />
-                </section>
+                {user ? (
+                  <section className="section content-section" id="work">
+                    <ProjectGrid />
+                  </section>
+                ) : null}
                 <CTASection />
               </main>
             }
@@ -168,6 +171,19 @@ export default function App() {
           <Route path="/features" element={<Features />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/classes" element={<Classes />} />
+          <Route
+            path="/timetable"
+            element={
+              user ? (
+                <Timetable />
+              ) : (
+                <main>
+                  <Hero />
+                  <CTASection />
+                </main>
+              )
+            }
+          />
         </Routes>
         <Footer />
         <CookieConsent />

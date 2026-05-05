@@ -33,6 +33,13 @@ export default function Header({
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
 
+  const navLinks = user
+    ? [
+        { label: 'Timetable', to: '/timetable' },
+        { label: 'Contact', href: '#contact' },
+      ]
+    : headerNavLinks;
+
   useEffect(() => {
     if (!isLoginOpen && !isSignupOpen && !isUserMenuOpen) {
       return undefined;
@@ -189,7 +196,7 @@ export default function Header({
             </Link>
 
             <nav className="main-nav" aria-label="Primary navigation">
-              {headerNavLinks.map((item) =>
+              {navLinks.map((item) =>
                 item.href ? (
                   <a key={item.label} className="nav-link" href={item.href}>
                     {item.label}
