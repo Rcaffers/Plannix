@@ -1,9 +1,18 @@
 import { dispatchOpenCookieSettings } from '../utils/cookieConsent';
+import { dispatchOpenTermsModal } from '../utils/plannixEvents';
 import './Footer.css';
 
 function openCookieSettings(event) {
   event.preventDefault();
   dispatchOpenCookieSettings();
+}
+
+function openTermsModal(event) {
+  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) {
+    return;
+  }
+  event.preventDefault();
+  dispatchOpenTermsModal();
 }
 
 const socialLinks = [
@@ -81,7 +90,9 @@ export default function Footer() {
           <span>© {new Date().getFullYear()} Plannix</span>
           <div className="footer-legal">
             <a href="#privacy">Privacy</a>
-            <a href="#terms">Terms</a>
+            <a href="/terms" onClick={openTermsModal}>
+              Terms &amp; conditions
+            </a>
             <a href="#cookies" onClick={openCookieSettings}>
               Cookies
             </a>

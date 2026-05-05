@@ -11,6 +11,9 @@ import Features from './pages/Features';
 import Settings from './pages/Settings';
 import Classes from './pages/Classes';
 import Timetable from './pages/Timetable';
+import TermsGate from './pages/TermsGate';
+import TermsModal from './components/TermsModal';
+import ScrollToTop from './components/ScrollToTop';
 import {
   completePaidSignupSubscription,
   completePaidSignupSession,
@@ -156,6 +159,7 @@ export default function App() {
   return (
     <TimetableLayoutProvider>
       <div className="page-shell">
+        <ScrollToTop />
         <Header
           user={user}
           isAuthLoading={isAuthLoading}
@@ -182,6 +186,7 @@ export default function App() {
             }
           />
           <Route path="/features" element={<Features user={user} />} />
+          <Route path="/terms" element={<TermsGate />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/classes" element={<Classes />} />
           <Route
@@ -199,6 +204,7 @@ export default function App() {
           />
         </Routes>
         <Footer />
+        <TermsModal />
         <CookieConsent />
       </div>
     </TimetableLayoutProvider>

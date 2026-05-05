@@ -1,0 +1,161 @@
+.terms-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 58;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(17, 17, 17, 0.48);
+  backdrop-filter: blur(6px);
+}
+
+.terms-modal-dialog {
+  width: min(640px, 100%);
+  max-height: min(90vh, 820px);
+  display: flex;
+  flex-direction: column;
+  padding: 20px 22px 22px;
+  border-radius: 14px;
+  border: 1px solid rgba(63, 127, 120, 0.28);
+  background: linear-gradient(145deg, rgba(252, 250, 246, 0.99), rgba(236, 244, 241, 0.97));
+  box-shadow: 0 28px 64px rgba(20, 20, 20, 0.22);
+  color: var(--text);
+}
+
+.terms-modal-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.terms-modal-title {
+  margin: 0;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-size: clamp(1.35rem, 3.2vw, 1.55rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  padding-right: 8px;
+}
+
+.terms-modal-dismiss {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  margin: -6px -6px 0 0;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.65);
+  color: rgba(17, 17, 17, 0.65);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.terms-modal-dismiss:hover {
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--text);
+}
+
+.terms-modal-meta {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+  color: rgba(17, 17, 17, 0.52);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.terms-modal-lead {
+  margin: 12px 0 0;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: rgba(17, 17, 17, 0.78);
+  flex-shrink: 0;
+}
+
+.terms-modal-body {
+  margin-top: 16px;
+  padding-top: 4px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  border-top: 1px solid rgba(63, 127, 120, 0.12);
+}
+
+.terms-modal-section {
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid rgba(63, 127, 120, 0.1);
+}
+
+.terms-modal-section:first-child {
+  padding-top: 12px;
+  margin-top: 0;
+  border-top: none;
+}
+
+.terms-modal-section-title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #244b47;
+}
+
+.terms-modal-section p {
+  margin: 0 0 10px;
+  font-size: 0.84rem;
+  line-height: 1.58;
+  color: rgba(17, 17, 17, 0.82);
+}
+
+.terms-modal-section p:last-child {
+  margin-bottom: 0;
+}
+
+.terms-modal-section a {
+  color: #2d6b63;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.terms-modal-section a:hover {
+  color: #244b47;
+}
+
+.terms-modal-actions {
+  flex-shrink: 0;
+  margin-top: 18px;
+  padding-top: 4px;
+}
+
+.terms-modal-close-btn {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: #3f7f78;
+  color: var(--white);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.terms-modal-close-btn:hover {
+  background: #346b66;
+}
+
+.terms-modal-close-btn:focus-visible {
+  outline: 2px solid #8bbf8b;
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .terms-modal-dialog {
+    padding: 18px 16px 18px;
+  }
+}
