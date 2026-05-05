@@ -9,7 +9,8 @@
 
 .features-header {
   max-width: 42rem;
-  margin-bottom: clamp(28px, 4vw, 40px);
+  margin: 0 auto clamp(32px, 5vw, 48px);
+  text-align: center;
 }
 
 .features-kicker {
@@ -41,45 +42,169 @@
 .features-cards {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: clamp(16px, 2.5vw, 24px);
+  gap: clamp(20px, 3vw, 28px);
   margin: 0;
   padding: 0;
   list-style: none;
+  align-items: stretch;
 }
 
 .features-card {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: clamp(20px, 2.5vw, 26px);
-  border-radius: 14px;
-  border: 1px solid var(--stroke);
-  background: var(--card);
-  box-shadow: var(--shadow);
-  min-height: 180px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 16px;
+  border: 1px solid rgba(63, 127, 120, 0.14);
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 252, 249, 0.96) 100%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 14px 40px rgba(20, 40, 35, 0.06),
+    0 2px 8px rgba(20, 40, 35, 0.04);
+  overflow: hidden;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.features-card:hover {
+  border-color: rgba(63, 127, 120, 0.22);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 20px 48px rgba(20, 40, 35, 0.08),
+    0 4px 12px rgba(63, 127, 120, 0.07);
+}
+
+.features-card--tier-primary {
+  border-color: rgba(63, 127, 120, 0.2);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 18px 44px rgba(63, 127, 120, 0.1),
+    0 2px 10px rgba(63, 127, 120, 0.06);
+}
+
+.features-card--tier-primary::before {
+  content: '';
+  display: block;
+  height: 3px;
+  width: 100%;
+  background: linear-gradient(90deg, #3f7f78, #8bbf8b);
+  flex-shrink: 0;
+}
+
+.features-card--tier-primary:hover {
+  border-color: rgba(63, 127, 120, 0.28);
+}
+
+.features-card-main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: clamp(22px, 2.8vw, 28px) clamp(22px, 2.8vw, 28px) clamp(20px, 2.5vw, 24px);
+}
+
+.features-card--tier-primary .features-card-main {
+  padding-top: clamp(20px, 2.5vw, 24px);
 }
 
 .features-card-heading {
   margin: 0;
-  font-size: 1.15rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-size: 1.22rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
   color: var(--text);
 }
 
 .features-card-body {
   margin: 0;
-  font-size: 0.92rem;
-  line-height: 1.5;
-  color: var(--muted);
+  font-size: 0.93rem;
+  line-height: 1.58;
+  color: rgba(17, 17, 17, 0.62);
+}
+
+.features-card-bullets {
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: rgba(17, 17, 17, 0.58);
+}
+
+.features-card-bullets li {
+  position: relative;
+  margin: 0 0 10px;
+  padding-left: 1.15rem;
+}
+
+.features-card-bullets li:last-child {
+  margin-bottom: 0;
+}
+
+.features-card-bullets li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3f7f78, #6ba89c);
+  box-shadow: 0 0 0 2px rgba(63, 127, 120, 0.12);
+}
+
+.features-card-cta {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding: 20px clamp(22px, 2.8vw, 28px) clamp(22px, 2.8vw, 28px);
+  margin-top: auto;
+  border-top: 1px solid rgba(63, 127, 120, 0.1);
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.features-card-signup {
+  min-width: min(200px, 100%);
+  min-height: 46px;
+  padding: 0 28px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: #3f7f78;
+  color: var(--white);
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(63, 127, 120, 0.25);
+}
+
+.features-card-signup:hover {
+  transform: translateY(-2px);
+  background: #346b66;
+  box-shadow: 0 4px 14px rgba(63, 127, 120, 0.3);
+}
+
+.features-card-signup:active {
+  transform: translateY(0);
+}
+
+.features-card-signup:focus-visible {
+  outline: 2px solid #8bbf8b;
+  outline-offset: 3px;
 }
 
 @media (max-width: 900px) {
-  .features-cards {
-    grid-template-columns: 1fr;
+  .features-header {
+    text-align: left;
+    margin-left: 0;
+    margin-right: 0;
   }
 
-  .features-card {
-    min-height: 0;
+  .features-cards {
+    grid-template-columns: 1fr;
   }
 }

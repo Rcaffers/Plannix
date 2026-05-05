@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { createDbPool, runMigrations } from './db.js';
 
 async function main() {

@@ -22,7 +22,11 @@ export async function fetchAuthConfig() {
   }
   const data = await parseJsonSafe(response);
   if (data && typeof data.signupRequiresPayment === 'boolean') {
-    return { signupRequiresPayment: data.signupRequiresPayment };
+    return {
+      signupRequiresPayment: data.signupRequiresPayment,
+      stripePublishableKey:
+        typeof data.stripePublishableKey === 'string' ? data.stripePublishableKey : '',
+    };
   }
   return null;
 }
@@ -45,6 +49,18 @@ export async function completePaidSignupSession(sessionId) {
     headers: JSON_POST_HEADERS,
     credentials: 'include',
     body: JSON.stringify({ session_id: sessionId }),
+  });
+  const payload = await parseJsonSafe(response);
+  const user = response.ok && payload?.user ? payload.user : null;
+  return { user };
+}
+
+export async function completePaidSignupSubscription(subscriptionId) {
+  const response = await fetch(`${API_BASE_URL}/auth/signup/complete-subscription`, {
+    method: 'POST',
+    headers: JSON_POST_HEADERS,
+    credentials: 'include',
+    body: JSON.stringify({ subscription_id: subscriptionId }),
   });
   const payload = await parseJsonSafe(response);
   const user = response.ok && payload?.user ? payload.user : null;
@@ -86,6 +102,28 @@ export async function logoutSession() {
   });
 }
 
+export async function applySignupPromotionCode({ subscriptionId, promotionCode }) {
+  const response = await fetch(`${API_BASE_URL}/auth/signup/apply-promotion-code`, {
+    method: 'POST',
+    headers: JSON_POST_HEADERS,
+    credentials: 'include',
+    body: JSON.stringify({
+      subscription_id: subscriptionId,
+      promotion_code: promotionCode,
+    }),
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not apply that promotion code.');
+  }
+  return {
+    clientSecret: payload.clientSecret,
+    subscriptionId: payload.subscriptionId || subscriptionId,
+    subscriptionPrice: payload.subscriptionPrice ?? null,
+    dueToday: payload.dueToday ?? null,
+  };
+}
+
 export async function signupAccount({ name, email, password }) {
   const response = await fetch(`${API_BASE_URL}/auth/signup`, {
     method: 'POST',
@@ -99,9 +137,19 @@ export async function signupAccount({ name, email, password }) {
     throw new Error(payload?.message || 'Unable to create your account right now.');
   }
 
+  if (payload?.clientSecret) {
+    return {
+      redirecting: true,
+      clientSecret: payload.clientSecret,
+      subscriptionId: payload.subscriptionId || '',
+      subscriptionPrice: payload.subscriptionPrice ?? null,
+      dueToday: payload.dueToday ?? null,
+      user: null,
+    };
+  }
+
   if (payload?.checkoutUrl) {
-    window.location.assign(payload.checkoutUrl);
-    return { redirecting: true, user: null };
+    return { redirecting: true, checkoutUrl: payload.checkoutUrl, user: null };
   }
 
   const createdUser = payload?.user ?? payload ?? null;

@@ -14,3 +14,11 @@ export function readPaidSignupSessionId() {
   }
   return params.get('session_id');
 }
+
+export function readPaidSignupSubscriptionId() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('signup_subscription_complete') !== '1') {
+    return null;
+  }
+  return params.get('subscription_id');
+}

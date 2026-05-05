@@ -308,12 +308,266 @@
   color: rgba(17, 17, 17, 0.68);
 }
 
+.payment-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(63, 127, 120, 0.26);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.payment-card--plannix {
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  gap: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.payment-card-accent {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3f7f78, #8bbf8b);
+  margin-bottom: 14px;
+}
+
+.payment-card-brand {
+  padding: 0 2px 14px;
+  border-bottom: 1px solid rgba(63, 127, 120, 0.2);
+  margin-bottom: 14px;
+}
+
+.payment-card-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #244b47;
+  background: rgba(232, 246, 232, 0.95);
+  border: 1px solid rgba(185, 220, 185, 0.85);
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 8px;
+}
+
+.payment-card-title {
+  margin: 0 0 6px;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-size: 1.12rem;
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.payment-card-price {
+  margin: 0 0 10px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #2d6b63;
+  letter-spacing: -0.01em;
+}
+
+.payment-card-due {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(17, 17, 17, 0.78);
+  letter-spacing: -0.01em;
+}
+
+.payment-promo {
+  margin: 0 0 14px;
+  padding: 0 2px;
+}
+
+.payment-promo--below-card {
+  margin-top: 14px;
+  margin-bottom: 12px;
+}
+
+.payment-promo label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgba(17, 17, 17, 0.55);
+  margin-bottom: 6px;
+}
+
+.payment-promo-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.payment-promo-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(63, 127, 120, 0.35);
+  background: rgba(255, 255, 255, 0.95);
+  font-size: 0.95rem;
+}
+
+.payment-promo-row input:focus {
+  outline: none;
+  border-color: #3f7f78;
+  box-shadow: 0 0 0 3px rgba(63, 127, 120, 0.2);
+}
+
+.payment-promo-row input:disabled {
+  opacity: 0.75;
+  cursor: not-allowed;
+}
+
+.payment-promo-apply {
+  flex-shrink: 0;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(63, 127, 120, 0.45);
+  background: rgba(232, 246, 232, 0.85);
+  color: #2d6b63;
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.payment-promo-apply:hover:not(:disabled) {
+  background: rgba(212, 236, 228, 0.95);
+  border-color: #3f7f78;
+}
+
+.payment-promo-apply:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.payment-promo-applied {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #2d6b63;
+}
+
+.payment-card-lead {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: rgba(17, 17, 17, 0.68);
+}
+
+.payment-card-frame {
+  border-radius: calc(var(--radius) - 18px);
+  border: 1px solid rgba(63, 127, 120, 0.28);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(244, 249, 244, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 10px 32px rgba(20, 20, 20, 0.07);
+  padding: 10px;
+  overflow: hidden;
+}
+
+.payment-card-footnote {
+  margin: 12px 2px 0;
+  font-size: 0.78rem;
+  color: rgba(17, 17, 17, 0.55);
+  line-height: 1.45;
+}
+
+.payment-card-flash {
+  margin: 0 0 12px;
+}
+
+.payment-card-stripe {
+  margin-top: 20px;
+}
+
+.payment-card-copy {
+  margin: 0;
+  font-size: 0.9rem;
+  color: rgba(17, 17, 17, 0.72);
+}
+
+.payment-card-back {
+  margin-top: 0;
+  min-height: 44px;
+  padding: 0 18px;
+  align-self: stretch;
+  border: 1px solid rgba(63, 127, 120, 0.35);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #2f645e;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.payment-card-back:hover {
+  background: rgba(232, 246, 232, 0.65);
+  border-color: #8bbf8b;
+}
+
 .login-modal h2 {
   margin: 8px 0 18px;
   font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
   font-size: clamp(1.55rem, 4vw, 2rem);
   font-weight: 500;
   letter-spacing: -0.02em;
+}
+
+.login-modal--embedded-checkout {
+  width: min(560px, 100%);
+  max-height: min(92vh, 720px);
+  overflow-y: auto;
+  padding-bottom: 28px;
+}
+
+.embedded-checkout-mount {
+  min-height: 420px;
+  width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(252, 250, 246, 0.98);
+}
+
+.payment-element-form {
+  display: grid;
+  gap: 10px;
+}
+
+.payment-element-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+  align-items: stretch;
+}
+
+.payment-element-actions .login-submit,
+.payment-element-actions .payment-card-back {
+  margin-top: 0;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 18px;
+  box-sizing: border-box;
+  font-size: 0.95rem;
+}
+
+.payment-element-actions .payment-card-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .login-form {

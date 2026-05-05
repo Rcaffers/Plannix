@@ -11,6 +11,13 @@ import {
   pruneSessionsToGrid,
   saveSessionsForLayoutKey,
 } from '../utils/timetableLayout';
+import { loadTimetableEditModeFromStorage, saveTimetableEditModeToStorage } from '../utils/timetableEditModeStorage';
+import {
+  computeAvailableClassOptions,
+  getPlannedClassEntries,
+  mapsFromPlannedClasses,
+  resolveSessionClassDisplay,
+} from '../utils/timetablePlannedClasses';
 import './ProjectCard.css';
 
 export default function ProjectCard({ project }) {
@@ -41,48 +48,21 @@ export default function ProjectCard({ project }) {
   const [classDraft, setClassDraft] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
   const [availableClasses, setAvailableClasses] = useState([]);
-  const [isEditingClasses, setIsEditingClasses] = useState(() => {
-    try {
-      const raw = localStorage.getItem('plannix_timetable_edit_mode_v1');
-      if (raw === 'locked') return false;
-      if (raw === 'editing') return true;
-    } catch {
-      /* ignore */
-    }
-    return true;
-  });
+  const [isEditingClasses, setIsEditingClasses] = useState(() => loadTimetableEditModeFromStorage());
 
   const modalSession =
     modalSlot == null ? null : findSessionAt(sessions, modalSlot.day, modalSlot.time) ?? null;
   const modalRowSegment = modalSlot == null ? null : rowSegments[modalSlot.time] ?? null;
   const modalDayLabel = modalSlot == null ? '' : dayLabels[modalSlot.day] ?? '';
   const classesPlan = useMemo(() => loadClassesPlanFromStorage(), [modalSlot, sessions]);
-  const plannedClasses = useMemo(
-    () =>
-      classesPlan.entries
-        .map((entry) => ({
-          id: String(entry.id || ''),
-          name: entry.name.trim(),
-          max: Number(entry.frequency) || 0,
-        }))
-        .filter((entry) => entry.id && entry.name && entry.max > 0),
-    [classesPlan],
-  );
-  const plannedClassById = useMemo(
-    () => new Map(plannedClasses.map((entry) => [entry.id, entry])),
-    [plannedClasses],
-  );
-  const plannedClassByName = useMemo(
-    () => new Map(plannedClasses.map((entry) => [entry.name, entry])),
+  const plannedClasses = useMemo(() => getPlannedClassEntries(classesPlan), [classesPlan]);
+  const { byId: plannedClassById, byName: plannedClassByName } = useMemo(
+    () => mapsFromPlannedClasses(plannedClasses),
     [plannedClasses],
   );
 
   useEffect(() => {
-    try {
-      localStorage.setItem('plannix_timetable_edit_mode_v1', isEditingClasses ? 'editing' : 'locked');
-    } catch {
-      /* ignore */
-    }
+    saveTimetableEditModeToStorage(isEditingClasses);
   }, [isEditingClasses]);
 
   function toggleEditMode() {
@@ -90,48 +70,20 @@ export default function ProjectCard({ project }) {
   }
 
   function resolveSessionClass(session) {
-    if (!session) return '';
-    const fromId = session.classId ? plannedClassById.get(session.classId) : null;
-    if (fromId) return fromId.name;
-    return String(session.class || '').trim();
-  }
-
-  function classUsageCounts(nextSessions) {
-    return nextSessions.reduce((acc, session) => {
-      const fallbackName = String(session.class || '').trim();
-      const entry =
-        (session.classId && plannedClassById.get(session.classId)) || plannedClassByName.get(fallbackName);
-      if (!entry) return acc;
-      acc.set(entry.id, (acc.get(entry.id) ?? 0) + 1);
-      return acc;
-    }, new Map());
+    return resolveSessionClassDisplay(session, plannedClassById, plannedClassByName);
   }
 
   function loadClassOptions(dayIndex, rowIndex) {
-    const filteredSessions = sessions.filter((s) => !(s.day === dayIndex && s.time === rowIndex));
-    const usedCounts = classUsageCounts(filteredSessions);
-    const currentSession = findSessionAt(sessions, dayIndex, rowIndex);
-    const currentClassId =
-      (currentSession?.classId && plannedClassById.get(currentSession.classId)?.id) ||
-      plannedClassByName.get(String(currentSession?.class || '').trim())?.id ||
-      '';
-
-    const nextAvailable = plannedClasses
-      .filter((entry) => {
-        if (entry.id === currentClassId) return true;
-        const used = usedCounts.get(entry.id) ?? 0;
-        return used < entry.max;
-      })
-      .map((entry) => ({
-        id: entry.id,
-        label: entry.name,
-        max: entry.max,
-        used:
-          (usedCounts.get(entry.id) ?? 0) +
-          (currentClassId && currentClassId === entry.id ? 1 : 0),
-      }));
-
-    setAvailableClasses(nextAvailable);
+    setAvailableClasses(
+      computeAvailableClassOptions({
+        plannedClasses,
+        sessions,
+        dayIndex,
+        rowIndex,
+        plannedClassById,
+        plannedClassByName,
+      }),
+    );
   }
 
   function openLessonModal(dayIndex, rowIndex) {

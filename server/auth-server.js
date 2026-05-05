@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import crypto from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
@@ -63,7 +64,7 @@ app.post(
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      if (session.payment_status === 'paid') {
+      if (session.payment_status === 'paid' || session.payment_status === 'no_payment_required') {
         try {
           await fulfillPaidCheckout(session.id);
         } catch (e) {
@@ -131,9 +132,56 @@ function cleanupPendingSignups() {
   }
 }
 
+function dueTodayFromInvoice(invoice) {
+  if (!invoice || typeof invoice === 'string') {
+    return null;
+  }
+  if (typeof invoice.amount_due !== 'number') {
+    return null;
+  }
+  return { amount: invoice.amount_due, currency: invoice.currency };
+}
+
+function subscriptionPricePayloadFromSubscription(subscription) {
+  const price = subscription.items?.data?.[0]?.price;
+  if (!price || typeof price.unit_amount !== 'number') {
+    return null;
+  }
+  const product = price.product;
+  const productName =
+    product && typeof product === 'object' && !product.deleted && product.name
+      ? String(product.name)
+      : null;
+  return {
+    amount: price.unit_amount,
+    currency: price.currency,
+    interval: price.recurring?.interval ?? null,
+    intervalCount: price.recurring?.interval_count ?? 1,
+    productName,
+  };
+}
+
+function assertAwaitingSignupSubscription(subscription) {
+  const pendingId = subscription.metadata?.pending_signup_id;
+  if (!pendingId || !pendingSignups.has(pendingId)) {
+    const err = new Error(
+      'This payment session is no longer valid. Please go back and create your account again.',
+    );
+    err.statusCode = 403;
+    throw err;
+  }
+  if (subscription.status !== 'incomplete') {
+    const err = new Error('This subscription cannot accept a promotion code right now.');
+    err.statusCode = 400;
+    throw err;
+  }
+}
+
 async function fulfillPaidCheckout(checkoutSessionId) {
   const session = await stripe.checkout.sessions.retrieve(checkoutSessionId);
-  if (session.payment_status !== 'paid') {
+  const okPayment =
+    session.payment_status === 'paid' || session.payment_status === 'no_payment_required';
+  if (!okPayment) {
     return null;
   }
 
@@ -167,6 +215,37 @@ async function fulfillPaidCheckout(checkoutSessionId) {
 
   if (emailFromStripe) {
     return users.find((u) => u.email.toLowerCase() === emailFromStripe) || null;
+  }
+
+  return null;
+}
+
+async function fulfillPaidSubscription(subscriptionId) {
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  if (!subscription || !['active', 'trialing'].includes(subscription.status)) {
+    return null;
+  }
+
+  const pendingSignupId = subscription.metadata?.pending_signup_id;
+  cleanupPendingSignups();
+
+  if (pendingSignupId && pendingSignups.has(pendingSignupId)) {
+    const pending = pendingSignups.get(pendingSignupId);
+    pendingSignups.delete(pendingSignupId);
+
+    const existingUser = users.find((u) => u.email.toLowerCase() === pending.email.toLowerCase());
+    if (existingUser) {
+      return existingUser;
+    }
+
+    const newUser = {
+      id: `u_individual_${crypto.randomUUID()}`,
+      name: pending.name,
+      email: pending.email,
+      passwordHash: pending.passwordHash,
+    };
+    users.push(newUser);
+    return newUser;
   }
 
   return null;
@@ -206,6 +285,7 @@ function requireDb(res) {
 app.get('/auth/config', (req, res) => {
   return res.json({
     signupRequiresPayment: Boolean(stripe && stripePriceId),
+    stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '',
   });
 });
 
@@ -269,26 +349,53 @@ app.post('/auth/signup', async (req, res) => {
     });
 
     try {
-      const checkoutSession = await stripe.checkout.sessions.create({
-        mode: 'payment',
-        customer_email: email,
-        line_items: [{ price: stripePriceId, quantity: 1 }],
-        success_url: `${FRONTEND_ORIGIN}/?signup_complete=1&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${FRONTEND_ORIGIN}/?signup_cancel=1`,
+      const customer = await stripe.customers.create({
+        email,
+        name,
         metadata: {
           pending_signup_id: pendingSignupId,
         },
       });
 
+      const subscription = await stripe.subscriptions.create({
+        customer: customer.id,
+        items: [{ price: stripePriceId }],
+        payment_behavior: 'default_incomplete',
+        payment_settings: {
+          save_default_payment_method: 'on_subscription',
+        },
+        metadata: {
+          pending_signup_id: pendingSignupId,
+        },
+        expand: ['latest_invoice.payment_intent', 'items.data.price.product'],
+      });
+
+      const paymentIntent = subscription.latest_invoice?.payment_intent;
+      const clientSecret = paymentIntent?.client_secret;
+
+      if (!clientSecret) {
+        pendingSignups.delete(pendingSignupId);
+        return res.status(502).json({
+          message: 'Stripe did not return a payment client secret for this subscription.',
+        });
+      }
+
+      const subscriptionPrice = subscriptionPricePayloadFromSubscription(subscription);
+
       return res.status(200).json({
-        checkoutUrl: checkoutSession.url,
+        clientSecret,
+        subscriptionId: subscription.id,
+        subscriptionPrice,
+        dueToday: dueTodayFromInvoice(subscription.latest_invoice),
       });
     } catch (err) {
       pendingSignups.delete(pendingSignupId);
       // eslint-disable-next-line no-console
-      console.error('Stripe checkout session error:', err);
+      console.error('Stripe subscription create error:', err);
+      const stripeMsg =
+        err?.raw?.message || err?.message || 'Unable to start subscription with Stripe.';
       return res.status(502).json({
-        message: 'Unable to start payment. Check Stripe keys and price ID, then try again.',
+        message: `${stripeMsg} Ensure STRIPE_PRICE_ID points to an active recurring Stripe price.`,
       });
     }
   }
@@ -304,6 +411,69 @@ app.post('/auth/signup', async (req, res) => {
   attachSessionCookie(res, newUser.id);
 
   return res.status(201).json({ user: toPublicUser(newUser) });
+});
+
+app.post('/auth/signup/apply-promotion-code', async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ message: 'Paid signup is not enabled on this server.' });
+  }
+
+  const subscriptionId = String(req.body?.subscription_id || req.body?.subscriptionId || '').trim();
+  const rawCode = String(req.body?.promotion_code || req.body?.promotionCode || '').trim();
+
+  if (!subscriptionId || !rawCode) {
+    return res.status(400).json({ message: 'Subscription and promotion code are required.' });
+  }
+
+  try {
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    assertAwaitingSignupSubscription(subscription);
+
+    const codes = await stripe.promotionCodes.list({
+      code: rawCode,
+      limit: 1,
+      active: true,
+    });
+    const promotionCode = codes.data[0];
+    if (!promotionCode) {
+      return res.status(400).json({
+        message: 'That promotion code is not valid or is no longer active.',
+      });
+    }
+
+    const updated = await stripe.subscriptions.update(
+      subscriptionId,
+      {
+        discounts: [{ promotion_code: promotionCode.id }],
+      },
+      {
+        expand: ['latest_invoice.payment_intent', 'items.data.price.product'],
+      },
+    );
+
+    const paymentIntent = updated.latest_invoice?.payment_intent;
+    const clientSecret = paymentIntent?.client_secret;
+    if (!clientSecret) {
+      return res.status(502).json({
+        message: 'Could not refresh the payment form after applying that code. Please try again.',
+      });
+    }
+
+    return res.json({
+      clientSecret,
+      subscriptionId: updated.id,
+      subscriptionPrice: subscriptionPricePayloadFromSubscription(updated),
+      dueToday: dueTodayFromInvoice(updated.latest_invoice),
+    });
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
+    // eslint-disable-next-line no-console
+    console.error('apply-promotion-code error:', err);
+    const stripeMsg = err?.raw?.message || err?.message || 'Unable to apply that promotion code.';
+    return res.status(400).json({ message: stripeMsg });
+  }
 });
 
 app.post('/auth/signup/complete', async (req, res) => {
@@ -330,6 +500,33 @@ app.post('/auth/signup/complete', async (req, res) => {
     // eslint-disable-next-line no-console
     console.error('signup/complete error:', err);
     return res.status(502).json({ message: 'Unable to verify payment with Stripe.' });
+  }
+});
+
+app.post('/auth/signup/complete-subscription', async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ message: 'Paid signup is not enabled on this server.' });
+  }
+
+  const subscriptionId = String(req.body?.subscription_id || '').trim();
+  if (!subscriptionId) {
+    return res.status(400).json({ message: 'Missing subscription_id.' });
+  }
+
+  try {
+    const user = await fulfillPaidSubscription(subscriptionId);
+    if (!user) {
+      return res.status(400).json({
+        message: 'Subscription is not active yet or this signup is no longer valid.',
+      });
+    }
+
+    attachSessionCookie(res, user.id);
+    return res.json({ user: toPublicUser(user) });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('signup/complete-subscription error:', err);
+    return res.status(502).json({ message: 'Unable to verify subscription with Stripe.' });
   }
 });
 
@@ -570,7 +767,7 @@ async function startServer() {
     console.log('Demo login: teacher@plannix.test / Password123!');
     if (stripe && stripePriceId) {
       // eslint-disable-next-line no-console
-      console.log('Stripe signup: enabled (Checkout before account is created).');
+      console.log('Stripe signup: enabled (Subscription Payment Element mode).');
     } else {
       // eslint-disable-next-line no-console
       console.log('Stripe signup: disabled (set STRIPE_SECRET_KEY and STRIPE_PRICE_ID to require payment).');

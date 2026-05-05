@@ -12,6 +12,7 @@ import Settings from './pages/Settings';
 import Classes from './pages/Classes';
 import Timetable from './pages/Timetable';
 import {
+  completePaidSignupSubscription,
   completePaidSignupSession,
   fetchAuthConfig,
   fetchAuthMe,
@@ -20,12 +21,19 @@ import {
   signupAccount,
 } from './utils/api';
 import { TimetableLayoutProvider } from './context/TimetableLayoutContext';
-import { readPaidSignupSessionId, shouldOpenSignupAfterCancel, stripQueryFromLocation } from './utils/authUrl';
+import { shouldOpenSignupAfterCancel, stripQueryFromLocation } from './utils/authUrl';
+import {
+  tryCompletePaidCheckoutSignup,
+  tryCompletePaidSubscriptionSignup,
+} from './utils/paidSignupCompletion';
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [authConfig, setAuthConfig] = useState({ signupRequiresPayment: false });
+  const [authConfig, setAuthConfig] = useState({
+    signupRequiresPayment: false,
+    stripePublishableKey: '',
+  });
   const [openSignupAfterCancel, setOpenSignupAfterCancel] = useState(false);
 
   useEffect(() => {
@@ -36,30 +44,34 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const sessionId = readPaidSignupSessionId();
-    if (!sessionId) {
-      return undefined;
-    }
-
     let cancelled = false;
 
-    const finishPaidSignup = async () => {
-      try {
-        const { user: completedUser } = await completePaidSignupSession(sessionId);
-        if (cancelled) {
-          return;
-        }
-        if (completedUser) {
-          setUser(completedUser);
-        }
-      } finally {
-        if (!cancelled) {
-          stripQueryFromLocation();
-        }
+    const run = async () => {
+      const { user: completedUser } = await tryCompletePaidSubscriptionSignup(completePaidSignupSubscription);
+      if (cancelled || !completedUser) {
+        return;
       }
+      setUser(completedUser);
     };
 
-    finishPaidSignup();
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      const { user: completedUser } = await tryCompletePaidCheckoutSignup(completePaidSignupSession);
+      if (cancelled || !completedUser) {
+        return;
+      }
+      setUser(completedUser);
+    };
+
+    run();
     return () => {
       cancelled = true;
     };
@@ -132,10 +144,11 @@ export default function App() {
   };
 
   const handleSignup = async ({ name, email, password }) => {
-    const { redirecting, user: createdUser } = await signupAccount({ name, email, password });
-    if (redirecting) {
-      return { redirecting: true };
+    const result = await signupAccount({ name, email, password });
+    if (result?.redirecting) {
+      return result;
     }
+    const { user: createdUser } = result;
     setUser(createdUser);
     return createdUser;
   };
@@ -168,7 +181,7 @@ export default function App() {
               </main>
             }
           />
-          <Route path="/features" element={<Features />} />
+          <Route path="/features" element={<Features user={user} />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/classes" element={<Classes />} />
           <Route

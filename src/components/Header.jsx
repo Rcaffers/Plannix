@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
+import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import {
   getLoginValidationError,
   getSignupValidationError,
@@ -7,8 +8,102 @@ import {
   signupSuccessMessage,
 } from '../utils/authForms';
 import { SIGNUP_PAYMENT_CANCELLED_MESSAGE } from '../utils/authMessages';
+import { loadStripe } from '@stripe/stripe-js';
+import { applySignupPromotionCode } from '../utils/api';
 import { headerNavLinks } from '../utils/headerNav';
+import { PLANNIX_OPEN_SIGNUP_EVENT } from '../utils/plannixEvents';
+import { formatMoneyMinor, formatSubscriptionPriceSummary } from '../utils/stripePriceFormat';
+import { buildSubscriptionSignupReturnUrl } from '../utils/stripeSignupUrl';
 import './Header.css';
+
+function SignupSubscriptionPaymentForm({
+  subscriptionId,
+  onBack,
+  onError,
+  promotionInput,
+  onPromotionInputChange,
+  promotionApplying,
+  promotionAppliedCode,
+  onApplyPromotion,
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!stripe || !elements || isSubmitting) return;
+    setIsSubmitting(true);
+    onError('');
+    try {
+      const { error } = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          return_url: buildSubscriptionSignupReturnUrl(subscriptionId),
+        },
+      });
+      if (error) {
+        onError(error.message || 'Payment failed. Please check your details and try again.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form className="payment-element-form" onSubmit={handleSubmit}>
+      <div className="payment-card-frame">
+        <PaymentElement />
+      </div>
+      <div className="payment-promo payment-promo--below-card">
+        <label htmlFor="signup-promotion-code">Promotion code</label>
+        <div className="payment-promo-row">
+          <input
+            id="signup-promotion-code"
+            type="text"
+            name="promotion_code"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="Enter code"
+            value={promotionInput}
+            onChange={(event) => onPromotionInputChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                onApplyPromotion();
+              }
+            }}
+            disabled={promotionApplying || Boolean(promotionAppliedCode)}
+          />
+          <button
+            type="button"
+            className="payment-promo-apply"
+            onClick={onApplyPromotion}
+            disabled={
+              promotionApplying || Boolean(promotionAppliedCode) || !promotionInput.trim()
+            }
+          >
+            {promotionApplying ? 'Applying…' : 'Apply'}
+          </button>
+        </div>
+        {promotionAppliedCode ? (
+          <p className="payment-promo-applied">Applied: {promotionAppliedCode}</p>
+        ) : null}
+      </div>
+      <p className="payment-card-footnote">
+        You may be asked to complete bank verification, then you will return to Plannix automatically.
+      </p>
+      <div className="payment-element-actions">
+        <button type="submit" className="login-submit" disabled={!stripe || isSubmitting}>
+          {isSubmitting ? 'Processing payment...' : 'Activate membership'}
+        </button>
+        <button type="button" className="payment-card-back" onClick={onBack} disabled={isSubmitting}>
+          ← Back to account details
+        </button>
+      </div>
+    </form>
+  );
+}
 
 export default function Header({
   user,
@@ -30,8 +125,19 @@ export default function Header({
   const [signupError, setSignupError] = useState('');
   const [loginSuccess, setLoginSuccess] = useState('');
   const [signupSuccess, setSignupSuccess] = useState('');
+  const [paymentClientSecret, setPaymentClientSecret] = useState('');
+  const [pendingSubscriptionId, setPendingSubscriptionId] = useState('');
+  const [signupSubscriptionPrice, setSignupSubscriptionPrice] = useState(null);
+  const [signupDueToday, setSignupDueToday] = useState(null);
+  const [signupPromotionInput, setSignupPromotionInput] = useState('');
+  const [signupPromotionApplying, setSignupPromotionApplying] = useState(false);
+  const [signupPromotionAppliedCode, setSignupPromotionAppliedCode] = useState('');
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
+  const stripePromise = useMemo(() => {
+    if (!authConfig?.stripePublishableKey) return null;
+    return loadStripe(authConfig.stripePublishableKey);
+  }, [authConfig?.stripePublishableKey]);
 
   const navLinks = user
     ? [
@@ -101,6 +207,13 @@ export default function Header({
     setIsSignupOpen(false);
     setSignupError('');
     setSignupSuccess('');
+    setPaymentClientSecret('');
+    setPendingSubscriptionId('');
+    setSignupSubscriptionPrice(null);
+    setSignupDueToday(null);
+    setSignupPromotionInput('');
+    setSignupPromotionApplying(false);
+    setSignupPromotionAppliedCode('');
   };
 
   const openLogin = () => {
@@ -115,7 +228,25 @@ export default function Header({
     setLoginError('');
     setLoginSuccess('');
     setIsSignupOpen(true);
+    setPaymentClientSecret('');
+    setPendingSubscriptionId('');
+    setSignupSubscriptionPrice(null);
+    setSignupDueToday(null);
+    setSignupPromotionInput('');
+    setSignupPromotionApplying(false);
+    setSignupPromotionAppliedCode('');
   };
+
+  const openSignupRef = useRef(openSignup);
+  openSignupRef.current = openSignup;
+
+  useEffect(() => {
+    const onGlobalOpenSignup = () => {
+      openSignupRef.current();
+    };
+    window.addEventListener(PLANNIX_OPEN_SIGNUP_EVENT, onGlobalOpenSignup);
+    return () => window.removeEventListener(PLANNIX_OPEN_SIGNUP_EVENT, onGlobalOpenSignup);
+  }, []);
 
   const stopModalCloseFromInnerClick = (event) => {
     event.stopPropagation();
@@ -169,6 +300,28 @@ export default function Header({
     try {
       const result = await onSignup({ name, email, password });
       if (result?.redirecting) {
+        if (result.clientSecret && result.subscriptionId) {
+          if (!authConfig?.stripePublishableKey) {
+            setSignupError(
+              'Payment UI is not configured. Set STRIPE_PUBLISHABLE_KEY in the server .env and restart.',
+            );
+            return;
+          }
+          setPaymentClientSecret(result.clientSecret);
+          setPendingSubscriptionId(result.subscriptionId);
+          setSignupSubscriptionPrice(result.subscriptionPrice ?? null);
+          setSignupDueToday(result.dueToday ?? null);
+          setSignupPromotionInput('');
+          setSignupPromotionAppliedCode('');
+          setSignupError('');
+          setSignupSuccess('Complete secure payment below to activate your subscription.');
+          return;
+        }
+        if (result.checkoutUrl) {
+          window.location.assign(result.checkoutUrl);
+          return;
+        }
+        setSignupError('Could not start payment. Please try again.');
         return;
       }
       const createdUser = result;
@@ -183,6 +336,43 @@ export default function Header({
       setIsSignupSubmitting(false);
     }
   };
+
+  const handleApplyPromotion = async () => {
+    if (!pendingSubscriptionId || signupPromotionApplying || signupPromotionAppliedCode) {
+      return;
+    }
+    const code = signupPromotionInput.trim();
+    if (!code) {
+      setSignupError('Enter a promotion code.');
+      return;
+    }
+    setSignupPromotionApplying(true);
+    setSignupError('');
+    try {
+      const next = await applySignupPromotionCode({
+        subscriptionId: pendingSubscriptionId,
+        promotionCode: code,
+      });
+      setPaymentClientSecret(next.clientSecret);
+      if (next.subscriptionPrice) {
+        setSignupSubscriptionPrice(next.subscriptionPrice);
+      }
+      setSignupDueToday(next.dueToday ?? null);
+      setSignupPromotionAppliedCode(code);
+      setSignupPromotionInput('');
+      setSignupSuccess('Promotion applied. Your payment total has been updated.');
+    } catch (error) {
+      setSignupError(error.message || 'Could not apply that promotion code.');
+    } finally {
+      setSignupPromotionApplying(false);
+    }
+  };
+
+  const signupPriceLine = formatSubscriptionPriceSummary(signupSubscriptionPrice);
+  const signupDueTodayFormatted =
+    signupDueToday && typeof signupDueToday.amount === 'number'
+      ? formatMoneyMinor(signupDueToday.amount, signupDueToday.currency)
+      : '';
 
   return (
     <>
@@ -369,7 +559,7 @@ export default function Header({
       {isSignupOpen ? (
         <div className="login-modal-backdrop" onClick={closeSignup}>
           <div
-            className="login-modal"
+            className={`login-modal${paymentClientSecret ? ' login-modal--embedded-checkout' : ''}`}
             role="dialog"
             aria-modal="true"
             aria-labelledby="signup-modal-title"
@@ -384,66 +574,137 @@ export default function Header({
               ×
             </button>
 
-            <p className="login-kicker">New to Plannix</p>
-            <h2 id="signup-modal-title">Create your individual account</h2>
-            {authConfig?.signupRequiresPayment ? (
+            <p className="login-kicker">{paymentClientSecret ? 'Secure payment' : 'New to Plannix'}</p>
+            <h2 id="signup-modal-title">
+              {paymentClientSecret ? 'Complete your payment' : 'Create your individual account'}
+            </h2>
+            {authConfig?.signupRequiresPayment && !paymentClientSecret ? (
               <p className="signup-payment-note">
-                After you submit this form, you will be redirected to Stripe to complete payment. Your account is
-                created once payment succeeds.
+                After you submit this form, complete payment in the secure form below. Your account is created once
+                payment succeeds.
               </p>
             ) : null}
 
-            <form className="login-form" onSubmit={handleSignupSubmit}>
-              <label htmlFor="signup-name">Full name</label>
-              <input
-                id="signup-name"
-                type="text"
-                name="name"
-                placeholder="Jane Doe"
-                value={signupForm.name}
-                autoComplete="name"
-                onChange={(event) => setSignupForm((current) => ({ ...current, name: event.target.value }))}
-                disabled={isSignupSubmitting}
-              />
+            {paymentClientSecret ? (
+              <div className="payment-card payment-card--plannix">
+                <div className="payment-card-accent" aria-hidden />
+                <header className="payment-card-brand">
+                  <span className="payment-card-badge">Secure checkout</span>
+                  <h3 className="payment-card-title">
+                    {signupSubscriptionPrice?.productName || 'Individual membership'}
+                  </h3>
+                  {signupPriceLine ? (
+                    <p className="payment-card-price" aria-live="polite">
+                      {signupPriceLine}
+                    </p>
+                  ) : null}
+                  {signupDueTodayFormatted ? (
+                    <p className="payment-card-due" aria-live="polite">
+                      Due now: {signupDueTodayFormatted}
+                    </p>
+                  ) : null}
+                  <p className="payment-card-lead">
+                    Your account details are saved. Add payment details below to activate your recurring subscription.
+                  </p>
+                </header>
+                {signupError ? <p className="login-message error payment-card-flash">{signupError}</p> : null}
+                {signupSuccess ? <p className="login-message success payment-card-flash">{signupSuccess}</p> : null}
+                {stripePromise ? (
+                  <div className="payment-card-stripe">
+                    <Elements
+                      key={paymentClientSecret}
+                      stripe={stripePromise}
+                      options={{
+                        clientSecret: paymentClientSecret,
+                        paymentMethodOrder: ['apple_pay', 'google_pay', 'link', 'card'],
+                        appearance: {
+                          theme: 'stripe',
+                          variables: {
+                            colorPrimary: '#3f7f78',
+                            borderRadius: '10px',
+                          },
+                        },
+                      }}
+                    >
+                      <SignupSubscriptionPaymentForm
+                        subscriptionId={pendingSubscriptionId}
+                        promotionInput={signupPromotionInput}
+                        onPromotionInputChange={setSignupPromotionInput}
+                        promotionApplying={signupPromotionApplying}
+                        promotionAppliedCode={signupPromotionAppliedCode}
+                        onApplyPromotion={handleApplyPromotion}
+                        onBack={() => {
+                          setPaymentClientSecret('');
+                          setPendingSubscriptionId('');
+                          setSignupSubscriptionPrice(null);
+                          setSignupDueToday(null);
+                          setSignupPromotionInput('');
+                          setSignupPromotionApplying(false);
+                          setSignupPromotionAppliedCode('');
+                        }}
+                        onError={setSignupError}
+                      />
+                    </Elements>
+                  </div>
+                ) : (
+                  <p className="login-message error">
+                    Payment configuration is missing. Please contact support.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <form className="login-form" onSubmit={handleSignupSubmit}>
+                <label htmlFor="signup-name">Full name</label>
+                <input
+                  id="signup-name"
+                  type="text"
+                  name="name"
+                  placeholder="Jane Doe"
+                  value={signupForm.name}
+                  autoComplete="name"
+                  onChange={(event) => setSignupForm((current) => ({ ...current, name: event.target.value }))}
+                  disabled={isSignupSubmitting}
+                />
 
-              <label htmlFor="signup-email">Email</label>
-              <input
-                id="signup-email"
-                type="email"
-                name="email"
-                placeholder="you@school.edu"
-                value={signupForm.email}
-                autoComplete="email"
-                onChange={(event) => setSignupForm((current) => ({ ...current, email: event.target.value }))}
-                disabled={isSignupSubmitting}
-              />
+                <label htmlFor="signup-email">Email</label>
+                <input
+                  id="signup-email"
+                  type="email"
+                  name="email"
+                  placeholder="you@school.edu"
+                  value={signupForm.email}
+                  autoComplete="email"
+                  onChange={(event) => setSignupForm((current) => ({ ...current, email: event.target.value }))}
+                  disabled={isSignupSubmitting}
+                />
 
-              <label htmlFor="signup-password">Password</label>
-              <input
-                id="signup-password"
-                type="password"
-                name="password"
-                placeholder="At least 8 characters"
-                value={signupForm.password}
-                autoComplete="new-password"
-                onChange={(event) => setSignupForm((current) => ({ ...current, password: event.target.value }))}
-                disabled={isSignupSubmitting}
-              />
+                <label htmlFor="signup-password">Password</label>
+                <input
+                  id="signup-password"
+                  type="password"
+                  name="password"
+                  placeholder="At least 8 characters"
+                  value={signupForm.password}
+                  autoComplete="new-password"
+                  onChange={(event) => setSignupForm((current) => ({ ...current, password: event.target.value }))}
+                  disabled={isSignupSubmitting}
+                />
 
-              {signupError ? <p className="login-message error">{signupError}</p> : null}
-              {signupSuccess ? <p className="login-message success">{signupSuccess}</p> : null}
+                {signupError ? <p className="login-message error">{signupError}</p> : null}
+                {signupSuccess ? <p className="login-message success">{signupSuccess}</p> : null}
 
-              <button type="submit" className="login-submit" disabled={isSignupSubmitting}>
-                {isSignupSubmitting ? 'Creating account...' : 'Create account'}
-              </button>
-
-              <p className="login-switch">
-                Already have an account?{' '}
-                <button type="button" className="login-switch-link" onClick={openLogin} disabled={isSignupSubmitting}>
-                  Log in
+                <button type="submit" className="login-submit" disabled={isSignupSubmitting}>
+                  {isSignupSubmitting ? 'Creating account...' : 'Create account'}
                 </button>
-              </p>
-            </form>
+
+                <p className="login-switch">
+                  Already have an account?{' '}
+                  <button type="button" className="login-switch-link" onClick={openLogin} disabled={isSignupSubmitting}>
+                    Log in
+                  </button>
+                </p>
+              </form>
+            )}
           </div>
         </div>
       ) : null}
