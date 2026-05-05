@@ -318,19 +318,7 @@ export function buildDefaultSessions(layout) {
   const segments = buildRowSegments(layout);
   const lessonToRow = lessonRowIndexMap(segments);
 
-  const templates = [
-    { day: 0, time: 0, class: '10pg/Ma6', teacher: 'RCA', title: '' },
-    { day: 1, time: 0, class: '1sp/Ma6', teacher: 'RCA', title: '' },
-    { day: 2, time: 0, class: '7py/Ma6', teacher: 'RCA (RE/AHD)', title: '' },
-    { day: 3, time: 1, class: '1ja/Ma1', teacher: 'RCA', title: '' },
-    { day: 4, time: 1, class: '11B/Ma2', teacher: 'RCA', title: '' },
-    { day: 0, time: 2, class: '1be/Ma6', teacher: 'RCA', title: '' },
-    { day: 2, time: 3, class: 'PM Reg', teacher: '11a/Ma1', title: '' },
-    { day: 4, time: 4, class: '7py/Ma3', teacher: 'RCA', title: '' },
-    { day: 5, time: 0, class: '8ab/En7', teacher: 'RCA', title: '' },
-    { day: 6, time: 2, class: 'Sci Lab', teacher: 'RCA', title: '' },
-    { day: 8, time: 1, class: '12C/St4', teacher: 'RCA', title: '' },
-  ];
+  const templates = [];
 
   return templates
     .filter((t) => t.day < dayCount && lessonToRow.has(t.time))

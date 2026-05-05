@@ -192,6 +192,20 @@
   transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
 }
 
+.lesson-card--empty {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  border-style: dashed;
+  color: rgba(17, 17, 17, 0.68);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.session-empty-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
 .lesson-card:hover,
 .lesson-card:focus-visible {
   border-color: #8bbf8b;
@@ -318,9 +332,35 @@
   font-size: 0.9rem;
 }
 
+.lesson-modal-form select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(63, 127, 120, 0.26);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
 .lesson-modal-form input:focus-visible {
   outline: 2px solid rgba(63, 127, 120, 0.56);
   outline-offset: 1px;
+}
+
+.lesson-modal-form select:focus-visible {
+  outline: 2px solid rgba(63, 127, 120, 0.56);
+  outline-offset: 1px;
+}
+
+.lesson-modal-note {
+  margin: 0;
+  font-size: 0.84rem;
+  color: rgba(17, 17, 17, 0.7);
+}
+
+.lesson-modal-note a {
+  color: #2f645e;
+  font-weight: 600;
 }
 
 .lesson-modal-actions {

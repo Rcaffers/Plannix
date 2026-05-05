@@ -9,6 +9,7 @@ import Footer from './components/Footer';
 import CookieConsent from './components/CookieConsent';
 import Features from './pages/Features';
 import Settings from './pages/Settings';
+import Classes from './pages/Classes';
 import {
   completePaidSignupSession,
   fetchAuthConfig,
@@ -166,6 +167,7 @@ export default function App() {
           />
           <Route path="/features" element={<Features />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/classes" element={<Classes />} />
         </Routes>
         <Footer />
         <CookieConsent />

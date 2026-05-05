@@ -1,0 +1,150 @@
+.classes-page {
+  padding: clamp(32px, 6vw, 72px) 0 80px;
+  color: var(--text);
+}
+
+.classes-inner {
+  max-width: 760px;
+}
+
+.classes-breadcrumb {
+  margin: 0 0 16px;
+  font-size: 0.88rem;
+  color: rgba(17, 17, 17, 0.55);
+}
+
+.classes-breadcrumb a {
+  color: #2f645e;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.classes-breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.classes-title {
+  margin: 0 0 12px;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.classes-lead {
+  margin: 0 0 36px;
+  font-size: 1rem;
+  line-height: 1.55;
+  color: rgba(17, 17, 17, 0.68);
+}
+
+.classes-form {
+  display: grid;
+  gap: 18px;
+  padding: 24px 22px;
+  border-radius: calc(var(--radius) - 6px);
+  border: 1px solid rgba(63, 127, 120, 0.24);
+  background: linear-gradient(140deg, rgba(250, 247, 241, 0.98), rgba(236, 244, 241, 0.96));
+  box-shadow: 0 12px 36px rgba(20, 20, 20, 0.08);
+}
+
+.classes-overview-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.classes-field {
+  display: grid;
+  gap: 8px;
+}
+
+.classes-field label {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: rgba(17, 17, 17, 0.82);
+}
+
+.classes-field input[type='number'],
+.classes-field input[type='text'],
+.classes-field select {
+  width: 100%;
+  max-width: 280px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(63, 127, 120, 0.26);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+  font: inherit;
+}
+
+.classes-field input:focus-visible,
+.classes-field select:focus-visible {
+  outline: 2px solid rgba(63, 127, 120, 0.56);
+  outline-offset: 1px;
+}
+
+.classes-entry-card {
+  padding: 14px 14px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(63, 127, 120, 0.2);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.classes-entry-title {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #244b47;
+}
+
+.classes-entry-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.classes-field--inline input[type='number'],
+.classes-field--inline input[type='text'],
+.classes-field--inline select {
+  max-width: 100%;
+}
+
+@media (min-width: 720px) {
+  .classes-overview-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 720px) {
+  .classes-entry-grid {
+    grid-template-columns: 2fr 1fr;
+  }
+}
+
+.classes-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.classes-save {
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: #3f7f78;
+  color: var(--white);
+  font-weight: 600;
+  font: inherit;
+  cursor: pointer;
+}
+
+.classes-save:hover {
+  background: #346b66;
+}
+
+.classes-saved {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #276749;
+}

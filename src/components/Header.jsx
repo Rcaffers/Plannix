@@ -248,6 +248,14 @@ export default function Header({
                     >
                       Settings
                     </Link>
+                    <Link
+                      className="nav-user-dropdown-item"
+                      role="menuitem"
+                      to="/classes"
+                      onClick={() => setIsUserMenuOpen(false)}
+                    >
+                      Classes
+                    </Link>
                     <button
                       type="button"
                       className="nav-user-dropdown-item nav-user-dropdown-item-button"
