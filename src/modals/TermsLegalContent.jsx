@@ -1,3 +1,13 @@
+import { dispatchOpenPrivacyModal } from '../utils/plannixEvents';
+
+function openPrivacyModalFromTerms(event) {
+  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) {
+    return;
+  }
+  event.preventDefault();
+  dispatchOpenPrivacyModal();
+}
+
 /** Shared terms body (EU-oriented draft — have a lawyer review). */
 export default function TermsLegalContent() {
   return (
@@ -91,10 +101,12 @@ export default function TermsLegalContent() {
         <p>
           We process personal data in line with the EU General Data Protection Regulation (GDPR), UK GDPR where
           applicable, and related laws. You have rights of access, rectification, erasure, restriction, portability, and
-          objection in defined cases, and the right to lodge a complaint with a supervisory authority. Our privacy notice
-          (linked from the site footer) describes categories of data, purposes, legal bases, retention, and transfers.
-          Non-essential cookies and similar tools are used only with your consent where required; you can adjust choices
-          via the cookie controls we provide.
+          objection in defined cases, and the right to lodge a complaint with a supervisory authority. Our{' '}
+          <a href="/privacy" onClick={openPrivacyModalFromTerms}>
+            privacy notice
+          </a>{' '}
+          describes categories of data, purposes, legal bases, retention, and transfers. Non-essential cookies and similar
+          tools are used only with your consent where required; you can adjust choices via the cookie controls we provide.
         </p>
       </section>
 

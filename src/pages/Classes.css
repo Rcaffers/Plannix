@@ -31,11 +31,66 @@
   letter-spacing: -0.02em;
 }
 
+.classes-subnav {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+
+.classes-subnav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(63, 127, 120, 0.22);
+  background: rgba(255, 255, 255, 0.72);
+  color: #2f645e;
+  text-decoration: none;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.classes-subnav-link.is-active {
+  background: #3f7f78;
+  border-color: #3f7f78;
+  color: #f5f1ea;
+}
+
 .classes-lead {
   margin: 0 0 36px;
   font-size: 1rem;
   line-height: 1.55;
   color: rgba(17, 17, 17, 0.68);
+}
+
+.classes-week-switch {
+  display: inline-flex;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.classes-week-switch-btn {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(63, 127, 120, 0.25);
+  background: rgba(255, 255, 255, 0.76);
+  color: #2f645e;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.classes-week-switch-btn.is-active {
+  background: #3f7f78;
+  border-color: #3f7f78;
+  color: #f5f1ea;
+}
+
+.classes-input-timetable {
+  margin-top: 8px;
 }
 
 .classes-form {
@@ -48,9 +103,15 @@
   box-shadow: 0 12px 36px rgba(20, 20, 20, 0.08);
 }
 
-.classes-overview-grid {
-  display: grid;
-  gap: 12px;
+.classes-hint {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: rgba(17, 17, 17, 0.58);
+}
+
+.classes-hint--standalone {
+  margin: -6px 0 4px;
 }
 
 .classes-field {
@@ -90,11 +151,35 @@
   background: rgba(255, 255, 255, 0.55);
 }
 
+.classes-entry-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
 .classes-entry-title {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 0.95rem;
   font-weight: 700;
   color: #244b47;
+}
+
+.classes-entry-remove {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(63, 127, 120, 0.28);
+  background: rgba(255, 255, 255, 0.75);
+  color: #2f645e;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.classes-entry-remove:hover {
+  background: rgba(255, 255, 255, 0.95);
 }
 
 .classes-entry-grid {
@@ -109,12 +194,6 @@
 }
 
 @media (min-width: 720px) {
-  .classes-overview-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-@media (min-width: 720px) {
   .classes-entry-grid {
     grid-template-columns: 2fr 1fr;
   }
@@ -125,6 +204,10 @@
   align-items: center;
   gap: 12px;
   margin-top: 4px;
+}
+
+.classes-actions--add {
+  margin-top: 8px;
 }
 
 .classes-save {

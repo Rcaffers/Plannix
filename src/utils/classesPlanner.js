@@ -1,3 +1,5 @@
+import { TIMETABLE_CYCLE } from './timetableLayout';
+
 const STORAGE_KEY = 'plannix_classes_plan_v1';
 
 export const CLASS_CADENCE = {
@@ -25,6 +27,11 @@ function clampInt(value, min, max) {
 
 function normalizeCadence(value) {
   return value === CLASS_CADENCE.TWO_WEEK ? CLASS_CADENCE.TWO_WEEK : CLASS_CADENCE.ONE_WEEK;
+}
+
+/** Align stored class-plan cadence with timetable cycle (single source of truth in settings). */
+export function cadenceFromTimetableCycle(cycle) {
+  return cycle === TIMETABLE_CYCLE.TWO_WEEK ? CLASS_CADENCE.TWO_WEEK : CLASS_CADENCE.ONE_WEEK;
 }
 
 function normalizeEntry(raw, index) {
@@ -72,6 +79,38 @@ export function setClassEntryCount(plan, count) {
   return {
     cadence: normalized.cadence,
     entries: entries.slice(0, nextCount),
+  };
+}
+
+function newClassId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `class-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/** Append one empty class row (respects max class count). */
+export function addClassEntry(plan) {
+  const normalized = normalizeClassesPlan(plan);
+  if (normalized.entries.length >= LIMITS.classCountMax) {
+    return normalized;
+  }
+  const index = normalized.entries.length;
+  const nextEntry = normalizeEntry({ id: newClassId(), name: '', frequency: 0 }, index);
+  return {
+    cadence: normalized.cadence,
+    entries: [...normalized.entries, nextEntry],
+  };
+}
+
+/** Remove class at index. */
+export function removeClassEntry(plan, index) {
+  const normalized = normalizeClassesPlan(plan);
+  const i = Math.floor(Number(index));
+  if (!Number.isFinite(i) || i < 0 || i >= normalized.entries.length) return normalized;
+  return {
+    cadence: normalized.cadence,
+    entries: normalized.entries.filter((_, j) => j !== i),
   };
 }
 

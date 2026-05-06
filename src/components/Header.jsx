@@ -11,7 +11,7 @@ import { SIGNUP_PAYMENT_CANCELLED_MESSAGE } from '../utils/authMessages';
 import { loadStripe } from '@stripe/stripe-js';
 import { applySignupPromotionCode } from '../utils/api';
 import { headerNavLinks } from '../utils/headerNav';
-import { PLANNIX_OPEN_SIGNUP_EVENT } from '../utils/plannixEvents';
+import { PLANNIX_OPEN_LOGIN_EVENT, PLANNIX_OPEN_SIGNUP_EVENT } from '../utils/plannixEvents';
 import { formatMoneyMinor, formatSubscriptionPriceSummary } from '../utils/stripePriceFormat';
 import { buildSubscriptionSignupReturnUrl } from '../utils/stripeSignupUrl';
 import './Header.css';
@@ -240,12 +240,23 @@ export default function Header({
   const openSignupRef = useRef(openSignup);
   openSignupRef.current = openSignup;
 
+  const openLoginRef = useRef(openLogin);
+  openLoginRef.current = openLogin;
+
   useEffect(() => {
     const onGlobalOpenSignup = () => {
       openSignupRef.current();
     };
     window.addEventListener(PLANNIX_OPEN_SIGNUP_EVENT, onGlobalOpenSignup);
     return () => window.removeEventListener(PLANNIX_OPEN_SIGNUP_EVENT, onGlobalOpenSignup);
+  }, []);
+
+  useEffect(() => {
+    const onGlobalOpenLogin = () => {
+      openLoginRef.current();
+    };
+    window.addEventListener(PLANNIX_OPEN_LOGIN_EVENT, onGlobalOpenLogin);
+    return () => window.removeEventListener(PLANNIX_OPEN_LOGIN_EVENT, onGlobalOpenLogin);
   }, []);
 
   const stopModalCloseFromInnerClick = (event) => {
@@ -444,14 +455,6 @@ export default function Header({
                       onClick={() => setIsUserMenuOpen(false)}
                     >
                       Settings
-                    </Link>
-                    <Link
-                      className="nav-user-dropdown-item"
-                      role="menuitem"
-                      to="/classes"
-                      onClick={() => setIsUserMenuOpen(false)}
-                    >
-                      Classes
                     </Link>
                     <button
                       type="button"

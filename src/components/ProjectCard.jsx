@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAcademicYear } from '../context/AcademicYearContext';
 import { useTimetableLayout } from '../context/TimetableLayoutContext';
 import { lessonAriaLabel } from '../utils/lessonModal';
 import { loadClassesPlanFromStorage } from '../utils/classesPlanner';
 import { findSessionAt } from '../utils/timetable';
+import { countFullHolidayWeeksBeforeMonday, holidayLabelForLocalDate } from '../utils/academicYear';
 import {
   buildDefaultSessions,
-  getDayCount,
   loadSessionsForLayoutKey,
   makeLayoutKey,
   pruneSessionsToGrid,
   saveSessionsForLayoutKey,
+  TIMETABLE_CYCLE,
 } from '../utils/timetableLayout';
 import { loadTimetableEditModeFromStorage, saveTimetableEditModeToStorage } from '../utils/timetableEditModeStorage';
 import {
@@ -20,13 +22,81 @@ import {
 } from '../utils/timetablePlannedClasses';
 import './ProjectCard.css';
 
-export default function ProjectCard({ project }) {
+function startOfWeek(date) {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  const day = result.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  result.setDate(result.getDate() + diff);
+  return result;
+}
+
+function formatWeekCommencing(date) {
+  return new Intl.DateTimeFormat('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
+}
+
+function getIsoWeekNumber(date) {
+  const utc = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = utc.getUTCDay() || 7;
+  utc.setUTCDate(utc.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  return Math.ceil(((utc - yearStart) / 86400000 + 1) / 7);
+}
+
+export default function ProjectCard({
+  project,
+  enableEditing = true,
+  weekMode = 'date',
+  fixedWeekKey = 'cycle-1',
+  fixedWeekLabel = '',
+}) {
   const { layout, dayLabels, rowSegments } = useTimetableLayout();
-  const dayCount = getDayCount(layout);
+  const { academicYear } = useAcademicYear();
+  const isTwoWeekCycle = layout.cycle === TIMETABLE_CYCLE.TWO_WEEK;
+  const displayDayLabels = useMemo(() => {
+    if (!isTwoWeekCycle) return dayLabels;
+    return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  }, [dayLabels, isTwoWeekCycle]);
+  const dayCount = displayDayLabels.length;
   const layoutKey = useMemo(() => makeLayoutKey(layout), [layout]);
+  const [weekStartDate, setWeekStartDate] = useState(() => startOfWeek(new Date()));
+  const isoWeekNumber = useMemo(() => getIsoWeekNumber(weekStartDate), [weekStartDate]);
+  const repeatingWeekKey = useMemo(() => {
+    if (layout.cycle !== TIMETABLE_CYCLE.TWO_WEEK) return 'cycle-1';
+    const fullHolidayWeeksBefore =
+      weekMode === 'date' ? countFullHolidayWeeksBeforeMonday(academicYear, weekStartDate) : 0;
+    const adjustedIso = isoWeekNumber + fullHolidayWeeksBefore;
+    return adjustedIso % 2 === 0 ? 'cycle-2' : 'cycle-1';
+  }, [layout.cycle, isoWeekNumber, weekMode, academicYear, weekStartDate]);
+  const activeWeekKey = weekMode === 'date' ? repeatingWeekKey : fixedWeekKey;
+  const weekCommencingLabel = useMemo(() => {
+    if (weekMode !== 'date') return fixedWeekLabel;
+    if (layout.cycle === TIMETABLE_CYCLE.TWO_WEEK) {
+      const weekName = repeatingWeekKey === 'cycle-2' ? 'Week B' : 'Week A';
+      return `${formatWeekCommencing(weekStartDate)} (${weekName})`;
+    }
+    return formatWeekCommencing(weekStartDate);
+  }, [fixedWeekLabel, layout.cycle, repeatingWeekKey, weekMode, weekStartDate]);
+
+  const columnHolidayLabels = useMemo(() => {
+    if (weekMode !== 'date') {
+      return Array.from({ length: dayCount }, () => null);
+    }
+    return Array.from({ length: dayCount }, (_, dayIndex) => {
+      const d = new Date(weekStartDate);
+      d.setHours(12, 0, 0, 0);
+      d.setDate(d.getDate() + dayIndex);
+      return holidayLabelForLocalDate(academicYear, d);
+    });
+  }, [weekMode, weekStartDate, academicYear, dayCount]);
 
   const [sessions, setSessions] = useState(() => {
-    const saved = loadSessionsForLayoutKey(layoutKey);
+    const saved = loadSessionsForLayoutKey(layoutKey, activeWeekKey);
     if (saved && saved.length) {
       return pruneSessionsToGrid(saved, layout);
     }
@@ -34,21 +104,24 @@ export default function ProjectCard({ project }) {
   });
 
   useEffect(() => {
-    const saved = loadSessionsForLayoutKey(layoutKey);
+    const saved = loadSessionsForLayoutKey(layoutKey, activeWeekKey);
     if (saved && saved.length) {
       setSessions(pruneSessionsToGrid(saved, layout));
       return;
     }
     const defaults = buildDefaultSessions(layout);
     setSessions(defaults);
-    saveSessionsForLayoutKey(layoutKey, defaults);
-  }, [layoutKey, layout]);
+    saveSessionsForLayoutKey(layoutKey, defaults, activeWeekKey);
+  }, [layoutKey, layout, activeWeekKey]);
 
   const [modalSlot, setModalSlot] = useState(null);
   const [classDraft, setClassDraft] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
   const [availableClasses, setAvailableClasses] = useState([]);
-  const [isEditingClasses, setIsEditingClasses] = useState(() => loadTimetableEditModeFromStorage());
+  const [classLimitError, setClassLimitError] = useState('');
+  const [isEditingClasses, setIsEditingClasses] = useState(() =>
+    enableEditing ? loadTimetableEditModeFromStorage() : false,
+  );
 
   const modalSession =
     modalSlot == null ? null : findSessionAt(sessions, modalSlot.day, modalSlot.time) ?? null;
@@ -62,31 +135,66 @@ export default function ProjectCard({ project }) {
   );
 
   useEffect(() => {
+    if (!enableEditing) return;
     saveTimetableEditModeToStorage(isEditingClasses);
-  }, [isEditingClasses]);
+  }, [isEditingClasses, enableEditing]);
 
   function toggleEditMode() {
+    if (!enableEditing) return;
     setIsEditingClasses((current) => !current);
+  }
+
+  function moveWeek(offset) {
+    setWeekStartDate((current) => {
+      const next = new Date(current);
+      next.setDate(next.getDate() + offset * 7);
+      return next;
+    });
+  }
+
+  function jumpToCurrentWeek() {
+    setWeekStartDate(startOfWeek(new Date()));
   }
 
   function resolveSessionClass(session) {
     return resolveSessionClassDisplay(session, plannedClassById, plannedClassByName);
   }
 
+  function sessionsForCadenceLimit() {
+    if (layout.cycle === TIMETABLE_CYCLE.TWO_WEEK && weekMode === 'fixed') {
+      const week1Raw =
+        activeWeekKey === 'cycle-1' ? null : loadSessionsForLayoutKey(layoutKey, 'cycle-1');
+      const week2Raw =
+        activeWeekKey === 'cycle-2' ? null : loadSessionsForLayoutKey(layoutKey, 'cycle-2');
+      const week1Sessions =
+        activeWeekKey === 'cycle-1' ? sessions : week1Raw ? pruneSessionsToGrid(week1Raw, layout) : [];
+      const week2Sessions =
+        activeWeekKey === 'cycle-2' ? sessions : week2Raw ? pruneSessionsToGrid(week2Raw, layout) : [];
+      return [...week1Sessions, ...week2Sessions];
+    }
+    return sessions;
+  }
+
+  function buildClassOptions(dayIndex, rowIndex, currentSession = null) {
+    return computeAvailableClassOptions({
+      plannedClasses,
+      sessions: sessionsForCadenceLimit(),
+      dayIndex,
+      rowIndex,
+      plannedClassById,
+      plannedClassByName,
+      currentSession,
+    });
+  }
+
   function loadClassOptions(dayIndex, rowIndex) {
-    setAvailableClasses(
-      computeAvailableClassOptions({
-        plannedClasses,
-        sessions,
-        dayIndex,
-        rowIndex,
-        plannedClassById,
-        plannedClassByName,
-      }),
-    );
+    const currentSession = findSessionAt(sessions, dayIndex, rowIndex) ?? null;
+    setAvailableClasses(buildClassOptions(dayIndex, rowIndex, currentSession));
   }
 
   function openLessonModal(dayIndex, rowIndex) {
+    if (!enableEditing) return;
+    if (weekMode === 'date' && columnHolidayLabels[dayIndex]) return;
     const seg = rowSegments[rowIndex];
     if (!seg || seg.kind !== 'lesson') return;
     const session = findSessionAt(sessions, dayIndex, rowIndex);
@@ -94,6 +202,7 @@ export default function ProjectCard({ project }) {
       return;
     }
     loadClassOptions(dayIndex, rowIndex);
+    setClassLimitError('');
     setModalSlot({ day: dayIndex, time: rowIndex });
     setClassDraft(
       (session?.classId && plannedClassById.get(session.classId)?.id) ||
@@ -108,6 +217,7 @@ export default function ProjectCard({ project }) {
     setClassDraft('');
     setTitleDraft('');
     setAvailableClasses([]);
+    setClassLimitError('');
   }
 
   function saveLessonDetails(event) {
@@ -115,13 +225,24 @@ export default function ProjectCard({ project }) {
     if (modalSlot == null) return;
     const selectedClass = classDraft.trim();
     const selectedTitle = titleDraft.trim();
+    const currentSession = findSessionAt(sessions, modalSlot.day, modalSlot.time) ?? null;
+
+    if (selectedClass) {
+      const allowedOptions = buildClassOptions(modalSlot.day, modalSlot.time, currentSession);
+      const isAllowed = allowedOptions.some((option) => option.id === selectedClass);
+      if (!isAllowed) {
+        setClassLimitError('This class has reached its allowed frequency for the selected period.');
+        setAvailableClasses(allowedOptions);
+        return;
+      }
+    }
 
     setSessions((prev) => {
       const existing = findSessionAt(prev, modalSlot.day, modalSlot.time);
       const base = prev.filter((s) => !(s.day === modalSlot.day && s.time === modalSlot.time));
 
       if (!selectedClass) {
-        saveSessionsForLayoutKey(layoutKey, base);
+        saveSessionsForLayoutKey(layoutKey, base, activeWeekKey);
         return base;
       }
 
@@ -137,7 +258,7 @@ export default function ProjectCard({ project }) {
       };
 
       const next = [...base, nextSession];
-      saveSessionsForLayoutKey(layoutKey, next);
+      saveSessionsForLayoutKey(layoutKey, next, activeWeekKey);
       return next;
     });
     closeLessonModal();
@@ -153,27 +274,72 @@ export default function ProjectCard({ project }) {
   };
 
   return (
-    <article className={`project-card${isEditingClasses ? ' project-card--editing' : ''}`}>
+    <article
+      className={`project-card${enableEditing && isEditingClasses ? ' project-card--editing' : ''}`}
+    >
       <div className="schedule-card">
         <div className="schedule-titlebar">
           <div className="schedule-titlebar-main">
             <strong>{project.title}</strong>
             <span>{project.subtitle}</span>
           </div>
-          <button
-            type="button"
-            className="schedule-edit-toggle"
-            onClick={toggleEditMode}
-          >
-            {isEditingClasses ? 'Save class positions' : 'Edit classes'}
-          </button>
+          {weekMode === 'date' ? (
+            <div className="schedule-week-nav" aria-label="Week navigation">
+              <button
+                type="button"
+                className="schedule-week-arrow"
+                onClick={() => moveWeek(-1)}
+                aria-label="Go to previous week"
+              >
+                ←
+              </button>
+              <span className="schedule-week-label">Week commencing {weekCommencingLabel}</span>
+              <button
+                type="button"
+                className="schedule-week-today"
+                onClick={jumpToCurrentWeek}
+                aria-label="Jump to current week"
+              >
+                This week
+              </button>
+              <button
+                type="button"
+                className="schedule-week-arrow"
+                onClick={() => moveWeek(1)}
+                aria-label="Go to next week"
+              >
+                →
+              </button>
+            </div>
+          ) : (
+            <div className="schedule-week-nav">
+              <span className="schedule-week-label">{weekCommencingLabel}</span>
+            </div>
+          )}
+          {enableEditing ? (
+            <button
+              type="button"
+              className="schedule-edit-toggle"
+              onClick={toggleEditMode}
+            >
+              {isEditingClasses ? 'Save class positions' : 'Edit classes'}
+            </button>
+          ) : null}
         </div>
         <div className="schedule-dynamic" style={scheduleVars}>
           <div className="schedule-scroll">
             <div className={`schedule-head${dayLabels.length > 5 ? ' schedule-head--compact' : ''}`}>
               <span className="time-head">Time</span>
-              {dayLabels.map((day) => (
-                <span key={day} className="day-head">
+              {displayDayLabels.map((day, dayIndex) => (
+                <span
+                  key={day}
+                  className={`day-head${columnHolidayLabels[dayIndex] ? ' day-head--holiday' : ''}`}
+                  title={
+                    columnHolidayLabels[dayIndex]
+                      ? `Holiday: ${columnHolidayLabels[dayIndex]}`
+                      : undefined
+                  }
+                >
                   {day}
                 </span>
               ))}
@@ -197,9 +363,24 @@ export default function ProjectCard({ project }) {
                 ))}
               </div>
 
-              {dayLabels.map((day, dayIndex) => (
-                <div key={day} className="day-col">
+              {displayDayLabels.map((day, dayIndex) => {
+                const holidayLabel = columnHolidayLabels[dayIndex];
+                return (
+                <div key={day} className={`day-col${holidayLabel ? ' day-col--holiday' : ''}`}>
                   {rowSegments.map((seg) => {
+                    if (holidayLabel) {
+                      return (
+                        <div key={seg.rowIndex} className="slot slot--holiday">
+                          <div
+                            className="schedule-block-holiday"
+                            aria-label={`School closed, ${holidayLabel}`}
+                          >
+                            <span className="schedule-block-holiday-title">Holiday</span>
+                            <span className="schedule-block-holiday-name">{holidayLabel}</span>
+                          </div>
+                        </div>
+                      );
+                    }
                     if (seg.kind === 'lesson') {
                       const session = findSessionAt(sessions, dayIndex, seg.rowIndex);
                       const sessionClassName = resolveSessionClass(session);
@@ -211,7 +392,7 @@ export default function ProjectCard({ project }) {
 
                       return (
                         <div key={seg.rowIndex} className="slot">
-                          {session || isEditingClasses ? (
+                          {session || (enableEditing && isEditingClasses) ? (
                             <button
                               type="button"
                               className={`lesson-card${session ? '' : ' lesson-card--empty'}`}
@@ -252,7 +433,8 @@ export default function ProjectCard({ project }) {
                     );
                   })}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -291,7 +473,9 @@ export default function ProjectCard({ project }) {
                     <option value="">No class selected</option>
                     {availableClasses.map((classOption) => (
                       <option key={classOption.id} value={classOption.id}>
-                        {classOption.label} ({classOption.used}/{classOption.max})
+                        {classOption.label}{' '}
+                        ({classOption.used}/{classOption.max}
+                        {layout.cycle === TIMETABLE_CYCLE.TWO_WEEK ? ' over 2 weeks' : ' this week'})
                       </option>
                     ))}
                   </select>
@@ -300,6 +484,7 @@ export default function ProjectCard({ project }) {
                       No classes found yet. Add classes in <a href="/classes">Classes</a> first.
                     </p>
                   ) : null}
+                  {classLimitError ? <p className="lesson-modal-note">{classLimitError}</p> : null}
                 </>
               ) : (
                 <>

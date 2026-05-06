@@ -32,6 +32,26 @@
   line-height: 1.05;
 }
 
+.cta-guest-lead,
+.cta-member-lead {
+  margin: 14px 0 0;
+  max-width: 36rem;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.cta-card--member h2 {
+  font-size: clamp(1.55rem, 2.6vw, 2.4rem);
+}
+
+.button-signup {
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
 .cta-actions {
   display: flex;
   flex-wrap: wrap;
@@ -55,8 +75,13 @@
 }
 
 .button-primary {
-  background: var(--text);
+  background: #3f7f78;
   color: var(--white);
+  border-color: transparent;
+}
+
+.button-primary:hover {
+  background: #346b66;
 }
 
 .button-secondary {

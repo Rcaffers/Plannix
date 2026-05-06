@@ -3,16 +3,20 @@ import { Route, Routes } from 'react-router-dom';
 import './App.css';
 import Header from './components/Header';
 import Hero from './components/Hero';
+import HomeHighlights from './components/HomeHighlights';
 import ProjectGrid from './components/ProjectGrid';
 import CTASection from './components/CTASection';
 import Footer from './components/Footer';
-import CookieConsent from './components/CookieConsent';
+import CookieConsent from './modals/CookieConsent';
 import Features from './pages/Features';
 import Settings from './pages/Settings';
+import AcademicYear from './pages/AcademicYear';
 import Classes from './pages/Classes';
 import Timetable from './pages/Timetable';
 import TermsGate from './pages/TermsGate';
-import TermsModal from './components/TermsModal';
+import PrivacyGate from './pages/PrivacyGate';
+import TermsModal from './modals/TermsModal';
+import PrivacyModal from './modals/PrivacyModal';
 import ScrollToTop from './components/ScrollToTop';
 import {
   completePaidSignupSubscription,
@@ -24,6 +28,7 @@ import {
   signupAccount,
 } from './utils/api';
 import { TimetableLayoutProvider } from './context/TimetableLayoutContext';
+import { AcademicYearProvider } from './context/AcademicYearContext';
 import { shouldOpenSignupAfterCancel, stripQueryFromLocation } from './utils/authUrl';
 import {
   tryCompletePaidCheckoutSignup,
@@ -158,55 +163,64 @@ export default function App() {
 
   return (
     <TimetableLayoutProvider>
-      <div className="page-shell">
-        <ScrollToTop />
-        <Header
-          user={user}
-          isAuthLoading={isAuthLoading}
-          authConfig={authConfig}
-          openSignupAfterCancel={openSignupAfterCancel}
-          onOpenSignupAfterCancelHandled={() => setOpenSignupAfterCancel(false)}
-          onLogin={handleLogin}
-          onLogout={handleLogout}
-          onSignup={handleSignup}
-        />
-        <Routes>
-          <Route
-            path="/"
-            element={
-              <main>
-                <Hero />
-                {user ? (
-                  <section className="section content-section" id="work">
-                    <ProjectGrid />
-                  </section>
-                ) : null}
-                <CTASection />
-              </main>
-            }
+      <AcademicYearProvider>
+        <div className="page-shell">
+          <ScrollToTop />
+          <Header
+            user={user}
+            isAuthLoading={isAuthLoading}
+            authConfig={authConfig}
+            openSignupAfterCancel={openSignupAfterCancel}
+            onOpenSignupAfterCancelHandled={() => setOpenSignupAfterCancel(false)}
+            onLogin={handleLogin}
+            onLogout={handleLogout}
+            onSignup={handleSignup}
           />
-          <Route path="/features" element={<Features user={user} />} />
-          <Route path="/terms" element={<TermsGate />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/classes" element={<Classes />} />
-          <Route
-            path="/timetable"
-            element={
-              user ? (
-                <Timetable />
-              ) : (
+          <Routes>
+            <Route
+              path="/"
+              element={
                 <main>
-                  <Hero />
-                  <CTASection />
+                  <Hero user={user} />
+                  {user ? (
+                    <section className="section content-section" id="work">
+                      <ProjectGrid projectCardProps={{ enableEditing: false, weekMode: 'date' }} />
+                    </section>
+                  ) : (
+                    <HomeHighlights />
+                  )}
+                  <CTASection user={user} />
                 </main>
-              )
-            }
-          />
-        </Routes>
-        <Footer />
-        <TermsModal />
-        <CookieConsent />
-      </div>
+              }
+            />
+            <Route path="/features" element={<Features user={user} />} />
+            <Route path="/terms" element={<TermsGate />} />
+            <Route path="/privacy" element={<PrivacyGate />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/settings/academic-year" element={<AcademicYear />} />
+            <Route path="/classes" element={<Classes />} />
+            <Route path="/classes/input" element={<Classes />} />
+            <Route
+              path="/timetable"
+              element={
+                user ? (
+                  <Timetable />
+                ) : (
+                <main>
+                  <Hero user={null} />
+                  <HomeHighlights />
+                  <CTASection user={null} />
+                </main>
+                )
+              }
+            />
+          </Routes>
+          <Footer user={user} />
+          <TermsModal />
+          <PrivacyModal />
+          <CookieConsent />
+        </div>
+      </AcademicYearProvider>
     </TimetableLayoutProvider>
   );
 }

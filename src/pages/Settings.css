@@ -8,7 +8,7 @@
 }
 
 .settings-inner--wide {
-  max-width: 720px;
+  max-width: 760px;
 }
 
 .settings-breadcrumb {
@@ -33,6 +33,32 @@
   font-size: clamp(1.75rem, 4vw, 2.25rem);
   font-weight: 500;
   letter-spacing: -0.02em;
+}
+
+.classes-subnav {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+
+.classes-subnav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(63, 127, 120, 0.22);
+  background: rgba(255, 255, 255, 0.72);
+  color: #2f645e;
+  text-decoration: none;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.classes-subnav-link.is-active {
+  background: #3f7f78;
+  border-color: #3f7f78;
+  color: #f5f1ea;
 }
 
 .settings-lead {
@@ -77,7 +103,9 @@
 }
 
 .settings-field input[type='number'],
-.settings-field input[type='time'] {
+.settings-field input[type='time'],
+.settings-field input[type='text'],
+.settings-field input[type='date'] {
   max-width: 220px;
   padding: 10px 12px;
   border-radius: 12px;
@@ -97,8 +125,63 @@
 }
 
 .settings-field--inline input[type='time'],
-.settings-field--inline input[type='number'] {
+.settings-field--inline input[type='number'],
+.settings-field--inline input[type='text'],
+.settings-field--inline input[type='date'] {
   max-width: 100%;
+}
+
+.settings-holiday-card {
+  padding: 14px 14px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(63, 127, 120, 0.2);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.settings-holiday-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.settings-holiday-heading {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #244b47;
+}
+
+.settings-holiday-remove {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(63, 127, 120, 0.28);
+  background: rgba(255, 255, 255, 0.75);
+  color: #2f645e;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-holiday-remove:hover {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.settings-holiday-grid {
+  display: grid;
+  gap: 12px;
+}
+
+@media (min-width: 720px) {
+  .settings-holiday-grid {
+    grid-template-columns: 1.4fr 1fr 1fr;
+  }
+}
+
+.settings-actions--stack {
+  margin-top: 4px;
 }
 
 .settings-break-card {

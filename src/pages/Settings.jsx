@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import SettingsSubnav from '../components/SettingsSubnav';
 import { useTimetableLayout } from '../context/TimetableLayoutContext';
 import { DEFAULT_LUNCH, DEFAULT_REGISTRATION, TIMETABLE_CYCLE } from '../utils/timetableLayout';
 import './Settings.css';
@@ -84,6 +85,7 @@ export default function Settings() {
           Settings
         </p>
         <h1 className="settings-title">Settings</h1>
+        <SettingsSubnav />
         <p className="settings-lead">
           Configure the sample timetable: teaching periods, optional registration, breaks, lunch, and week cycle. Rows
           are ordered by start time (lessons use fixed spacing from the school start; registration, breaks, and lunch use
@@ -153,7 +155,7 @@ export default function Settings() {
                 checked={draft.cycle === TIMETABLE_CYCLE.TWO_WEEK}
                 onChange={() => setDraft((d) => ({ ...d, cycle: TIMETABLE_CYCLE.TWO_WEEK }))}
               />
-              Two weeks (Mon–Fri for week 1, then Mon–Fri for week 2)
+              Two weeks (Mon–Fri for week A, then Mon–Fri for week B)
             </label>
           </fieldset>
 

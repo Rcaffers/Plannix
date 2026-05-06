@@ -23,6 +23,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 12px 14px;
   background: #3f7f78;
@@ -44,6 +45,56 @@
 
 .schedule-titlebar span {
   opacity: 0.92;
+}
+
+.schedule-week-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.schedule-week-arrow {
+  border-radius: 999px;
+  border: 1px solid rgba(245, 241, 234, 0.75);
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(245, 241, 234, 0.1);
+  color: #f5f1ea;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.schedule-week-arrow:hover {
+  background: rgba(245, 241, 234, 0.22);
+}
+
+.schedule-week-today {
+  border-radius: 999px;
+  border: 1px solid rgba(245, 241, 234, 0.75);
+  padding: 4px 10px;
+  min-height: 30px;
+  background: rgba(245, 241, 234, 0.1);
+  color: #f5f1ea;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.schedule-week-today:hover {
+  background: rgba(245, 241, 234, 0.22);
+}
+
+.schedule-week-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .schedule-edit-toggle {
@@ -268,6 +319,53 @@
   border-right: 0;
 }
 
+.day-head--holiday {
+  opacity: 0.85;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+.day-col--holiday {
+  background: rgba(245, 245, 245, 0.65);
+}
+
+.slot--holiday {
+  padding: 5px;
+}
+
+.schedule-block-holiday {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 100%;
+  padding: 8px 4px;
+  border-radius: 6px;
+  border: 1px dashed rgba(110, 110, 110, 0.42);
+  background: rgba(235, 235, 235, 0.75);
+  text-align: center;
+}
+
+.schedule-block-holiday-title {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(17, 17, 17, 0.55);
+}
+
+.schedule-block-holiday-name {
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: rgba(17, 17, 17, 0.72);
+  line-height: 1.25;
+  max-width: 100%;
+  word-break: break-word;
+}
+
 .lesson-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -430,6 +528,13 @@
 @media (max-width: 720px) {
   .project-card {
     min-height: 420px;
+  }
+
+  .schedule-week-nav {
+    order: 3;
+    width: 100%;
+    justify-content: center;
+    margin-left: 0;
   }
 
   .schedule-head,

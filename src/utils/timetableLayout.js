@@ -239,8 +239,8 @@ export function buildDayColumnLabels(layout) {
   const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
   if (layout.cycle === TIMETABLE_CYCLE.TWO_WEEK) {
     return [
-      ...weekdays.map((d) => `${d} W1`),
-      ...weekdays.map((d) => `${d} W2`),
+      ...weekdays.map((d) => `${d} A`),
+      ...weekdays.map((d) => `${d} B`),
     ];
   }
   return [...weekdays];
@@ -282,9 +282,14 @@ export function saveTimetableLayoutToStorage(layout) {
 
 const SESSIONS_PREFIX = 'plannix_timetable_sessions_';
 
-export function loadSessionsForLayoutKey(layoutKey) {
+function makeSessionsStorageKey(layoutKey, weekKey = '') {
+  const suffix = weekKey ? `_w_${weekKey}` : '';
+  return `${SESSIONS_PREFIX}${layoutKey}${suffix}`;
+}
+
+export function loadSessionsForLayoutKey(layoutKey, weekKey = '') {
   try {
-    const raw = localStorage.getItem(SESSIONS_PREFIX + layoutKey);
+    const raw = localStorage.getItem(makeSessionsStorageKey(layoutKey, weekKey));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
@@ -294,9 +299,9 @@ export function loadSessionsForLayoutKey(layoutKey) {
   }
 }
 
-export function saveSessionsForLayoutKey(layoutKey, sessions) {
+export function saveSessionsForLayoutKey(layoutKey, sessions, weekKey = '') {
   try {
-    localStorage.setItem(SESSIONS_PREFIX + layoutKey, JSON.stringify(sessions));
+    localStorage.setItem(makeSessionsStorageKey(layoutKey, weekKey), JSON.stringify(sessions));
   } catch {
     /* ignore */
   }

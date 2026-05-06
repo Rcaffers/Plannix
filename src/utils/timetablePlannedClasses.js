@@ -46,13 +46,14 @@ export function computeAvailableClassOptions({
   rowIndex,
   plannedClassById,
   plannedClassByName,
+  currentSession = null,
 }) {
-  const filteredSessions = sessions.filter((s) => !(s.day === dayIndex && s.time === rowIndex));
+  const selectedSession = currentSession ?? findSessionAt(sessions, dayIndex, rowIndex);
+  const filteredSessions = selectedSession ? sessions.filter((s) => s !== selectedSession) : sessions;
   const usedCounts = computeClassUsageCounts(filteredSessions, plannedClassById, plannedClassByName);
-  const currentSession = findSessionAt(sessions, dayIndex, rowIndex);
   const currentClassId =
-    (currentSession?.classId && plannedClassById.get(currentSession.classId)?.id) ||
-    plannedClassByName.get(String(currentSession?.class || '').trim())?.id ||
+    (selectedSession?.classId && plannedClassById.get(selectedSession.classId)?.id) ||
+    plannedClassByName.get(String(selectedSession?.class || '').trim())?.id ||
     '';
 
   return plannedClasses

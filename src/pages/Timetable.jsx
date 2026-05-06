@@ -4,7 +4,7 @@ export default function Timetable() {
   return (
     <main>
       <section className="section content-section" id="work">
-        <ProjectGrid />
+        <ProjectGrid projectCardProps={{ enableEditing: false, weekMode: 'date' }} />
       </section>
     </main>
   );
