@@ -456,6 +456,14 @@ export default function Header({
                     >
                       Settings
                     </Link>
+                    <Link
+                      className="nav-user-dropdown-item"
+                      role="menuitem"
+                      to="/settings/subscription"
+                      onClick={() => setIsUserMenuOpen(false)}
+                    >
+                      Subscription
+                    </Link>
                     <button
                       type="button"
                       className="nav-user-dropdown-item nav-user-dropdown-item-button"

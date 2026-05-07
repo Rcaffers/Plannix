@@ -1,20 +1,9 @@
-const STORAGE_KEY = 'plannix_timetable_edit_mode_v1';
+let isEditingModeCached = true;
 
 export function loadTimetableEditModeFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === 'locked') return false;
-    if (raw === 'editing') return true;
-  } catch {
-    /* ignore */
-  }
-  return true;
+  return Boolean(isEditingModeCached);
 }
 
 export function saveTimetableEditModeToStorage(isEditingClasses) {
-  try {
-    localStorage.setItem(STORAGE_KEY, isEditingClasses ? 'editing' : 'locked');
-  } catch {
-    /* ignore */
-  }
+  isEditingModeCached = Boolean(isEditingClasses);
 }

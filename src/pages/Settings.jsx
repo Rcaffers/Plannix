@@ -87,9 +87,9 @@ export default function Settings() {
         <h1 className="settings-title">Settings</h1>
         <SettingsSubnav />
         <p className="settings-lead">
-          Configure the sample timetable: teaching periods, optional registration, breaks, lunch, and week cycle. Rows
-          are ordered by start time (lessons use fixed spacing from the school start; registration, breaks, and lunch use
-          the times you set).
+          Configure the sample timetable: teaching periods, optional registration, breaks, lunch, and week cycle. Teaching
+          periods are placed in order from the school-day start, skipping over registration, breaks, and lunch at the times
+          you set. All rows are sorted by start time for the grid.
         </p>
 
         <form className="settings-timetable-form" onSubmit={handleSubmit}>
@@ -123,7 +123,10 @@ export default function Settings() {
                 setDraft((d) => ({ ...d, periodLengthMinutes: Number.parseInt(e.target.value, 10) || 60 }))
               }
             />
-            <p className="settings-hint">Lesson periods run back-to-back from the school start time.</p>
+            <p className="settings-hint">
+              Each period has this length. Periods follow one after another from the school-day start, filling the gaps
+              between registration, breaks, and lunch (no overlap with those blocks).
+            </p>
           </div>
 
           <div className="settings-field">
@@ -134,7 +137,10 @@ export default function Settings() {
               value={draft.schoolStartTime}
               onChange={(e) => setDraft((d) => ({ ...d, schoolStartTime: e.target.value }))}
             />
-            <p className="settings-hint">When period 1 begins.</p>
+            <p className="settings-hint">
+              When teaching period 1 would start if nothing blocked it. If registration overlaps this time, period 1 moves
+              to after registration instead.
+            </p>
           </div>
 
           <fieldset className="settings-fieldset">
@@ -214,8 +220,8 @@ export default function Settings() {
               onChange={(e) => setBreakCount(e.target.value)}
             />
             <p className="settings-hint">
-              Up to {BREAKS_MAX} breaks. Rows are ordered by start time together with lessons; for the clearest grid,
-              place breaks between lesson end times (lessons stay evenly spaced from the school start).
+              Up to {BREAKS_MAX} breaks. Set each break’s start time and length; teaching periods automatically continue
+              before and after each break.
             </p>
           </div>
 

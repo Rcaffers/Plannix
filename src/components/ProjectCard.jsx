@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAcademicYear } from '../context/AcademicYearContext';
 import { useTimetableLayout } from '../context/TimetableLayoutContext';
 import { lessonAriaLabel } from '../utils/lessonModal';
-import { loadClassesPlanFromStorage } from '../utils/classesPlanner';
+import { normalizeClassesPlan } from '../utils/classesPlanner';
 import { findSessionAt } from '../utils/timetable';
+import { pushLessonDetailsForwardAlongSameClassAhead } from '../utils/timetablePushClassForward';
 import { countFullHolidayWeeksBeforeMonday, holidayLabelForLocalDate } from '../utils/academicYear';
 import {
   buildDefaultSessions,
-  loadSessionsForLayoutKey,
   makeLayoutKey,
   pruneSessionsToGrid,
-  saveSessionsForLayoutKey,
   TIMETABLE_CYCLE,
 } from '../utils/timetableLayout';
 import { loadTimetableEditModeFromStorage, saveTimetableEditModeToStorage } from '../utils/timetableEditModeStorage';
+import { fetchClassesPlan, fetchTimetableSessions, saveTimetableSessions } from '../utils/api';
 import {
   computeAvailableClassOptions,
   getPlannedClassEntries,
@@ -83,6 +84,21 @@ export default function ProjectCard({
     return formatWeekCommencing(weekStartDate);
   }, [fixedWeekLabel, layout.cycle, repeatingWeekKey, weekMode, weekStartDate]);
 
+  const todayColumnIndex = useMemo(() => {
+    if (weekMode !== 'date') {
+      return -1;
+    }
+    const now = new Date();
+    now.setHours(12, 0, 0, 0);
+    const monday = new Date(weekStartDate);
+    monday.setHours(12, 0, 0, 0);
+    const diffDays = Math.floor((now.getTime() - monday.getTime()) / 86400000);
+    if (diffDays < 0 || diffDays >= dayCount) {
+      return -1;
+    }
+    return diffDays;
+  }, [weekMode, weekStartDate, dayCount]);
+
   const columnHolidayLabels = useMemo(() => {
     if (weekMode !== 'date') {
       return Array.from({ length: dayCount }, () => null);
@@ -96,27 +112,36 @@ export default function ProjectCard({
   }, [weekMode, weekStartDate, academicYear, dayCount]);
 
   const [sessions, setSessions] = useState(() => {
-    const saved = loadSessionsForLayoutKey(layoutKey, activeWeekKey);
-    if (saved && saved.length) {
-      return pruneSessionsToGrid(saved, layout);
-    }
     return buildDefaultSessions(layout);
   });
 
   useEffect(() => {
-    const saved = loadSessionsForLayoutKey(layoutKey, activeWeekKey);
-    if (saved && saved.length) {
-      setSessions(pruneSessionsToGrid(saved, layout));
-      return;
-    }
-    const defaults = buildDefaultSessions(layout);
-    setSessions(defaults);
-    saveSessionsForLayoutKey(layoutKey, defaults, activeWeekKey);
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const loaded = await fetchTimetableSessions({ layoutKey, weekKey: activeWeekKey });
+        if (cancelled) return;
+        if (loaded && loaded.length) {
+          setSessions(pruneSessionsToGrid(loaded, layout));
+          return;
+        }
+        setSessions(buildDefaultSessions(layout));
+      } catch {
+        if (!cancelled) {
+          setSessions(buildDefaultSessions(layout));
+        }
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
   }, [layoutKey, layout, activeWeekKey]);
 
   const [modalSlot, setModalSlot] = useState(null);
   const [classDraft, setClassDraft] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
+  const [notesDraft, setNotesDraft] = useState('');
   const [availableClasses, setAvailableClasses] = useState([]);
   const [classLimitError, setClassLimitError] = useState('');
   const [isEditingClasses, setIsEditingClasses] = useState(() =>
@@ -127,7 +152,49 @@ export default function ProjectCard({
     modalSlot == null ? null : findSessionAt(sessions, modalSlot.day, modalSlot.time) ?? null;
   const modalRowSegment = modalSlot == null ? null : rowSegments[modalSlot.time] ?? null;
   const modalDayLabel = modalSlot == null ? '' : dayLabels[modalSlot.day] ?? '';
-  const classesPlan = useMemo(() => loadClassesPlanFromStorage(), [modalSlot, sessions]);
+
+  const [lessonPushForwardError, setLessonPushForwardError] = useState('');
+
+  useEffect(() => {
+    if (!modalSlot) {
+      return undefined;
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [modalSlot]);
+
+  useEffect(() => {
+    setLessonPushForwardError('');
+  }, [modalSlot]);
+
+  const [classesPlan, setClassesPlan] = useState(() => normalizeClassesPlan({ cadence: 'week', entries: [] }));
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const data = await fetchClassesPlan();
+        if (!cancelled) {
+          setClassesPlan(
+            normalizeClassesPlan({
+              cadence: layout.cycle === TIMETABLE_CYCLE.TWO_WEEK ? 'two-weeks' : 'week',
+              entries: Array.isArray(data?.entries) ? data.entries : [],
+            }),
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setClassesPlan(normalizeClassesPlan({ cadence: 'week', entries: [] }));
+        }
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [layout.cycle]);
   const plannedClasses = useMemo(() => getPlannedClassEntries(classesPlan), [classesPlan]);
   const { byId: plannedClassById, byName: plannedClassByName } = useMemo(
     () => mapsFromPlannedClasses(plannedClasses),
@@ -157,10 +224,10 @@ export default function ProjectCard({
     }
     const emptySessions = [];
     setSessions(emptySessions);
-    saveSessionsForLayoutKey(layoutKey, emptySessions, activeWeekKey);
+    saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: emptySessions }).catch(() => {});
     if (clearsBothWeeks) {
       const otherWeekKey = activeWeekKey === 'cycle-1' ? 'cycle-2' : 'cycle-1';
-      saveSessionsForLayoutKey(layoutKey, emptySessions, otherWeekKey);
+      saveTimetableSessions({ layoutKey, weekKey: otherWeekKey, sessions: emptySessions }).catch(() => {});
     }
     closeLessonModal();
   }
@@ -182,17 +249,6 @@ export default function ProjectCard({
   }
 
   function sessionsForCadenceLimit() {
-    if (layout.cycle === TIMETABLE_CYCLE.TWO_WEEK && weekMode === 'fixed') {
-      const week1Raw =
-        activeWeekKey === 'cycle-1' ? null : loadSessionsForLayoutKey(layoutKey, 'cycle-1');
-      const week2Raw =
-        activeWeekKey === 'cycle-2' ? null : loadSessionsForLayoutKey(layoutKey, 'cycle-2');
-      const week1Sessions =
-        activeWeekKey === 'cycle-1' ? sessions : week1Raw ? pruneSessionsToGrid(week1Raw, layout) : [];
-      const week2Sessions =
-        activeWeekKey === 'cycle-2' ? sessions : week2Raw ? pruneSessionsToGrid(week2Raw, layout) : [];
-      return [...week1Sessions, ...week2Sessions];
-    }
     return sessions;
   }
 
@@ -214,15 +270,21 @@ export default function ProjectCard({
   }
 
   function openLessonModal(dayIndex, rowIndex) {
-    if (!enableEditing) return;
     if (weekMode === 'date' && columnHolidayLabels[dayIndex]) return;
     const seg = rowSegments[rowIndex];
     if (!seg || seg.kind !== 'lesson') return;
     const session = findSessionAt(sessions, dayIndex, rowIndex);
+    if (!enableEditing && !session) {
+      return;
+    }
     if (!isEditingClasses && !session) {
       return;
     }
-    loadClassOptions(dayIndex, rowIndex);
+    if (isEditingClasses) {
+      loadClassOptions(dayIndex, rowIndex);
+    } else {
+      setAvailableClasses([]);
+    }
     setClassLimitError('');
     setModalSlot({ day: dayIndex, time: rowIndex });
     setClassDraft(
@@ -231,12 +293,14 @@ export default function ProjectCard({
         '',
     );
     setTitleDraft(session?.title ?? '');
+    setNotesDraft(session?.notes ?? '');
   }
 
   function closeLessonModal() {
     setModalSlot(null);
     setClassDraft('');
     setTitleDraft('');
+    setNotesDraft('');
     setAvailableClasses([]);
     setClassLimitError('');
   }
@@ -244,9 +308,29 @@ export default function ProjectCard({
   function saveLessonDetails(event) {
     event.preventDefault();
     if (modalSlot == null) return;
-    const selectedClass = classDraft.trim();
-    const selectedTitle = titleDraft.trim();
     const currentSession = findSessionAt(sessions, modalSlot.day, modalSlot.time) ?? null;
+    const selectedTitle = titleDraft.trim();
+    const selectedNotes = notesDraft.trim().slice(0, 4000);
+
+    if (!isEditingClasses) {
+      if (!currentSession) {
+        closeLessonModal();
+        return;
+      }
+      setSessions((prev) => {
+        const next = prev.map((session) =>
+          session.day === modalSlot.day && session.time === modalSlot.time
+            ? { ...session, title: selectedTitle, notes: selectedNotes }
+            : session,
+        );
+        saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: next }).catch(() => {});
+        return next;
+      });
+      closeLessonModal();
+      return;
+    }
+
+    const selectedClass = classDraft.trim();
 
     if (selectedClass) {
       const allowedOptions = buildClassOptions(modalSlot.day, modalSlot.time, currentSession);
@@ -263,7 +347,7 @@ export default function ProjectCard({
       const base = prev.filter((s) => !(s.day === modalSlot.day && s.time === modalSlot.time));
 
       if (!selectedClass) {
-        saveSessionsForLayoutKey(layoutKey, base, activeWeekKey);
+        saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: base }).catch(() => {});
         return base;
       }
 
@@ -275,11 +359,12 @@ export default function ProjectCard({
         class: selectedClassEntry?.name ?? selectedClass,
         teacher: existing?.teacher ?? '',
         title: selectedTitle,
+        notes: selectedNotes,
         meta: modalRowSegment?.rangeLabel ?? '',
       };
 
       const next = [...base, nextSession];
-      saveSessionsForLayoutKey(layoutKey, next, activeWeekKey);
+      saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: next }).catch(() => {});
       return next;
     });
     closeLessonModal();
@@ -288,6 +373,41 @@ export default function ProjectCard({
   const stopLessonModalCloseFromInnerClick = (event) => {
     event.stopPropagation();
   };
+
+  function handlePushLessonsForwardForClass() {
+    if (modalSlot == null || !modalSession) {
+      setLessonPushForwardError('Assign a class on this slot first.');
+      return;
+    }
+    setLessonPushForwardError('');
+    const result = pushLessonDetailsForwardAlongSameClassAhead({
+      sessions,
+      pivotDayIndex: modalSlot.day,
+      pivotTime: modalSlot.time,
+      pivotSessionRef: modalSession,
+      rowSegments,
+      dayCount,
+    });
+    if (!result.ok) {
+      const copy =
+        result.reason === 'PIVOT_NOTHING_TO_SHIFT'
+          ? 'There’s nothing on this card to move (add a title, notes, or teacher first).'
+          : result.reason === 'LAST_DETAIL_WOULD_DROP'
+          ? 'The last matching slot already has title, notes, or teacher — clear those first or extend the chain (add another lesson for this class) so nothing need be dropped.'
+          : result.reason === 'NO_FURTHER_SAME_CLASS_SLOT'
+          ? 'There isn’t a later slot in this timetable where this class is already assigned (next days first, then later periods on the same day).'
+          : result.reason === 'NOT_LESSON_ROW'
+              ? 'This row is not a teaching period.'
+              : result.reason === 'NO_CLASS'
+                ? 'This slot has no class to match against.'
+              : 'Could not shift lesson details forward.';
+      setLessonPushForwardError(copy);
+      return;
+    }
+    setSessions(result.sessions);
+    saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: result.sessions }).catch(() => {});
+    closeLessonModal();
+  }
 
   const scheduleVars = {
     '--timetable-days': dayCount,
@@ -360,14 +480,14 @@ export default function ProjectCard({
               {displayDayLabels.map((day, dayIndex) => (
                 <span
                   key={day}
-                  className={`day-head${columnHolidayLabels[dayIndex] ? ' day-head--holiday' : ''}`}
+                  className={`day-head${columnHolidayLabels[dayIndex] ? ' day-head--holiday' : ''}${todayColumnIndex === dayIndex ? ' day-head--today' : ''}`}
                   title={
                     columnHolidayLabels[dayIndex]
                       ? `Holiday: ${columnHolidayLabels[dayIndex]}`
                       : undefined
                   }
                 >
-                  {day}
+                  <span className="day-head-label">{day}</span>
                 </span>
               ))}
             </div>
@@ -393,7 +513,10 @@ export default function ProjectCard({
               {displayDayLabels.map((day, dayIndex) => {
                 const holidayLabel = columnHolidayLabels[dayIndex];
                 return (
-                <div key={day} className={`day-col${holidayLabel ? ' day-col--holiday' : ''}`}>
+                <div
+                  key={day}
+                  className={`day-col${holidayLabel ? ' day-col--holiday' : ''}${todayColumnIndex === dayIndex ? ' day-col--today' : ''}`}
+                >
                   {rowSegments.map((seg) => {
                     if (holidayLabel) {
                       return (
@@ -411,7 +534,8 @@ export default function ProjectCard({
                     if (seg.kind === 'lesson') {
                       const session = findSessionAt(sessions, dayIndex, seg.rowIndex);
                       const sessionClassName = resolveSessionClass(session);
-                      const trimmedTitle = session ? session.title.trim() : '';
+                      const trimmedTitle = session ? String(session.title ?? '').trim() : '';
+                      const trimmedNotes = session ? String(session.notes ?? '').trim() : '';
                       const teacher = session ? session.teacher?.trim() : '';
                       const ariaLabel =
                         lessonAriaLabel(session ? { ...session, class: sessionClassName } : session) ??
@@ -433,6 +557,9 @@ export default function ProjectCard({
                                   {teacher ? <span>{teacher}</span> : null}
                                   {trimmedTitle ? (
                                     <span className="session-lesson-title">{trimmedTitle}</span>
+                                  ) : null}
+                                  {trimmedNotes ? (
+                                    <span className="session-lesson-notes">{trimmedNotes}</span>
                                   ) : null}
                                 </>
                               ) : (
@@ -467,54 +594,55 @@ export default function ProjectCard({
         </div>
       </div>
 
-      {modalSlot ? (
-        <div className="lesson-modal-backdrop" onClick={closeLessonModal}>
-          <div
-            className="lesson-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="lesson-modal-title"
-            onClick={stopLessonModalCloseFromInnerClick}
-          >
-            <button type="button" className="lesson-modal-close" aria-label="Close" onClick={closeLessonModal}>
-              ×
-            </button>
-            <p className="lesson-modal-kicker">Lesson details</p>
-            <h2 id="lesson-modal-title">Assign class</h2>
-            <p className="lesson-modal-context">
-              <span className="lesson-modal-class">{modalDayLabel}</span>
-              <span className="lesson-modal-meta">{modalRowSegment?.rangeLabel ?? ''}</span>
-              {modalSession ? (
-                <span className="lesson-modal-teacher">{resolveSessionClass(modalSession)}</span>
-              ) : null}
-            </p>
-            <form className="lesson-modal-form" onSubmit={saveLessonDetails}>
-              {isEditingClasses ? (
-                <>
-                  <label htmlFor="lesson-class-input">Class</label>
-                  <select
-                    id="lesson-class-input"
-                    value={classDraft}
-                    onChange={(event) => setClassDraft(event.target.value)}
-                  >
-                    <option value="">No class selected</option>
-                    {availableClasses.map((classOption) => (
-                      <option key={classOption.id} value={classOption.id}>
-                        {classOption.label}{' '}
-                        ({classOption.used}/{classOption.max}
-                        {layout.cycle === TIMETABLE_CYCLE.TWO_WEEK ? ' over 2 weeks' : ' this week'})
-                      </option>
-                    ))}
-                  </select>
-                  {availableClasses.length === 0 ? (
-                    <p className="lesson-modal-note">
-                      No classes found yet. Add classes in <a href="/classes">Classes</a> first.
-                    </p>
+      {modalSlot && typeof document !== 'undefined'
+        ? createPortal(
+            <div className="lesson-modal-backdrop" onClick={closeLessonModal}>
+              <div
+                className="lesson-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="lesson-modal-title"
+                onClick={stopLessonModalCloseFromInnerClick}
+              >
+                <button type="button" className="lesson-modal-close" aria-label="Close" onClick={closeLessonModal}>
+                  ×
+                </button>
+                <p className="lesson-modal-kicker">Lesson details</p>
+                <h2 id="lesson-modal-title">Assign class</h2>
+                <p className="lesson-modal-context">
+                  <span className="lesson-modal-class">{modalDayLabel}</span>
+                  <span className="lesson-modal-meta">{modalRowSegment?.rangeLabel ?? ''}</span>
+                  {modalSession ? (
+                    <span className="lesson-modal-teacher">{resolveSessionClass(modalSession)}</span>
                   ) : null}
-                  {classLimitError ? <p className="lesson-modal-note">{classLimitError}</p> : null}
-                </>
-              ) : (
-                <>
+                </p>
+                <form className="lesson-modal-form" onSubmit={saveLessonDetails}>
+                  {isEditingClasses ? (
+                    <>
+                      <label htmlFor="lesson-class-input">Class</label>
+                      <select
+                        id="lesson-class-input"
+                        value={classDraft}
+                        onChange={(event) => setClassDraft(event.target.value)}
+                      >
+                        <option value="">No class selected</option>
+                        {availableClasses.map((classOption) => (
+                          <option key={classOption.id} value={classOption.id}>
+                            {classOption.label}{' '}
+                            ({classOption.used}/{classOption.max}
+                            {layout.cycle === TIMETABLE_CYCLE.TWO_WEEK ? ' over 2 weeks' : ' this week'})
+                          </option>
+                        ))}
+                      </select>
+                      {availableClasses.length === 0 ? (
+                        <p className="lesson-modal-note">
+                          No classes found yet. Add classes in <a href="/classes">Classes</a> first.
+                        </p>
+                      ) : null}
+                      {classLimitError ? <p className="lesson-modal-note">{classLimitError}</p> : null}
+                    </>
+                  ) : null}
+
                   <label htmlFor="lesson-title-input">Title</label>
                   <input
                     id="lesson-title-input"
@@ -524,20 +652,53 @@ export default function ProjectCard({
                     placeholder="e.g. Introduction to fractions"
                     autoComplete="off"
                   />
-                </>
-              )}
-              <div className="lesson-modal-actions">
-                <button type="button" className="lesson-modal-cancel" onClick={closeLessonModal}>
-                  Cancel
-                </button>
-                <button type="submit" className="lesson-modal-save">
-                  Save
-                </button>
+
+                  <label htmlFor="lesson-notes-input">Notes</label>
+                  <textarea
+                    id="lesson-notes-input"
+                    className="lesson-modal-notes"
+                    rows={4}
+                    value={notesDraft}
+                    onChange={(event) => setNotesDraft(event.target.value)}
+                    placeholder="Room, equipment, reminders for this slot…"
+                    maxLength={4000}
+                  />
+
+                  <div className="lesson-modal-bump-row">
+                    <button
+                      type="button"
+                      className="lesson-modal-bump"
+                      onClick={() => handlePushLessonsForwardForClass()}
+                      disabled={!modalSession}
+                    >
+                      Push lesson details down one step
+                    </button>
+                    <p className="lesson-modal-bump-help">
+                      Title, notes, and teacher move to the next slot that already has this class, scanning forward across
+                      the timetable (later days first, then later periods on the same day). This slot clears. The final
+                      matching slot must be empty so nothing is overwritten without warning.
+                    </p>
+                    {lessonPushForwardError ? (
+                      <p className="lesson-modal-note lesson-modal-note--warn" role="alert">
+                        {lessonPushForwardError}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="lesson-modal-actions">
+                    <button type="button" className="lesson-modal-cancel" onClick={closeLessonModal}>
+                      Cancel
+                    </button>
+                    <button type="submit" className="lesson-modal-save">
+                      Save
+                    </button>
+                  </div>
+                </form>
               </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </article>
   );
 }

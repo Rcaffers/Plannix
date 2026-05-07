@@ -68,6 +68,10 @@
   color: rgba(17, 17, 17, 0.68);
 }
 
+.settings-lead--tight {
+  margin-bottom: 0;
+}
+
 .settings-timetable-form {
   display: grid;
   gap: 22px;
@@ -217,11 +221,77 @@
   margin-top: -8px;
 }
 
+.settings-holiday-import {
+  display: grid;
+  gap: 10px;
+  margin-top: -4px;
+}
+
+.settings-holiday-import-manual {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+}
+
+.settings-holiday-import-manual label {
+  width: 100%;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: rgba(17, 17, 17, 0.82);
+}
+
+.settings-holiday-import-manual input[type='text'] {
+  min-width: 230px;
+  max-width: 340px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(63, 127, 120, 0.26);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+  font: inherit;
+}
+
+.settings-holiday-import-manual input[type='text']:focus-visible {
+  outline: 2px solid rgba(63, 127, 120, 0.56);
+  outline-offset: 1px;
+}
+
 .settings-hint {
   margin: 0;
   font-size: 0.84rem;
   line-height: 1.45;
   color: rgba(17, 17, 17, 0.58);
+}
+
+.settings-hint--error {
+  color: #8f4d46;
+}
+
+.settings-hint--success {
+  color: #276749;
+}
+
+.settings-subscription-card {
+  padding: 14px 14px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(63, 127, 120, 0.2);
+  background: rgba(255, 255, 255, 0.55);
+  display: grid;
+  gap: 6px;
+}
+
+.settings-subscription-plan {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #244b47;
+}
+
+.settings-subscription-meta {
+  margin: 0;
+  font-size: 0.9rem;
+  color: rgba(17, 17, 17, 0.78);
 }
 
 .settings-fieldset {
@@ -306,8 +376,25 @@
   cursor: pointer;
 }
 
+.settings-reset-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .settings-reset:hover {
   background: rgba(255, 255, 255, 0.95);
+}
+
+.settings-reset--danger {
+  border-color: rgba(177, 102, 94, 0.45);
+  color: #8f4d46;
+  background: rgba(177, 102, 94, 0.1);
+}
+
+.settings-reset--danger:hover {
+  background: rgba(177, 102, 94, 0.18);
 }
 
 .settings-saved {

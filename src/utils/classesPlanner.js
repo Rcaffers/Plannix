@@ -1,7 +1,5 @@
 import { TIMETABLE_CYCLE } from './timetableLayout';
 
-const STORAGE_KEY = 'plannix_classes_plan_v1';
-
 export const CLASS_CADENCE = {
   ONE_WEEK: 'week',
   TWO_WEEK: 'two-weeks',
@@ -114,21 +112,3 @@ export function removeClassEntry(plan, index) {
   };
 }
 
-export function loadClassesPlanFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return normalizeClassesPlan(DEFAULT_CLASSES_PLAN);
-    const parsed = JSON.parse(raw);
-    return normalizeClassesPlan(parsed);
-  } catch {
-    return normalizeClassesPlan(DEFAULT_CLASSES_PLAN);
-  }
-}
-
-export function saveClassesPlanToStorage(plan) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeClassesPlan(plan)));
-  } catch {
-    /* ignore */
-  }
-}

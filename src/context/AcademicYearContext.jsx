@@ -1,23 +1,51 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
-  loadAcademicYearFromStorage,
+  DEFAULT_ACADEMIC_YEAR,
   normalizeAcademicYear,
-  saveAcademicYearToStorage,
 } from '../utils/academicYear';
+import { fetchAcademicYearPlan, saveAcademicYearPlan } from '../utils/api';
 
 const AcademicYearContext = createContext(null);
 
-export function AcademicYearProvider({ children }) {
-  const [academicYear, setAcademicYearState] = useState(() => loadAcademicYearFromStorage());
+export function AcademicYearProvider({ children, user }) {
+  const [academicYear, setAcademicYearState] = useState(() => normalizeAcademicYear(DEFAULT_ACADEMIC_YEAR));
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!user) {
+        if (!cancelled) {
+          setAcademicYearState(normalizeAcademicYear(DEFAULT_ACADEMIC_YEAR));
+        }
+        return;
+      }
+      try {
+        const plan = await fetchAcademicYearPlan();
+        if (!cancelled) {
+          setAcademicYearState(normalizeAcademicYear(plan ?? DEFAULT_ACADEMIC_YEAR));
+        }
+      } catch {
+        if (!cancelled) {
+          setAcademicYearState(normalizeAcademicYear(DEFAULT_ACADEMIC_YEAR));
+        }
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   const setAcademicYear = useCallback((next) => {
     setAcademicYearState((prev) => {
       const merged = typeof next === 'function' ? next(prev) : { ...prev, ...next };
       const normalized = normalizeAcademicYear(merged);
-      saveAcademicYearToStorage(normalized);
+      if (user) {
+        saveAcademicYearPlan(normalized).catch(() => {});
+      }
       return normalized;
     });
-  }, []);
+  }, [user]);
 
   const value = useMemo(
     () => ({ academicYear, setAcademicYear }),

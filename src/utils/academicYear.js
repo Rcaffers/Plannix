@@ -1,5 +1,3 @@
-const STORAGE_KEY = 'plannix_academic_year_v1';
-
 export const DEFAULT_ACADEMIC_YEAR = {
   label: '',
   startDate: '',
@@ -52,25 +50,6 @@ export function normalizeAcademicYear(partial) {
     ? base.holidays.map((h) => normalizeHoliday(h))
     : [];
   return { label, startDate, holidays };
-}
-
-export function loadAcademicYearFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return normalizeAcademicYear(DEFAULT_ACADEMIC_YEAR);
-    const parsed = JSON.parse(raw);
-    return normalizeAcademicYear(parsed && typeof parsed === 'object' ? parsed : DEFAULT_ACADEMIC_YEAR);
-  } catch {
-    return normalizeAcademicYear(DEFAULT_ACADEMIC_YEAR);
-  }
-}
-
-export function saveAcademicYearToStorage(plan) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeAcademicYear(plan)));
-  } catch {
-    /* ignore */
-  }
 }
 
 /**

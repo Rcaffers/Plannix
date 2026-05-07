@@ -30,6 +30,22 @@ npm run build
 npm run preview
 ```
 
+## Secrets scanning (Gitleaks)
+
+Install Gitleaks locally (example on macOS with Homebrew):
+
+```bash
+brew install gitleaks
+```
+
+Run a local scan:
+
+```bash
+npm run secrets:check
+```
+
+CI also runs Gitleaks on pushes and pull requests via `.github/workflows/gitleaks.yml`.
+
 ## Main files
 
 - `src/App.jsx`

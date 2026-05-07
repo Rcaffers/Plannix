@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Route, Routes, useNavigate } from 'react-router-dom';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import './App.css';
 import Header from './components/Header';
 import Hero from './components/Hero';
@@ -13,6 +13,8 @@ import Settings from './pages/Settings';
 import AcademicYear from './pages/AcademicYear';
 import Classes from './pages/Classes';
 import Timetable from './pages/Timetable';
+import Subscription from './pages/Subscription';
+import SubscriptionGate from './pages/SubscriptionGate';
 import TermsGate from './pages/TermsGate';
 import PrivacyGate from './pages/PrivacyGate';
 import TermsModal from './modals/TermsModal';
@@ -23,6 +25,7 @@ import {
   completePaidSignupSession,
   fetchAuthConfig,
   fetchAuthMe,
+  fetchSubscriptionSummary,
   loginWithCredentials,
   logoutSession,
   signupAccount,
@@ -44,6 +47,31 @@ export default function App() {
     stripePublishableKey: '',
   });
   const [openSignupAfterCancel, setOpenSignupAfterCancel] = useState(false);
+  const [isSubscriptionCheckLoading, setIsSubscriptionCheckLoading] = useState(false);
+  const [isSubscriptionRequired, setIsSubscriptionRequired] = useState(false);
+  const isDemoUser = String(user?.email || '').toLowerCase() === 'teacher@plannix.test';
+
+  const requiresPaidSubscription = Boolean(authConfig.signupRequiresPayment);
+
+  const checkSubscriptionAccess = async () => {
+    if (!requiresPaidSubscription || isDemoUser) {
+      setIsSubscriptionRequired(false);
+      return true;
+    }
+    setIsSubscriptionCheckLoading(true);
+    try {
+      const summary = await fetchSubscriptionSummary();
+      const status = String(summary?.subscription?.status || '');
+      const hasAccess = status === 'active' || status === 'trialing';
+      setIsSubscriptionRequired(!hasAccess);
+      return hasAccess;
+    } catch {
+      setIsSubscriptionRequired(true);
+      return false;
+    } finally {
+      setIsSubscriptionCheckLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (shouldOpenSignupAfterCancel()) {
@@ -51,6 +79,15 @@ export default function App() {
       stripQueryFromLocation();
     }
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setIsSubscriptionRequired(false);
+      setIsSubscriptionCheckLoading(false);
+      return;
+    }
+    checkSubscriptionAccess();
+  }, [user, requiresPaidSubscription, isDemoUser]);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,7 +178,8 @@ export default function App() {
   const handleLogin = async ({ email, password }) => {
     const loggedInUser = await loginWithCredentials({ email, password });
     setUser(loggedInUser);
-    navigate('/timetable');
+    const hasAccess = await checkSubscriptionAccess();
+    navigate(hasAccess ? '/timetable' : '/subscription-required');
     return loggedInUser;
   };
 
@@ -150,7 +188,27 @@ export default function App() {
       await logoutSession();
     } finally {
       setUser(null);
+      setIsSubscriptionRequired(false);
     }
+  };
+
+  const hasSubscriptionAccess =
+    !requiresPaidSubscription || (!isSubscriptionRequired && !isSubscriptionCheckLoading);
+
+  const privateOrSubscriptionGate = (element) => {
+    if (!user) {
+      return (
+        <main>
+          <Hero user={null} />
+          <HomeHighlights />
+          <CTASection user={null} />
+        </main>
+      );
+    }
+    if (!hasSubscriptionAccess) {
+      return <Navigate to="/subscription-required" replace />;
+    }
+    return element;
   };
 
   const handleSignup = async ({ name, email, password }) => {
@@ -164,8 +222,8 @@ export default function App() {
   };
 
   return (
-    <TimetableLayoutProvider>
-      <AcademicYearProvider>
+    <TimetableLayoutProvider user={user}>
+      <AcademicYearProvider user={user}>
         <div className="page-shell">
           <ScrollToTop />
           <Header
@@ -198,23 +256,41 @@ export default function App() {
             <Route path="/features" element={<Features user={user} />} />
             <Route path="/terms" element={<TermsGate />} />
             <Route path="/privacy" element={<PrivacyGate />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/settings/academic-year" element={<AcademicYear />} />
-            <Route path="/classes" element={<Classes />} />
-            <Route path="/classes/input" element={<Classes />} />
+            <Route path="/settings" element={privateOrSubscriptionGate(<Settings />)} />
             <Route
-              path="/timetable"
+              path="/subscription-required"
               element={
                 user ? (
-                  <Timetable />
+                  <SubscriptionGate />
                 ) : (
-                <main>
-                  <Hero user={null} />
-                  <HomeHighlights />
-                  <CTASection user={null} />
-                </main>
+                  <main>
+                    <Hero user={null} />
+                    <HomeHighlights />
+                    <CTASection user={null} />
+                  </main>
                 )
               }
+            />
+            <Route
+              path="/settings/subscription"
+              element={
+                user ? (
+                  <Subscription />
+                ) : (
+                  <main>
+                    <Hero user={null} />
+                    <HomeHighlights />
+                    <CTASection user={null} />
+                  </main>
+                )
+              }
+            />
+            <Route path="/settings/academic-year" element={privateOrSubscriptionGate(<AcademicYear />)} />
+            <Route path="/classes" element={privateOrSubscriptionGate(<Classes />)} />
+            <Route path="/classes/input" element={privateOrSubscriptionGate(<Classes />)} />
+            <Route
+              path="/timetable"
+              element={privateOrSubscriptionGate(<Timetable />)}
             />
           </Routes>
           <Footer user={user} />

@@ -13,6 +13,18 @@ export default defineConfig({
         target: 'http://localhost:4000',
         changeOrigin: true,
       },
+      '/holidays': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
+      '/billing': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
+      '/api': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
     },
   },
 });

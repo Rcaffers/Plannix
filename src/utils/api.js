@@ -155,3 +155,199 @@ export async function signupAccount({ name, email, password }) {
   const createdUser = payload?.user ?? payload ?? null;
   return { redirecting: false, user: createdUser };
 }
+
+export async function fetchHolidayCountries() {
+  const response = await fetch(`${API_BASE_URL}/holidays/countries`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not load country list.');
+  }
+  return Array.isArray(payload?.countries) ? payload.countries : [];
+}
+
+export async function resolveCountryFromCoordinates({ lat, lng }) {
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lng: String(lng),
+  });
+  const response = await fetch(`${API_BASE_URL}/holidays/resolve-country?${params.toString()}`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not detect your country from location.');
+  }
+  return {
+    countryCode: String(payload?.countryCode || '').toUpperCase(),
+    countryName: String(payload?.countryName || '').trim(),
+  };
+}
+
+export async function fetchPublicHolidays({ countryCode, year }) {
+  const params = new URLSearchParams({
+    country: String(countryCode || '').toUpperCase(),
+    year: String(year),
+  });
+  const response = await fetch(`${API_BASE_URL}/holidays/public?${params.toString()}`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not load public holidays.');
+  }
+  return Array.isArray(payload?.holidays) ? payload.holidays : [];
+}
+
+export async function fetchSubscriptionSummary() {
+  const response = await fetch(`${API_BASE_URL}/billing/subscription-summary`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not load subscription details.');
+  }
+  return {
+    enabled: Boolean(payload?.enabled),
+    subscription: payload?.subscription ?? null,
+  };
+}
+
+export async function createBillingPortalSession({ mode = '', subscriptionId = '' } = {}) {
+  const response = await fetch(`${API_BASE_URL}/billing/portal-session`, {
+    method: 'POST',
+    headers: JSON_POST_HEADERS,
+    credentials: 'include',
+    body: JSON.stringify({ mode, subscriptionId }),
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not open billing portal.');
+  }
+  return {
+    url: String(payload?.url || ''),
+  };
+}
+
+export async function deleteAccount() {
+  const response = await fetch(`${API_BASE_URL}/account`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not delete account.');
+  }
+}
+
+export async function fetchClassesPlan() {
+  const response = await fetch(`${API_BASE_URL}/api/classes`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not load classes.');
+  }
+  return {
+    entries: Array.isArray(payload?.entries) ? payload.entries : [],
+  };
+}
+
+export async function saveClassesPlan(plan) {
+  const response = await fetch(`${API_BASE_URL}/api/classes`, {
+    method: 'PUT',
+    headers: JSON_POST_HEADERS,
+    credentials: 'include',
+    body: JSON.stringify(plan),
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not save classes.');
+  }
+  return payload;
+}
+
+export async function fetchTimetableLayout() {
+  const response = await fetch(`${API_BASE_URL}/api/timetable/layout`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not load timetable layout.');
+  }
+  return payload?.layout ?? null;
+}
+
+export async function saveTimetableLayout(layout) {
+  const response = await fetch(`${API_BASE_URL}/api/timetable/layout`, {
+    method: 'PUT',
+    headers: JSON_POST_HEADERS,
+    credentials: 'include',
+    body: JSON.stringify({ layout }),
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not save timetable layout.');
+  }
+  return payload;
+}
+
+export async function fetchTimetableSessions({ layoutKey, weekKey = '' }) {
+  const params = new URLSearchParams({ layoutKey, weekKey });
+  const response = await fetch(`${API_BASE_URL}/api/timetable/sessions?${params.toString()}`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not load timetable sessions.');
+  }
+  return Array.isArray(payload?.sessions) ? payload.sessions : [];
+}
+
+export async function saveTimetableSessions({ layoutKey, weekKey = '', sessions }) {
+  const response = await fetch(`${API_BASE_URL}/api/timetable/sessions`, {
+    method: 'PUT',
+    headers: JSON_POST_HEADERS,
+    credentials: 'include',
+    body: JSON.stringify({ layoutKey, weekKey, sessions }),
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not save timetable sessions.');
+  }
+  return payload;
+}
+
+export async function fetchAcademicYearPlan() {
+  const response = await fetch(`${API_BASE_URL}/api/academic-year`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not load academic year.');
+  }
+  return payload?.plan ?? null;
+}
+
+export async function saveAcademicYearPlan(plan) {
+  const response = await fetch(`${API_BASE_URL}/api/academic-year`, {
+    method: 'PUT',
+    headers: JSON_POST_HEADERS,
+    credentials: 'include',
+    body: JSON.stringify({ plan }),
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not save academic year.');
+  }
+  return payload;
+}

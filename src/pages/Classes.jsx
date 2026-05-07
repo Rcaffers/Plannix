@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import SettingsSubnav from '../components/SettingsSubnav';
 import ProjectCard from '../components/ProjectCard';
@@ -7,11 +7,11 @@ import { useTimetableLayout } from '../context/TimetableLayoutContext';
 import {
   addClassEntry,
   cadenceFromTimetableCycle,
-  loadClassesPlanFromStorage,
   normalizeClassesPlan,
   removeClassEntry,
-  saveClassesPlanToStorage,
+  DEFAULT_CLASSES_PLAN,
 } from '../utils/classesPlanner';
+import { fetchClassesPlan, saveClassesPlan } from '../utils/api';
 import { TIMETABLE_CYCLE } from '../utils/timetableLayout';
 import './Classes.css';
 
@@ -19,9 +19,36 @@ export default function Classes() {
   const location = useLocation();
   const isInputPage = location.pathname === '/classes/input';
   const { layout } = useTimetableLayout();
-  const [draft, setDraft] = useState(() => loadClassesPlanFromStorage());
+  const [draft, setDraft] = useState(() => normalizeClassesPlan(DEFAULT_CLASSES_PLAN));
   const [savedFlash, setSavedFlash] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [inputWeek, setInputWeek] = useState(1);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const data = await fetchClassesPlan();
+        if (!cancelled) {
+          setDraft((current) =>
+            normalizeClassesPlan({
+              ...current,
+              entries: Array.isArray(data?.entries) ? data.entries : [],
+            }),
+          );
+          setLoadError('');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(error.message || 'Could not load classes from database.');
+        }
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function updateEntry(index, patch) {
     setDraft((current) => {
@@ -38,9 +65,14 @@ export default function Classes() {
       cadence: cadenceFromTimetableCycle(layout.cycle),
     });
     setDraft(normalized);
-    saveClassesPlanToStorage(normalized);
-    setSavedFlash(true);
-    window.setTimeout(() => setSavedFlash(false), 2400);
+    saveClassesPlan(normalized)
+      .then(() => {
+        setSavedFlash(true);
+        window.setTimeout(() => setSavedFlash(false), 2400);
+      })
+      .catch((error) => {
+        setLoadError(error.message || 'Could not save classes to database.');
+      });
   }
 
   function handleClearClasses() {
@@ -78,6 +110,7 @@ export default function Classes() {
             <p className="classes-lead">
               Place classes into timetable slots here. Use Edit classes to change class positions, then save them.
             </p>
+            {loadError ? <p className="classes-hint">{loadError}</p> : null}
             {layout.cycle === TIMETABLE_CYCLE.TWO_WEEK ? (
               <div className="classes-week-switch" role="group" aria-label="Input week A or week B selector">
                 <button

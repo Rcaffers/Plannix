@@ -17,6 +17,9 @@ export default function SettingsSubnav() {
       <NavLink to="/classes/input" className={linkClass}>
         Input classes
       </NavLink>
+      <NavLink to="/settings/subscription" className={linkClass}>
+        Subscription
+      </NavLink>
     </nav>
   );
 }

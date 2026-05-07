@@ -1,5 +1,3 @@
-const STORAGE_KEY = 'plannix_timetable_layout_v1';
-
 export const TIMETABLE_CYCLE = {
   ONE_WEEK: 'one-week',
   TWO_WEEK: 'two-week',
@@ -46,7 +44,7 @@ export function getDayCount(layout) {
 }
 
 export function parseTimeToMinutes(time) {
-  const m = String(time || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  const m = String(time || '').trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
   if (!m) return 9 * 60;
   const h = Math.min(23, Math.max(0, parseInt(m[1], 10)));
   const min = Math.min(59, Math.max(0, parseInt(m[2], 10)));
@@ -74,7 +72,7 @@ function clampInt(n, min, max) {
 }
 
 function normalizeTimeString(value, fallback = DEFAULT_TIMETABLE_LAYOUT.schoolStartTime) {
-  const m = String(value || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  const m = String(value || '').trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
   if (!m) return fallback;
   const h = Math.min(23, Math.max(0, parseInt(m[1], 10)));
   const min = Math.min(59, Math.max(0, parseInt(m[2], 10)));
@@ -119,6 +117,91 @@ function normalizeBreaksList(raw) {
   return arr.slice(0, LIMITS.breaksMax).map((b, i) => normalizeBreakEntry(b, i));
 }
 
+function intervalsOverlap(aStart, aEnd, bStart, bEnd) {
+  return Math.max(aStart, bStart) < Math.min(aEnd, bEnd);
+}
+
+function mergeFixedIntervals(blocks) {
+  if (!blocks.length) return [];
+  const sorted = [...blocks].sort((x, y) => x.startM - y.startM);
+  const out = [{ startM: sorted[0].startM, endM: sorted[0].endM }];
+  for (let i = 1; i < sorted.length; i += 1) {
+    const prev = out[out.length - 1];
+    const cur = sorted[i];
+    if (cur.startM <= prev.endM) {
+      prev.endM = Math.max(prev.endM, cur.endM);
+    } else {
+      out.push({ startM: cur.startM, endM: cur.endM });
+    }
+  }
+  return out;
+}
+
+/** Registration, breaks, and lunch (merged overlaps) — teaching periods are placed in the gaps between these. */
+function collectMergedFixedIntervals(normalized) {
+  const {
+    registration,
+    breaks,
+    lunch,
+    showBreaksInTimetable,
+    showLunchInTimetable,
+  } = normalized;
+  const raw = [];
+
+  const regLen = clampInt(
+    registration.lengthMinutes,
+    LIMITS.registrationLengthMin,
+    LIMITS.registrationLengthMax,
+  );
+  if (registration.enabled && regLen > 0) {
+    const startM = parseTimeToMinutes(registration.startTime);
+    raw.push({ startM, endM: startM + regLen });
+  }
+
+  if (showBreaksInTimetable) {
+    breaks.forEach((b) => {
+      const startM = parseTimeToMinutes(b.startTime);
+      const len = clampInt(b.lengthMinutes, LIMITS.breakLengthMin, LIMITS.breakLengthMax);
+      raw.push({ startM, endM: startM + len });
+    });
+  }
+
+  const lunchLen = clampInt(lunch.lengthMinutes, 0, LIMITS.lunchLengthMax);
+  if (lunchLen > 0 && showLunchInTimetable) {
+    const startM = parseTimeToMinutes(lunch.startTime);
+    raw.push({ startM, endM: startM + lunchLen });
+  }
+
+  return mergeFixedIntervals(raw);
+}
+
+function advancePastFixedBlocks(cursorM, merged) {
+  let t = cursorM;
+  let progress = true;
+  while (progress) {
+    progress = false;
+    for (const b of merged) {
+      if (t >= b.startM && t < b.endM) {
+        t = b.endM;
+        progress = true;
+      }
+    }
+  }
+  return t;
+}
+
+/** Next teaching block of length L from startSearchM, not overlapping fixed blocks. */
+function findNextLessonInterval(startSearchM, L, merged) {
+  let t = advancePastFixedBlocks(startSearchM, merged);
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const endM = t + L;
+    const conflict = merged.find((b) => intervalsOverlap(t, endM, b.startM, b.endM));
+    if (!conflict) return { startM: t, endM };
+    t = advancePastFixedBlocks(conflict.endM, merged);
+  }
+  return { startM: t, endM: t + L };
+}
+
 export function normalizeLayout(partial) {
   const base = { ...DEFAULT_TIMETABLE_LAYOUT, ...partial };
   const cycle =
@@ -154,7 +237,7 @@ export function normalizeLayout(partial) {
 }
 
 /**
- * Ordered rows for the timetable: lessons (fixed spacing from school start) plus breaks and lunch,
+ * Ordered rows: teaching periods (packed between registration, breaks, and lunch), then those fixed rows,
  * sorted by start time. Sessions use `time` as rowIndex into this list (lesson rows only).
  */
 export function buildRowSegments(layout) {
@@ -173,15 +256,18 @@ export function buildRowSegments(layout) {
   const L = periodLengthMinutes;
   const segments = [];
 
+  const fixedMerged = collectMergedFixedIntervals(normalized);
+
+  let cursor = T0;
   for (let i = 0; i < periodsPerDay; i += 1) {
-    const startM = T0 + i * L;
-    const endM = startM + L;
+    const { startM, endM } = findNextLessonInterval(cursor, L, fixedMerged);
     segments.push({
       kind: 'lesson',
       lessonIndex: i,
       startM,
       endM,
     });
+    cursor = endM;
   }
 
   const regLen = clampInt(
@@ -259,52 +345,6 @@ export function makeLayoutKey(layout) {
     sb: n.showBreaksInTimetable,
     sl: n.showLunchInTimetable,
   });
-}
-
-export function loadTimetableLayoutFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return normalizeLayout(DEFAULT_TIMETABLE_LAYOUT);
-    const parsed = JSON.parse(raw);
-    return normalizeLayout(parsed);
-  } catch {
-    return normalizeLayout(DEFAULT_TIMETABLE_LAYOUT);
-  }
-}
-
-export function saveTimetableLayoutToStorage(layout) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeLayout(layout)));
-  } catch {
-    /* ignore */
-  }
-}
-
-const SESSIONS_PREFIX = 'plannix_timetable_sessions_';
-
-function makeSessionsStorageKey(layoutKey, weekKey = '') {
-  const suffix = weekKey ? `_w_${weekKey}` : '';
-  return `${SESSIONS_PREFIX}${layoutKey}${suffix}`;
-}
-
-export function loadSessionsForLayoutKey(layoutKey, weekKey = '') {
-  try {
-    const raw = localStorage.getItem(makeSessionsStorageKey(layoutKey, weekKey));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-export function saveSessionsForLayoutKey(layoutKey, sessions, weekKey = '') {
-  try {
-    localStorage.setItem(makeSessionsStorageKey(layoutKey, weekKey), JSON.stringify(sessions));
-  } catch {
-    /* ignore */
-  }
 }
 
 function lessonRowIndexMap(segments) {

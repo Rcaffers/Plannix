@@ -137,6 +137,7 @@
 .schedule-dynamic {
   --timetable-days: 5;
   --timetable-periods: 5;
+  --today-col-inner-line: rgba(56, 114, 108, 0.38);
 }
 
 .schedule-scroll {
@@ -168,6 +169,14 @@
   text-align: center;
   color: #111111;
   border-right: 1px solid #d8d1c7;
+}
+
+.day-head-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 2px;
 }
 
 .schedule-grid {
@@ -334,6 +343,20 @@
   line-height: 1.2;
 }
 
+.session-lesson-notes {
+  padding-top: 3px;
+  font-weight: 400;
+  font-size: 0.6rem;
+  color: rgba(17, 17, 17, 0.62);
+  line-height: 1.28;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
 .day-col:last-child,
 .day-head:last-child {
   border-right: 0;
@@ -344,6 +367,93 @@
   text-decoration: underline;
   text-decoration-style: dotted;
   text-underline-offset: 3px;
+}
+
+/* Today column (date mode): tinted green darker than neutral cells, lighter than schedule titlebar (#3f7f78). */
+.day-head--today:not(.day-head--holiday) {
+  position: relative;
+  background: #cde4e0;
+  color: #1f3d39;
+  border-left: 1px solid var(--today-col-inner-line);
+  border-right: 1px solid var(--today-col-inner-line);
+}
+
+.day-head--today:not(.day-head--holiday)::after {
+  content: '';
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  bottom: -1px;
+  height: 1px;
+  background: var(--today-col-inner-line);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.day-head:last-child.day-head--today:not(.day-head--holiday)::after {
+  right: 0;
+}
+
+.day-head:last-child.day-head--today:not(.day-head--holiday) {
+  border-right: 1px solid var(--today-col-inner-line);
+}
+
+.day-col--today:not(.day-col--holiday) {
+  background: #cde4e0;
+  border-left: 1px solid var(--today-col-inner-line);
+  border-right: 1px solid var(--today-col-inner-line);
+}
+
+.day-col:last-child.day-col--today:not(.day-col--holiday) {
+  border-right: 1px solid var(--today-col-inner-line);
+}
+
+.day-col--today:not(.day-col--holiday) .slot {
+  border-bottom-color: var(--today-col-inner-line);
+}
+
+.day-col--today:not(.day-col--holiday) .lesson-card:not(.lesson-card--empty) {
+  background: #f5fbf6;
+  border-color: #5c958c;
+  border-width: 1px;
+}
+
+.day-col--today:not(.day-col--holiday) .lesson-card--empty {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: #5c958c;
+}
+
+.day-col--today:not(.day-col--holiday) .lesson-card:hover,
+.day-col--today:not(.day-col--holiday) .lesson-card:focus-visible {
+  border-color: #3f7f78;
+}
+
+.day-col--today:not(.day-col--holiday) .lesson-card:focus-visible {
+  outline-color: #3f7f78;
+}
+
+.day-col--today:not(.day-col--holiday) .schedule-block-muted {
+  background: #f5fcf7;
+  border-color: rgba(92, 149, 140, 0.72);
+  border-style: dashed;
+}
+
+.day-col--today:not(.day-col--holiday) .schedule-block-muted--lunch {
+  background: #fff9f1;
+  border-color: rgba(212, 160, 70, 0.65);
+}
+
+.day-col--today:not(.day-col--holiday) .schedule-block-muted--registration {
+  background: #f5f9fe;
+  border-color: rgba(90, 120, 170, 0.55);
+}
+
+.day-col--today:not(.day-col--holiday) .schedule-block-muted-title {
+  color: #1a3d37;
+}
+
+.day-col--today:not(.day-col--holiday) .schedule-block-muted-range {
+  color: rgba(17, 17, 17, 0.72);
 }
 
 .day-col--holiday {
@@ -389,12 +499,21 @@
 .lesson-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 56;
   display: grid;
   place-items: center;
   padding: 16px;
-  background: rgba(17, 17, 17, 0.44);
-  backdrop-filter: blur(5px);
+  box-sizing: border-box;
+  /* Default: solid scrim (used when prefers-reduced-motion: reduce). */
+  background: rgba(22, 24, 26, 0.52);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lesson-modal-backdrop {
+    background: rgba(22, 24, 26, 0.38);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+  }
 }
 
 .lesson-modal {
@@ -482,6 +601,21 @@
   font-size: 0.9rem;
 }
 
+.lesson-modal-form textarea,
+.lesson-modal-notes {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(63, 127, 120, 0.26);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  resize: vertical;
+  min-height: 88px;
+  font-family: inherit;
+}
+
 .lesson-modal-form select {
   width: 100%;
   padding: 10px 12px;
@@ -492,7 +626,8 @@
   font-size: 0.9rem;
 }
 
-.lesson-modal-form input:focus-visible {
+.lesson-modal-form input:focus-visible,
+.lesson-modal-form textarea:focus-visible {
   outline: 2px solid rgba(63, 127, 120, 0.56);
   outline-offset: 1px;
 }
@@ -511,6 +646,50 @@
 .lesson-modal-note a {
   color: #2f645e;
   font-weight: 600;
+}
+
+.lesson-modal-note--warn {
+  color: rgba(148, 60, 55, 0.95);
+  font-weight: 600;
+}
+
+.lesson-modal-bump-row {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(63, 127, 120, 0.28);
+}
+
+.lesson-modal-bump {
+  justify-self: start;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(63, 127, 120, 0.45);
+  background: rgba(255, 255, 255, 0.75);
+  color: rgba(34, 60, 57, 0.95);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.lesson-modal-bump:hover:not(:disabled) {
+  border-color: #3f7f78;
+  background: rgba(232, 246, 232, 0.55);
+}
+
+.lesson-modal-bump:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
+.lesson-modal-bump-help {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.42;
+  color: rgba(17, 17, 17, 0.62);
 }
 
 .lesson-modal-actions {
