@@ -144,6 +144,27 @@ export default function ProjectCard({
     setIsEditingClasses((current) => !current);
   }
 
+  function handleClearTimetable() {
+    if (!enableEditing || sessions.length === 0) {
+      return;
+    }
+    const clearsBothWeeks = layout.cycle === TIMETABLE_CYCLE.TWO_WEEK && weekMode === 'fixed';
+    const confirmMessage = clearsBothWeeks
+      ? 'Clear all classes from both Week A and Week B timetables?'
+      : 'Clear all classes from this timetable?';
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+    const emptySessions = [];
+    setSessions(emptySessions);
+    saveSessionsForLayoutKey(layoutKey, emptySessions, activeWeekKey);
+    if (clearsBothWeeks) {
+      const otherWeekKey = activeWeekKey === 'cycle-1' ? 'cycle-2' : 'cycle-1';
+      saveSessionsForLayoutKey(layoutKey, emptySessions, otherWeekKey);
+    }
+    closeLessonModal();
+  }
+
   function moveWeek(offset) {
     setWeekStartDate((current) => {
       const next = new Date(current);
@@ -317,13 +338,19 @@ export default function ProjectCard({
             </div>
           )}
           {enableEditing ? (
-            <button
-              type="button"
-              className="schedule-edit-toggle"
-              onClick={toggleEditMode}
-            >
-              {isEditingClasses ? 'Save class positions' : 'Edit classes'}
-            </button>
+            <div className="schedule-titlebar-actions">
+              <button type="button" className="schedule-edit-toggle" onClick={toggleEditMode}>
+                {isEditingClasses ? 'Save class positions' : 'Edit classes'}
+              </button>
+              <button
+                type="button"
+                className="schedule-edit-toggle schedule-edit-toggle--danger"
+                onClick={handleClearTimetable}
+                disabled={sessions.length === 0}
+              >
+                Clear timetable
+              </button>
+            </div>
           ) : null}
         </div>
         <div className="schedule-dynamic" style={scheduleVars}>

@@ -43,6 +43,23 @@ export default function Classes() {
     window.setTimeout(() => setSavedFlash(false), 2400);
   }
 
+  function handleClearClasses() {
+    if (!draft.entries.length) {
+      return;
+    }
+    const confirmed = window.confirm('Clear all classes from this form?');
+    if (!confirmed) {
+      return;
+    }
+    setDraft((current) =>
+      normalizeClassesPlan({
+        ...current,
+        cadence: cadenceFromTimetableCycle(layout.cycle),
+        entries: [],
+      }),
+    );
+  }
+
   return (
     <main className="classes-page">
       <div className="container classes-inner">
@@ -162,6 +179,14 @@ export default function Classes() {
                   disabled={draft.entries.length >= 60}
                 >
                   + Add class
+                </button>
+                <button
+                  type="button"
+                  className="add-row-button add-row-button--danger"
+                  onClick={handleClearClasses}
+                  disabled={draft.entries.length === 0}
+                >
+                  Clear classes
                 </button>
               </div>
 

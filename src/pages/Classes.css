@@ -210,6 +210,20 @@
   margin-top: 8px;
 }
 
+.add-row-button.add-row-button--danger {
+  background: rgba(177, 102, 94, 0.08);
+  border-color: #b1665e;
+  color: #8f4d46;
+  box-shadow: 0 2px 10px rgba(177, 102, 94, 0.16);
+}
+
+.add-row-button.add-row-button--danger:hover:not(:disabled) {
+  background: rgba(177, 102, 94, 0.14);
+  border-color: #9a5750;
+  color: #7d413a;
+  box-shadow: 0 4px 14px rgba(177, 102, 94, 0.2);
+}
+
 .classes-save {
   padding: 10px 20px;
   border-radius: 999px;

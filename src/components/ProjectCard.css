@@ -114,6 +114,26 @@
   background: rgba(245, 241, 234, 0.24);
 }
 
+.schedule-titlebar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.schedule-edit-toggle--danger {
+  border-color: rgba(245, 241, 234, 0.78);
+  background: rgba(177, 102, 94, 0.22);
+}
+
+.schedule-edit-toggle--danger:hover:not(:disabled) {
+  background: rgba(177, 102, 94, 0.34);
+}
+
+.schedule-edit-toggle:disabled {
+  opacity: 0.56;
+  cursor: not-allowed;
+}
+
 .schedule-dynamic {
   --timetable-days: 5;
   --timetable-periods: 5;

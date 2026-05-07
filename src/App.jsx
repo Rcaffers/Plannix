@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes, useNavigate } from 'react-router-dom';
 import './App.css';
 import Header from './components/Header';
 import Hero from './components/Hero';
@@ -36,6 +36,7 @@ import {
 } from './utils/paidSignupCompletion';
 
 export default function App() {
+  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [authConfig, setAuthConfig] = useState({
@@ -140,6 +141,7 @@ export default function App() {
   const handleLogin = async ({ email, password }) => {
     const loggedInUser = await loginWithCredentials({ email, password });
     setUser(loggedInUser);
+    navigate('/timetable');
     return loggedInUser;
   };
 
