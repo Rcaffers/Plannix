@@ -5,7 +5,10 @@ import { useTimetableLayout } from '../context/TimetableLayoutContext';
 import { lessonAriaLabel } from '../utils/lessonModal';
 import { normalizeClassesPlan } from '../utils/classesPlanner';
 import { findSessionAt } from '../utils/timetable';
-import { pushLessonDetailsForwardAlongSameClassAhead } from '../utils/timetablePushClassForward';
+import {
+  pushLessonDetailsForwardAlongSameClassAhead,
+  pushLessonDetailsForwardAcrossWeeks,
+} from '../utils/timetablePushClassForward';
 import { countFullHolidayWeeksBeforeMonday, holidayLabelForLocalDate } from '../utils/academicYear';
 import {
   buildDefaultSessions,
@@ -30,6 +33,22 @@ function startOfWeek(date) {
   const diff = day === 0 ? -6 : 1 - day;
   result.setDate(result.getDate() + diff);
   return result;
+}
+
+function formatDateKeyPart(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function makeDateModeWeekKey(layout, weekStartDate, repeatingWeekKey) {
+  const monday = startOfWeek(weekStartDate);
+  const base = formatDateKeyPart(monday);
+  if (layout.cycle === TIMETABLE_CYCLE.TWO_WEEK) {
+    return `date-${base}-${repeatingWeekKey}`;
+  }
+  return `date-${base}`;
 }
 
 function formatWeekCommencing(date) {
@@ -74,7 +93,11 @@ export default function ProjectCard({
     const adjustedIso = isoWeekNumber + fullHolidayWeeksBefore;
     return adjustedIso % 2 === 0 ? 'cycle-2' : 'cycle-1';
   }, [layout.cycle, isoWeekNumber, weekMode, academicYear, weekStartDate]);
-  const activeWeekKey = weekMode === 'date' ? repeatingWeekKey : fixedWeekKey;
+  const dateModeWeekKey = useMemo(
+    () => (weekMode === 'date' ? makeDateModeWeekKey(layout, weekStartDate, repeatingWeekKey) : ''),
+    [weekMode, layout, weekStartDate, repeatingWeekKey],
+  );
+  const activeWeekKey = weekMode === 'date' ? dateModeWeekKey : fixedWeekKey;
   const weekCommencingLabel = useMemo(() => {
     if (weekMode !== 'date') return fixedWeekLabel;
     if (layout.cycle === TIMETABLE_CYCLE.TWO_WEEK) {
@@ -374,14 +397,79 @@ export default function ProjectCard({
     event.stopPropagation();
   };
 
-  function handlePushLessonsForwardForClass() {
+  async function handlePushLessonsForwardForClass() {
     if (modalSlot == null || !modalSession) {
       setLessonPushForwardError('Assign a class on this slot first.');
       return;
     }
     setLessonPushForwardError('');
-    const result = pushLessonDetailsForwardAlongSameClassAhead({
-      sessions,
+
+    if (weekMode !== 'date') {
+      const result = pushLessonDetailsForwardAlongSameClassAhead({
+        sessions,
+        pivotDayIndex: modalSlot.day,
+        pivotTime: modalSlot.time,
+        pivotSessionRef: modalSession,
+        rowSegments,
+        dayCount,
+      });
+      if (!result.ok) {
+        const copy =
+          result.reason === 'PIVOT_NOTHING_TO_SHIFT'
+            ? 'There’s nothing on this card to move (add a title, notes, or teacher first).'
+            : result.reason === 'LAST_DETAIL_WOULD_DROP'
+              ? 'The last matching slot already has title, notes, or teacher — clear those first or extend the chain (add another lesson for this class) so nothing need be dropped.'
+              : result.reason === 'NO_FURTHER_SAME_CLASS_SLOT'
+                ? 'There isn’t a later slot in this timetable where this class is already assigned (next days first, then later periods on the same day).'
+                : result.reason === 'NOT_LESSON_ROW'
+                    ? 'This row is not a teaching period.'
+                    : result.reason === 'NO_CLASS'
+                      ? 'This slot has no class to match against.'
+                      : 'Could not shift lesson details forward.';
+        setLessonPushForwardError(copy);
+        return;
+      }
+      setSessions(result.sessions);
+      saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: result.sessions }).catch(
+        () => {},
+      );
+      closeLessonModal();
+      return;
+    }
+
+    const weeksAheadToScan = 12;
+    const orderedWeekKeys = [];
+    const byWeekKey = {};
+
+    for (let offset = 0; offset < weeksAheadToScan; offset += 1) {
+      const d = new Date(weekStartDate);
+      d.setDate(d.getDate() + offset * 7);
+      const wkKey =
+        offset === 0
+          ? activeWeekKey
+          : makeDateModeWeekKey(layout, d, repeatingWeekKey);
+      if (!orderedWeekKeys.includes(wkKey)) {
+        orderedWeekKeys.push(wkKey);
+      }
+    }
+
+    byWeekKey[activeWeekKey] = sessions;
+
+    for (let i = 0; i < orderedWeekKeys.length; i += 1) {
+      const wkKey = orderedWeekKeys[i];
+      if (wkKey === activeWeekKey) continue;
+      try {
+        const loaded = await fetchTimetableSessions({ layoutKey, weekKey: wkKey });
+        byWeekKey[wkKey] = pruneSessionsToGrid(loaded, layout);
+      } catch {
+        byWeekKey[wkKey] = [];
+      }
+    }
+
+    const result = pushLessonDetailsForwardAcrossWeeks({
+      byWeekKey,
+      orderedWeekKeys,
+      pivotWeekKey: activeWeekKey,
       pivotDayIndex: modalSlot.day,
       pivotTime: modalSlot.time,
       pivotSessionRef: modalSession,
@@ -393,19 +481,23 @@ export default function ProjectCard({
         result.reason === 'PIVOT_NOTHING_TO_SHIFT'
           ? 'There’s nothing on this card to move (add a title, notes, or teacher first).'
           : result.reason === 'LAST_DETAIL_WOULD_DROP'
-          ? 'The last matching slot already has title, notes, or teacher — clear those first or extend the chain (add another lesson for this class) so nothing need be dropped.'
-          : result.reason === 'NO_FURTHER_SAME_CLASS_SLOT'
-          ? 'There isn’t a later slot in this timetable where this class is already assigned (next days first, then later periods on the same day).'
-          : result.reason === 'NOT_LESSON_ROW'
-              ? 'This row is not a teaching period.'
-              : result.reason === 'NO_CLASS'
-                ? 'This slot has no class to match against.'
-              : 'Could not shift lesson details forward.';
+            ? 'The last matching slot already has title, notes, or teacher — clear those first or extend the chain (add another lesson for this class) so nothing need be dropped.'
+            : result.reason === 'NO_FURTHER_SAME_CLASS_SLOT'
+              ? 'There isn’t a later slot in any of the upcoming weeks where this class is already assigned.'
+              : result.reason === 'NOT_LESSON_ROW'
+                  ? 'This row is not a teaching period.'
+                  : result.reason === 'NO_CLASS'
+                    ? 'This slot has no class to match against.'
+                    : 'Could not shift lesson details forward.';
       setLessonPushForwardError(copy);
       return;
     }
-    setSessions(result.sessions);
-    saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: result.sessions }).catch(() => {});
+
+    Object.entries(result.byWeekKey).forEach(([wkKey, wkSessions]) => {
+      saveTimetableSessions({ layoutKey, weekKey: wkKey, sessions: wkSessions }).catch(() => {});
+    });
+    const currentWeekSessions = result.byWeekKey[activeWeekKey] || [];
+    setSessions(currentWeekSessions);
     closeLessonModal();
   }
 

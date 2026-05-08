@@ -126,3 +126,108 @@ export function pushLessonDetailsForwardAlongSameClassAhead({
 
   return { ok: true, sessions: next };
 }
+
+/**
+ * Multi-week variant that cascades lesson details across a sequence of weeks.
+ *
+ * `byWeekKey` is an object mapping weekKey -> sessions[] for that week. `orderedWeekKeys` must list
+ * those keys in the real calendar order you want to scan through (earliest first). The pivot week
+ * key identifies which week's slot the user clicked.
+ */
+export function pushLessonDetailsForwardAcrossWeeks({
+  byWeekKey,
+  orderedWeekKeys,
+  pivotWeekKey,
+  pivotDayIndex,
+  pivotTime,
+  pivotSessionRef,
+  rowSegments,
+  dayCount,
+}) {
+  if (!pivotSessionRef) {
+    return { ok: false, reason: 'NO_CLASS' };
+  }
+
+  const lt = lessonRowsFromSegments(rowSegments);
+  if (lt.indexOf(pivotTime) === -1) {
+    return { ok: false, reason: 'NOT_LESSON_ROW' };
+  }
+
+  const timeline = [];
+  for (let wi = 0; wi < orderedWeekKeys.length; wi += 1) {
+    const weekKey = orderedWeekKeys[wi];
+    for (let d = 0; d < dayCount; d += 1) {
+      for (let li = 0; li < lt.length; li += 1) {
+        timeline.push({ weekKey, day: d, time: lt[li] });
+      }
+    }
+  }
+
+  const pivotPos = timeline.findIndex(
+    (slot) => slot.weekKey === pivotWeekKey && slot.day === pivotDayIndex && slot.time === pivotTime,
+  );
+  if (pivotPos === -1) {
+    return { ok: false, reason: 'NOT_LESSON_ROW' };
+  }
+
+  const chain = [];
+  for (let p = pivotPos; p < timeline.length; p += 1) {
+    const { weekKey, day, time } = timeline[p];
+    const sessions = byWeekKey[weekKey] || [];
+    const sess = findSessionAt(sessions, day, time);
+    if (sess && sessionsTeachingGroupEqual(pivotSessionRef, sess)) {
+      const ix = sessions.findIndex((s) => s.day === day && s.time === time);
+      if (ix !== -1) {
+        chain.push({ weekKey, day, time, ix });
+      }
+    }
+  }
+
+  if (chain.length < 2) {
+    return { ok: false, reason: 'NO_FURTHER_SAME_CLASS_SLOT' };
+  }
+
+  const payloadsBefore = chain.map(({ weekKey, ix }) =>
+    readLessonPayload((byWeekKey[weekKey] || [])[ix]),
+  );
+
+  if (!lessonPayloadNonempty(payloadsBefore[0])) {
+    return { ok: false, reason: 'PIVOT_NOTHING_TO_SHIFT' };
+  }
+
+  const lastPayload = payloadsBefore[payloadsBefore.length - 1];
+  if (lessonPayloadNonempty(lastPayload)) {
+    return { ok: false, reason: 'LAST_DETAIL_WOULD_DROP' };
+  }
+
+  const nextByWeekKey = {};
+  orderedWeekKeys.forEach((wk) => {
+    const arr = byWeekKey[wk] || [];
+    nextByWeekKey[wk] = arr.map((s) => ({ ...s }));
+  });
+
+  for (let k = chain.length - 1; k >= 1; k -= 1) {
+    const { weekKey, ix: ixDest, time } = chain[k];
+    const incoming = payloadsBefore[k - 1];
+    const nextSessions = nextByWeekKey[weekKey];
+    nextSessions[ixDest] = {
+      ...nextSessions[ixDest],
+      teacher: incoming.teacher,
+      title: incoming.title,
+      notes: incoming.notes,
+      meta: rangeMetaForTime(rowSegments, time),
+    };
+  }
+
+  const { weekKey: pivotWK, ix: ixPivot, time: pivotT } = chain[0];
+  const pivotSessions = nextByWeekKey[pivotWK];
+  pivotSessions[ixPivot] = {
+    ...pivotSessions[ixPivot],
+    teacher: '',
+    title: '',
+    notes: '',
+    meta: rangeMetaForTime(rowSegments, pivotT),
+  };
+
+  return { ok: true, byWeekKey: nextByWeekKey };
+}
