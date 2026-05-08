@@ -215,6 +215,7 @@ export async function fetchSubscriptionSummary() {
   return {
     enabled: Boolean(payload?.enabled),
     subscription: payload?.subscription ?? null,
+    warning: String(payload?.warning || '').trim(),
   };
 }
 

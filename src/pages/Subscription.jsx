@@ -125,6 +125,9 @@ export default function Subscription() {
           {!loading && !error && summary.enabled && !subscription ? (
             <p className="settings-hint">No active subscription was found for this account.</p>
           ) : null}
+          {!loading && !error && summary.warning ? (
+            <p className="settings-hint settings-hint--error">{summary.warning}</p>
+          ) : null}
           {!loading && !error && subscription ? (
             <div className="settings-subscription-card">
               <p className="settings-subscription-plan">

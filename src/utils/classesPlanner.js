@@ -37,7 +37,7 @@ function normalizeEntry(raw, index) {
   return {
     id: String(raw?.id || `class-${index + 1}`),
     name: String(raw?.name ?? fallbackName).trim(),
-    frequency: clampInt(raw?.frequency ?? 0, LIMITS.frequencyMin, LIMITS.frequencyMax),
+    frequency: clampInt(raw?.frequency ?? 1, LIMITS.frequencyMin, LIMITS.frequencyMax),
   };
 }
 
@@ -67,7 +67,7 @@ export function setClassEntryCount(plan, count) {
         {
           id: `class-${entries.length + 1}-${Date.now()}`,
           name: '',
-          frequency: 0,
+          frequency: 1,
         },
         entries.length,
       ),
@@ -94,7 +94,7 @@ export function addClassEntry(plan) {
     return normalized;
   }
   const index = normalized.entries.length;
-  const nextEntry = normalizeEntry({ id: newClassId(), name: '', frequency: 0 }, index);
+  const nextEntry = normalizeEntry({ id: newClassId(), name: '', frequency: 1 }, index);
   return {
     cadence: normalized.cadence,
     entries: [...normalized.entries, nextEntry],

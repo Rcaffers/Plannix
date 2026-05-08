@@ -779,7 +779,13 @@ app.get('/billing/subscription-summary', async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(502).json({ message: error.message || 'Could not load subscription details.' });
+    // Degrade gracefully when Stripe has transient connectivity issues.
+    return res.json({
+      enabled: true,
+      subscription: null,
+      warning:
+        'An error occurred with our connection to Stripe. Please retry in a moment.',
+    });
   }
 });
 

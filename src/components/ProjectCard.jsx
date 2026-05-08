@@ -6,6 +6,8 @@ import { lessonAriaLabel } from '../utils/lessonModal';
 import { normalizeClassesPlan } from '../utils/classesPlanner';
 import { findSessionAt } from '../utils/timetable';
 import {
+  pullLessonDetailsBackwardAlongSameClassAhead,
+  pullLessonDetailsBackwardAcrossWeeks,
   pushLessonDetailsForwardAlongSameClassAhead,
   pushLessonDetailsForwardAcrossWeeks,
 } from '../utils/timetablePushClassForward';
@@ -570,6 +572,149 @@ export default function ProjectCard({
     );
   }
 
+  async function handlePullLessonsBackwardForClass() {
+    if (modalSlot == null || !modalSession) {
+      setLessonPushForwardError('Assign a class on this slot first.');
+      setLessonPushForwardSuccess('');
+      return;
+    }
+    setLessonPushForwardError('');
+    setLessonPushForwardSuccess('');
+
+    if (weekMode !== 'date') {
+      const result = pullLessonDetailsBackwardAlongSameClassAhead({
+        sessions,
+        pivotDayIndex: modalSlot.day,
+        pivotTime: modalSlot.time,
+        pivotSessionRef: modalSession,
+        rowSegments,
+        dayCount,
+      });
+      if (!result.ok) {
+        const copy =
+          result.reason === 'NO_LATER_DETAIL_TO_PULL'
+            ? 'There are no later title or notes entries to pull back.'
+            : result.reason === 'NO_FURTHER_SAME_CLASS_SLOT'
+              ? 'There isn’t a later slot in this timetable where this class is already assigned.'
+              : result.reason === 'NOT_LESSON_ROW'
+                ? 'This row is not a teaching period.'
+                : result.reason === 'NO_CLASS'
+                  ? 'This slot has no class to match against.'
+                  : 'Could not pull lesson details back.';
+        setLessonPushForwardError(copy);
+        setLessonPushForwardSuccess('');
+        return;
+      }
+      setSessions(result.sessions);
+      saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: result.sessions }).catch(
+        () => {},
+      );
+      const updatedPivot = findSessionAt(result.sessions, modalSlot.day, modalSlot.time);
+      setTitleDraft(updatedPivot?.title ?? '');
+      setNotesDraft(updatedPivot?.notes ?? '');
+      setLessonPushForwardSuccess(
+        `Lesson details pulled back from ${result.movedCount === 1 ? '1 later slot' : `${result.movedCount} later slots`}.`,
+      );
+      return;
+    }
+
+    const weeksAheadToScan = 8;
+    const orderedWeekKeys = [];
+    const byWeekKey = {};
+
+    for (let offset = 0; offset < weeksAheadToScan; offset += 1) {
+      const d = new Date(weekStartDate);
+      d.setDate(d.getDate() + offset * 7);
+      const wkRepeat = repeatingWeekKeyForDate(d);
+      const wkKey =
+        offset === 0
+          ? activeWeekKey
+          : makeDateModeWeekKey(layout, d, wkRepeat);
+      if (!orderedWeekKeys.includes(wkKey)) {
+        orderedWeekKeys.push(wkKey);
+      }
+    }
+
+    byWeekKey[activeWeekKey] = sessions;
+
+    const inheritedCache = new Map();
+    const fetchInheritedTemplate = async (weekDate) => {
+      const inheritedWeekKey = repeatingWeekKeyForDate(weekDate);
+      if (!inheritedCache.has(inheritedWeekKey)) {
+        inheritedCache.set(
+          inheritedWeekKey,
+          fetchTimetableSessions({ layoutKey, weekKey: inheritedWeekKey })
+            .then((inherited) => asClassPlacementTemplate(pruneSessionsToGrid(inherited, layout)))
+            .catch(() => []),
+        );
+      }
+      return inheritedCache.get(inheritedWeekKey);
+    };
+
+    const fetchTargets = orderedWeekKeys
+      .map((wkKey, i) => ({ wkKey, i }))
+      .filter(({ wkKey }) => wkKey !== activeWeekKey);
+
+    const fetchedWeeks = await Promise.all(
+      fetchTargets.map(async ({ wkKey, i }) => {
+        try {
+          const loaded = await fetchTimetableSessions({ layoutKey, weekKey: wkKey });
+          if (loaded && loaded.length) {
+            return { wkKey, sessions: pruneSessionsToGrid(loaded, layout) };
+          }
+          const weekDate = new Date(weekStartDate);
+          weekDate.setDate(weekDate.getDate() + i * 7);
+          const inheritedSessions = await fetchInheritedTemplate(weekDate);
+          return { wkKey, sessions: inheritedSessions };
+        } catch {
+          return { wkKey, sessions: [] };
+        }
+      }),
+    );
+
+    fetchedWeeks.forEach(({ wkKey, sessions: wkSessions }) => {
+      byWeekKey[wkKey] = wkSessions;
+    });
+
+    const result = pullLessonDetailsBackwardAcrossWeeks({
+      byWeekKey,
+      orderedWeekKeys,
+      pivotWeekKey: activeWeekKey,
+      pivotDayIndex: modalSlot.day,
+      pivotTime: modalSlot.time,
+      pivotSessionRef: modalSession,
+      rowSegments,
+      dayCount,
+    });
+    if (!result.ok) {
+      const copy =
+        result.reason === 'NO_LATER_DETAIL_TO_PULL'
+          ? 'There are no later title or notes entries in upcoming weeks to pull back.'
+          : result.reason === 'NO_FURTHER_SAME_CLASS_SLOT'
+            ? 'There isn’t a later slot in any upcoming week where this class is already assigned.'
+            : result.reason === 'NOT_LESSON_ROW'
+              ? 'This row is not a teaching period.'
+              : result.reason === 'NO_CLASS'
+                ? 'This slot has no class to match against.'
+                : 'Could not pull lesson details back.';
+      setLessonPushForwardError(copy);
+      setLessonPushForwardSuccess('');
+      return;
+    }
+
+    Object.entries(result.byWeekKey).forEach(([wkKey, wkSessions]) => {
+      saveTimetableSessions({ layoutKey, weekKey: wkKey, sessions: wkSessions }).catch(() => {});
+    });
+    const currentWeekSessions = result.byWeekKey[activeWeekKey] || [];
+    setSessions(currentWeekSessions);
+    const updatedPivot = findSessionAt(currentWeekSessions, modalSlot.day, modalSlot.time);
+    setTitleDraft(updatedPivot?.title ?? '');
+    setNotesDraft(updatedPivot?.notes ?? '');
+    setLessonPushForwardSuccess(
+      `Lesson details pulled back from ${result.movedCount === 1 ? '1 later slot' : `${result.movedCount} later slots`}.`,
+    );
+  }
+
   const scheduleVars = {
     '--timetable-days': dayCount,
     '--timetable-periods': rowSegments.length,
@@ -797,7 +942,8 @@ export default function ProjectCard({
                       </select>
                       {availableClasses.length === 0 ? (
                         <p className="lesson-modal-note">
-                          No classes found yet. Add classes in <a href="/classes">Classes</a> first.
+                          No classes available. Add classes in <a href="/classes">Classes</a> and set each class
+                          frequency to at least 1.
                         </p>
                       ) : null}
                       {classLimitError ? <p className="lesson-modal-note">{classLimitError}</p> : null}
@@ -826,19 +972,26 @@ export default function ProjectCard({
                   />
 
                   <div className="lesson-modal-bump-row">
-                    <button
-                      type="button"
-                      className="lesson-modal-bump"
-                      onClick={() => handlePushLessonsForwardForClass()}
-                      disabled={!modalSession}
-                    >
-                      Push lesson details down one step
-                    </button>
-                    <p className="lesson-modal-bump-help">
-                      Title and notes move to the next slot that already has this class, scanning forward across the
-                      timetable (later days first, then later periods on the same day). This slot clears title/notes only.
-                      The final matching slot must be empty so nothing is overwritten without warning.
-                    </p>
+                    <div className="lesson-modal-bump-actions">
+                      <button
+                        type="button"
+                        className="lesson-modal-bump lesson-modal-bump--danger"
+                        onClick={() => handlePullLessonsBackwardForClass()}
+                        disabled={!modalSession}
+                        aria-label="Pull lesson details left one step"
+                      >
+                        ×
+                      </button>
+                      <button
+                        type="button"
+                        className="lesson-modal-bump"
+                        onClick={() => handlePushLessonsForwardForClass()}
+                        disabled={!modalSession}
+                        aria-label="Push lesson details right one step"
+                      >
+                        →
+                      </button>
+                    </div>
                     {lessonPushForwardError ? (
                       <p className="lesson-modal-note lesson-modal-note--warn" role="alert">
                         {lessonPushForwardError}

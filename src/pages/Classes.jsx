@@ -207,7 +207,7 @@ export default function Classes() {
                       <input
                         id={`class-frequency-${index}`}
                         type="number"
-                        min={0}
+                        min={1}
                         max={50}
                         value={entry.frequency}
                         onChange={(event) => updateEntry(index, { frequency: event.target.value })}
