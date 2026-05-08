@@ -6,7 +6,6 @@ description = "Ignore generated build output and lockfiles"
 paths = [
   '''^dist/''',
   '''package-lock\.json$''',
-  '''^\.env(\..*)?$''',
 ]
 regexes = [
   '''plannix_academic_year_v1''',

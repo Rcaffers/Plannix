@@ -326,6 +326,19 @@ export async function saveTimetableSessions({ layoutKey, weekKey = '', sessions 
   return payload;
 }
 
+export async function clearTimetableSessionsForLayout({ layoutKey }) {
+  const params = new URLSearchParams({ layoutKey });
+  const response = await fetch(`${API_BASE_URL}/api/timetable/sessions?${params.toString()}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not clear timetable sessions.');
+  }
+  return payload;
+}
+
 export async function fetchAcademicYearPlan() {
   const response = await fetch(`${API_BASE_URL}/api/academic-year`, {
     method: 'GET',

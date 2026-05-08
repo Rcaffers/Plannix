@@ -7,7 +7,8 @@
     "dev": "vite",
     "server": "node server/auth-server.js",
     "server:migrate": "node server/migrate.js",
-    "secrets:check": "gitleaks detect --source . --config .gitleaks.toml --redact --verbose",
+    "secrets:check": "gitleaks detect --source . --config .gitleaks.toml --baseline-path .gitleaks-baseline.json --redact --verbose",
+    "prepare": "simple-git-hooks",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -28,6 +29,10 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.0.1",
+    "simple-git-hooks": "^2.13.1",
     "vite": "^8.0.9"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "npm run secrets:check"
   }
 }

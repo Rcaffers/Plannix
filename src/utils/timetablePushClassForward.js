@@ -21,14 +21,13 @@ function rangeMetaForTime(rowSegments, time) {
 
 function readLessonPayload(session) {
   return {
-    teacher: String(session?.teacher ?? '').trim(),
     title: String(session?.title ?? '').trim(),
     notes: String(session?.notes ?? '').trim(),
   };
 }
 
 function lessonPayloadNonempty(p) {
-  return Boolean(p.teacher || p.title || p.notes);
+  return Boolean(p.title || p.notes);
 }
 
 /** Every lesson cell in timetable column order then period order within the day. */
@@ -44,7 +43,7 @@ function buildLessonSlotTimeline(dayCount, rowSegments) {
 }
 
 /**
- * Shifts lesson details only (`title`, `notes`, `teacher`) one step along upcoming slots where this
+ * Shifts lesson details only (`title`, `notes`) one step along upcoming slots where this
  * class is already taught: same timetable column order as the grid (later days come after earlier),
  * then later periods within a day — not limited to staying on Monday if the next Maths is Tuesday.
  *
@@ -90,41 +89,42 @@ export function pushLessonDetailsForwardAlongSameClassAhead({
     return { ok: false, reason: 'NO_FURTHER_SAME_CLASS_SLOT' };
   }
 
-  const payloadsBefore = chain.map(({ ix }) => readLessonPayload(sessions[ix]));
+  const payloadsBeforeAll = chain.map(({ ix }) => readLessonPayload(sessions[ix]));
 
-  if (!lessonPayloadNonempty(payloadsBefore[0])) {
+  if (!lessonPayloadNonempty(payloadsBeforeAll[0])) {
     return { ok: false, reason: 'PIVOT_NOTHING_TO_SHIFT' };
   }
 
-  const lastPayload = payloadsBefore[payloadsBefore.length - 1];
-  if (lessonPayloadNonempty(lastPayload)) {
+  // Cascade to the first blank matching slot so later filled slots do not block.
+  const firstBlankIndex = payloadsBeforeAll.findIndex((p, idx) => idx > 0 && !lessonPayloadNonempty(p));
+  if (firstBlankIndex === -1) {
     return { ok: false, reason: 'LAST_DETAIL_WOULD_DROP' };
   }
+  const chainUsed = chain.slice(0, firstBlankIndex + 1);
+  const payloadsBefore = payloadsBeforeAll.slice(0, firstBlankIndex + 1);
 
   const next = sessions.map((s) => ({ ...s }));
 
-  for (let k = chain.length - 1; k >= 1; k -= 1) {
-    const { ix: ixDest, time } = chain[k];
+  for (let k = chainUsed.length - 1; k >= 1; k -= 1) {
+    const { ix: ixDest, time } = chainUsed[k];
     const incoming = payloadsBefore[k - 1];
     next[ixDest] = {
       ...next[ixDest],
-      teacher: incoming.teacher,
       title: incoming.title,
       notes: incoming.notes,
       meta: rangeMetaForTime(rowSegments, time),
     };
   }
 
-  const { ix: ixPivot, time: pivotT } = chain[0];
+  const { ix: ixPivot, time: pivotT } = chainUsed[0];
   next[ixPivot] = {
     ...next[ixPivot],
-    teacher: '',
     title: '',
     notes: '',
     meta: rangeMetaForTime(rowSegments, pivotT),
   };
 
-  return { ok: true, sessions: next };
+  return { ok: true, sessions: next, movedCount: Math.max(0, chainUsed.length - 1) };
 }
 
 /**
@@ -187,18 +187,21 @@ export function pushLessonDetailsForwardAcrossWeeks({
     return { ok: false, reason: 'NO_FURTHER_SAME_CLASS_SLOT' };
   }
 
-  const payloadsBefore = chain.map(({ weekKey, ix }) =>
+  const payloadsBeforeAll = chain.map(({ weekKey, ix }) =>
     readLessonPayload((byWeekKey[weekKey] || [])[ix]),
   );
 
-  if (!lessonPayloadNonempty(payloadsBefore[0])) {
+  if (!lessonPayloadNonempty(payloadsBeforeAll[0])) {
     return { ok: false, reason: 'PIVOT_NOTHING_TO_SHIFT' };
   }
 
-  const lastPayload = payloadsBefore[payloadsBefore.length - 1];
-  if (lessonPayloadNonempty(lastPayload)) {
+  // Cascade to the first blank matching slot so later filled slots do not block.
+  const firstBlankIndex = payloadsBeforeAll.findIndex((p, idx) => idx > 0 && !lessonPayloadNonempty(p));
+  if (firstBlankIndex === -1) {
     return { ok: false, reason: 'LAST_DETAIL_WOULD_DROP' };
   }
+  const chainUsed = chain.slice(0, firstBlankIndex + 1);
+  const payloadsBefore = payloadsBeforeAll.slice(0, firstBlankIndex + 1);
 
   const nextByWeekKey = {};
   orderedWeekKeys.forEach((wk) => {
@@ -206,28 +209,26 @@ export function pushLessonDetailsForwardAcrossWeeks({
     nextByWeekKey[wk] = arr.map((s) => ({ ...s }));
   });
 
-  for (let k = chain.length - 1; k >= 1; k -= 1) {
-    const { weekKey, ix: ixDest, time } = chain[k];
+  for (let k = chainUsed.length - 1; k >= 1; k -= 1) {
+    const { weekKey, ix: ixDest, time } = chainUsed[k];
     const incoming = payloadsBefore[k - 1];
     const nextSessions = nextByWeekKey[weekKey];
     nextSessions[ixDest] = {
       ...nextSessions[ixDest],
-      teacher: incoming.teacher,
       title: incoming.title,
       notes: incoming.notes,
       meta: rangeMetaForTime(rowSegments, time),
     };
   }
 
-  const { weekKey: pivotWK, ix: ixPivot, time: pivotT } = chain[0];
+  const { weekKey: pivotWK, ix: ixPivot, time: pivotT } = chainUsed[0];
   const pivotSessions = nextByWeekKey[pivotWK];
   pivotSessions[ixPivot] = {
     ...pivotSessions[ixPivot],
-    teacher: '',
     title: '',
     notes: '',
     meta: rangeMetaForTime(rowSegments, pivotT),
   };
 
-  return { ok: true, byWeekKey: nextByWeekKey };
+  return { ok: true, byWeekKey: nextByWeekKey, movedCount: Math.max(0, chainUsed.length - 1) };
 }

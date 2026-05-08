@@ -11,8 +11,8 @@ import {
   removeClassEntry,
   DEFAULT_CLASSES_PLAN,
 } from '../utils/classesPlanner';
-import { fetchClassesPlan, saveClassesPlan } from '../utils/api';
-import { TIMETABLE_CYCLE } from '../utils/timetableLayout';
+import { clearTimetableSessionsForLayout, fetchClassesPlan, saveClassesPlan } from '../utils/api';
+import { makeLayoutKey, TIMETABLE_CYCLE } from '../utils/timetableLayout';
 import './Classes.css';
 
 export default function Classes() {
@@ -75,21 +75,34 @@ export default function Classes() {
       });
   }
 
-  function handleClearClasses() {
+  async function handleClearClasses() {
     if (!draft.entries.length) {
       return;
     }
-    const confirmed = window.confirm('Clear all classes from this form?');
+    const confirmed = window.confirm(
+      'Clear all classes and remove class placements from the timetable for this layout?',
+    );
     if (!confirmed) {
       return;
     }
-    setDraft((current) =>
-      normalizeClassesPlan({
-        ...current,
-        cadence: cadenceFromTimetableCycle(layout.cycle),
-        entries: [],
-      }),
-    );
+    const emptyPlan = normalizeClassesPlan({
+      ...draft,
+      cadence: cadenceFromTimetableCycle(layout.cycle),
+      entries: [],
+    });
+    const layoutKey = makeLayoutKey(layout);
+    try {
+      await Promise.all([
+        saveClassesPlan(emptyPlan),
+        clearTimetableSessionsForLayout({ layoutKey }),
+      ]);
+      setDraft(emptyPlan);
+      setSavedFlash(true);
+      setLoadError('');
+      window.setTimeout(() => setSavedFlash(false), 2400);
+    } catch (error) {
+      setLoadError(error.message || 'Could not clear classes and timetable.');
+    }
   }
 
   return (

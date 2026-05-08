@@ -162,32 +162,38 @@ function assertAwaitingSignupSubscription(subscription) {
 async function dbGetUserByEmail(email) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return null;
-  const result = await db.query(
-    `SELECT id, name, email, password_hash AS "passwordHash"
-     FROM plannix_users
-     WHERE LOWER(email) = $1
-     LIMIT 1`,
-    [normalized],
+  const result = await withAuthDbSession((client) =>
+    client.query(
+      `SELECT id, name, email, password_hash AS "passwordHash"
+       FROM plannix_users
+       WHERE LOWER(email) = $1
+       LIMIT 1`,
+      [normalized],
+    ),
   );
   return result.rows[0] || null;
 }
 
 async function dbGetUserById(id) {
-  const result = await db.query(
-    `SELECT id, name, email, password_hash AS "passwordHash"
-     FROM plannix_users
-     WHERE id = $1
-     LIMIT 1`,
-    [id],
+  const result = await withAuthDbSession((client) =>
+    client.query(
+      `SELECT id, name, email, password_hash AS "passwordHash"
+       FROM plannix_users
+       WHERE id = $1
+       LIMIT 1`,
+      [id],
+    ),
   );
   return result.rows[0] || null;
 }
 
 async function dbCreateUser({ id, name, email, passwordHash }) {
-  await db.query(
-    `INSERT INTO plannix_users (id, name, email, password_hash, updated_at)
-     VALUES ($1, $2, $3, $4, NOW())`,
-    [id, name, email, passwordHash],
+  await withAuthDbSession((client) =>
+    client.query(
+      `INSERT INTO plannix_users (id, name, email, password_hash, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [id, name, email, passwordHash],
+    ),
   );
   return { id, name, email, passwordHash };
 }
@@ -206,11 +212,13 @@ async function ensureDemoUser() {
 }
 
 async function createSessionForUser(userId) {
-  const result = await db.query(
-    `INSERT INTO plannix_sessions (user_id, expires_at)
-     VALUES ($1, NOW() + INTERVAL '24 hours')
-     RETURNING id`,
-    [userId],
+  const result = await withAuthDbSession((client) =>
+    client.query(
+      `INSERT INTO plannix_sessions (user_id, expires_at)
+       VALUES ($1, NOW() + INTERVAL '24 hours')
+       RETURNING id`,
+      [userId],
+    ),
   );
   return result.rows[0]?.id;
 }
@@ -220,26 +228,46 @@ async function getSessionUser(req) {
   if (!sessionId) {
     return null;
   }
-  const result = await db.query(
-    `SELECT u.id, u.name, u.email, u.password_hash AS "passwordHash"
-     FROM plannix_sessions s
-     JOIN plannix_users u ON u.id = s.user_id
-     WHERE s.id = $1
-       AND s.expires_at > NOW()
-     LIMIT 1`,
-    [sessionId],
+  const result = await withAuthDbSession((client) =>
+    client.query(
+      `SELECT u.id, u.name, u.email, u.password_hash AS "passwordHash"
+       FROM plannix_sessions s
+       JOIN plannix_users u ON u.id = s.user_id
+       WHERE s.id = $1
+         AND s.expires_at > NOW()
+       LIMIT 1`,
+      [sessionId],
+    ),
   );
   return result.rows[0] || null;
 }
 
 async function deleteSessionById(sessionId) {
   if (!sessionId) return;
-  await db.query('DELETE FROM plannix_sessions WHERE id = $1', [sessionId]);
+  await withAuthDbSession((client) => client.query('DELETE FROM plannix_sessions WHERE id = $1', [sessionId]));
 }
 
 async function removeAllSessionsForUser(userId) {
   if (!userId) return;
-  await db.query('DELETE FROM plannix_sessions WHERE user_id = $1', [userId]);
+  await withAuthDbSession((client) =>
+    client.query('DELETE FROM plannix_sessions WHERE user_id = $1', [userId]),
+  );
+}
+
+async function withAuthDbSession(work) {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT set_config('app.auth_flow', 'true', true)`);
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function fulfillPaidCheckout(checkoutSessionId) {
@@ -703,7 +731,7 @@ app.delete('/account', async (req, res) => {
       await client.query('DELETE FROM plannix_classes WHERE user_id = $1', [user.id]);
       await client.query('DELETE FROM plannix_academic_years WHERE user_id = $1', [user.id]);
     });
-    await db.query('DELETE FROM plannix_users WHERE id = $1', [user.id]);
+    await withAuthDbSession((client) => client.query('DELETE FROM plannix_users WHERE id = $1', [user.id]));
   } catch (error) {
     return res.status(500).json({ message: error.message || 'Could not delete account data.' });
   }
@@ -1134,6 +1162,29 @@ app.put('/api/timetable/sessions', async (req, res) => {
     return res.json({ ok: true });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'Failed to save timetable sessions.' });
+  }
+});
+
+app.delete('/api/timetable/sessions', async (req, res) => {
+  if (!requireDb(res)) {
+    return;
+  }
+  const user = await requireSessionUser(req, res);
+  if (!user) return;
+  const layoutKey = String(req.query.layoutKey || '').trim();
+  if (!layoutKey) {
+    return res.status(400).json({ message: 'layoutKey query parameter is required.' });
+  }
+  try {
+    await withUserDbSession(user.id, (client) =>
+      client.query(
+        'DELETE FROM plannix_timetable_sessions WHERE user_id = $1 AND layout_key = $2',
+        [user.id, layoutKey],
+      ),
+    );
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'Failed to clear timetable sessions.' });
   }
 });
 

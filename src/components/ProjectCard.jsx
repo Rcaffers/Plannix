@@ -51,6 +51,15 @@ function makeDateModeWeekKey(layout, weekStartDate, repeatingWeekKey) {
   return `date-${base}`;
 }
 
+function asClassPlacementTemplate(sessions) {
+  return sessions.map((session) => ({
+    ...session,
+    teacher: '',
+    title: '',
+    notes: '',
+  }));
+}
+
 function formatWeekCommencing(date) {
   return new Intl.DateTimeFormat('en-GB', {
     weekday: 'short',
@@ -98,6 +107,12 @@ export default function ProjectCard({
     [weekMode, layout, weekStartDate, repeatingWeekKey],
   );
   const activeWeekKey = weekMode === 'date' ? dateModeWeekKey : fixedWeekKey;
+  function repeatingWeekKeyForDate(date) {
+    if (layout.cycle !== TIMETABLE_CYCLE.TWO_WEEK) return 'cycle-1';
+    const fullHolidayWeeksBefore = countFullHolidayWeeksBeforeMonday(academicYear, date);
+    const adjustedIso = getIsoWeekNumber(date) + fullHolidayWeeksBefore;
+    return adjustedIso % 2 === 0 ? 'cycle-2' : 'cycle-1';
+  }
   const weekCommencingLabel = useMemo(() => {
     if (weekMode !== 'date') return fixedWeekLabel;
     if (layout.cycle === TIMETABLE_CYCLE.TWO_WEEK) {
@@ -148,6 +163,15 @@ export default function ProjectCard({
           setSessions(pruneSessionsToGrid(loaded, layout));
           return;
         }
+        if (weekMode === 'date') {
+          const inheritedWeekKey = repeatingWeekKeyForDate(weekStartDate);
+          const inherited = await fetchTimetableSessions({ layoutKey, weekKey: inheritedWeekKey });
+          if (cancelled) return;
+          if (inherited && inherited.length) {
+            setSessions(asClassPlacementTemplate(pruneSessionsToGrid(inherited, layout)));
+            return;
+          }
+        }
         setSessions(buildDefaultSessions(layout));
       } catch {
         if (!cancelled) {
@@ -159,7 +183,7 @@ export default function ProjectCard({
     return () => {
       cancelled = true;
     };
-  }, [layoutKey, layout, activeWeekKey]);
+  }, [layoutKey, layout, activeWeekKey, weekMode, weekStartDate, repeatingWeekKey]);
 
   const [modalSlot, setModalSlot] = useState(null);
   const [classDraft, setClassDraft] = useState('');
@@ -177,6 +201,7 @@ export default function ProjectCard({
   const modalDayLabel = modalSlot == null ? '' : dayLabels[modalSlot.day] ?? '';
 
   const [lessonPushForwardError, setLessonPushForwardError] = useState('');
+  const [lessonPushForwardSuccess, setLessonPushForwardSuccess] = useState('');
 
   useEffect(() => {
     if (!modalSlot) {
@@ -191,6 +216,7 @@ export default function ProjectCard({
 
   useEffect(() => {
     setLessonPushForwardError('');
+    setLessonPushForwardSuccess('');
   }, [modalSlot]);
 
   const [classesPlan, setClassesPlan] = useState(() => normalizeClassesPlan({ cadence: 'week', entries: [] }));
@@ -326,6 +352,8 @@ export default function ProjectCard({
     setNotesDraft('');
     setAvailableClasses([]);
     setClassLimitError('');
+    setLessonPushForwardError('');
+    setLessonPushForwardSuccess('');
   }
 
   function saveLessonDetails(event) {
@@ -400,9 +428,11 @@ export default function ProjectCard({
   async function handlePushLessonsForwardForClass() {
     if (modalSlot == null || !modalSession) {
       setLessonPushForwardError('Assign a class on this slot first.');
+      setLessonPushForwardSuccess('');
       return;
     }
     setLessonPushForwardError('');
+    setLessonPushForwardSuccess('');
 
     if (weekMode !== 'date') {
       const result = pushLessonDetailsForwardAlongSameClassAhead({
@@ -416,9 +446,9 @@ export default function ProjectCard({
       if (!result.ok) {
         const copy =
           result.reason === 'PIVOT_NOTHING_TO_SHIFT'
-            ? 'There’s nothing on this card to move (add a title, notes, or teacher first).'
+            ? 'There’s nothing on this card to move (add a title or notes first).'
             : result.reason === 'LAST_DETAIL_WOULD_DROP'
-              ? 'The last matching slot already has title, notes, or teacher — clear those first or extend the chain (add another lesson for this class) so nothing need be dropped.'
+              ? 'The last matching slot already has title or notes — clear those first or extend the chain (add another lesson for this class) so nothing need be dropped.'
               : result.reason === 'NO_FURTHER_SAME_CLASS_SLOT'
                 ? 'There isn’t a later slot in this timetable where this class is already assigned (next days first, then later periods on the same day).'
                 : result.reason === 'NOT_LESSON_ROW'
@@ -427,27 +457,33 @@ export default function ProjectCard({
                       ? 'This slot has no class to match against.'
                       : 'Could not shift lesson details forward.';
         setLessonPushForwardError(copy);
+        setLessonPushForwardSuccess('');
         return;
       }
       setSessions(result.sessions);
       saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: result.sessions }).catch(
         () => {},
       );
-      closeLessonModal();
+      setTitleDraft('');
+      setNotesDraft('');
+      setLessonPushForwardSuccess(
+        `Lesson details pushed to ${result.movedCount === 1 ? '1 next slot' : `${result.movedCount} next slots`}.`,
+      );
       return;
     }
 
-    const weeksAheadToScan = 12;
+    const weeksAheadToScan = 8;
     const orderedWeekKeys = [];
     const byWeekKey = {};
 
     for (let offset = 0; offset < weeksAheadToScan; offset += 1) {
       const d = new Date(weekStartDate);
       d.setDate(d.getDate() + offset * 7);
+      const wkRepeat = repeatingWeekKeyForDate(d);
       const wkKey =
         offset === 0
           ? activeWeekKey
-          : makeDateModeWeekKey(layout, d, repeatingWeekKey);
+          : makeDateModeWeekKey(layout, d, wkRepeat);
       if (!orderedWeekKeys.includes(wkKey)) {
         orderedWeekKeys.push(wkKey);
       }
@@ -455,16 +491,44 @@ export default function ProjectCard({
 
     byWeekKey[activeWeekKey] = sessions;
 
-    for (let i = 0; i < orderedWeekKeys.length; i += 1) {
-      const wkKey = orderedWeekKeys[i];
-      if (wkKey === activeWeekKey) continue;
-      try {
-        const loaded = await fetchTimetableSessions({ layoutKey, weekKey: wkKey });
-        byWeekKey[wkKey] = pruneSessionsToGrid(loaded, layout);
-      } catch {
-        byWeekKey[wkKey] = [];
+    const inheritedCache = new Map();
+    const fetchInheritedTemplate = async (weekDate) => {
+      const inheritedWeekKey = repeatingWeekKeyForDate(weekDate);
+      if (!inheritedCache.has(inheritedWeekKey)) {
+        inheritedCache.set(
+          inheritedWeekKey,
+          fetchTimetableSessions({ layoutKey, weekKey: inheritedWeekKey })
+            .then((inherited) => asClassPlacementTemplate(pruneSessionsToGrid(inherited, layout)))
+            .catch(() => []),
+        );
       }
-    }
+      return inheritedCache.get(inheritedWeekKey);
+    };
+
+    const fetchTargets = orderedWeekKeys
+      .map((wkKey, i) => ({ wkKey, i }))
+      .filter(({ wkKey }) => wkKey !== activeWeekKey);
+
+    const fetchedWeeks = await Promise.all(
+      fetchTargets.map(async ({ wkKey, i }) => {
+        try {
+          const loaded = await fetchTimetableSessions({ layoutKey, weekKey: wkKey });
+          if (loaded && loaded.length) {
+            return { wkKey, sessions: pruneSessionsToGrid(loaded, layout) };
+          }
+          const weekDate = new Date(weekStartDate);
+          weekDate.setDate(weekDate.getDate() + i * 7);
+          const inheritedSessions = await fetchInheritedTemplate(weekDate);
+          return { wkKey, sessions: inheritedSessions };
+        } catch {
+          return { wkKey, sessions: [] };
+        }
+      }),
+    );
+
+    fetchedWeeks.forEach(({ wkKey, sessions: wkSessions }) => {
+      byWeekKey[wkKey] = wkSessions;
+    });
 
     const result = pushLessonDetailsForwardAcrossWeeks({
       byWeekKey,
@@ -479,9 +543,9 @@ export default function ProjectCard({
     if (!result.ok) {
       const copy =
         result.reason === 'PIVOT_NOTHING_TO_SHIFT'
-          ? 'There’s nothing on this card to move (add a title, notes, or teacher first).'
+          ? 'There’s nothing on this card to move (add a title or notes first).'
           : result.reason === 'LAST_DETAIL_WOULD_DROP'
-            ? 'The last matching slot already has title, notes, or teacher — clear those first or extend the chain (add another lesson for this class) so nothing need be dropped.'
+            ? 'The last matching slot already has title or notes — clear those first or extend the chain (add another lesson for this class) so nothing need be dropped.'
             : result.reason === 'NO_FURTHER_SAME_CLASS_SLOT'
               ? 'There isn’t a later slot in any of the upcoming weeks where this class is already assigned.'
               : result.reason === 'NOT_LESSON_ROW'
@@ -490,6 +554,7 @@ export default function ProjectCard({
                     ? 'This slot has no class to match against.'
                     : 'Could not shift lesson details forward.';
       setLessonPushForwardError(copy);
+      setLessonPushForwardSuccess('');
       return;
     }
 
@@ -498,7 +563,11 @@ export default function ProjectCard({
     });
     const currentWeekSessions = result.byWeekKey[activeWeekKey] || [];
     setSessions(currentWeekSessions);
-    closeLessonModal();
+    setTitleDraft('');
+    setNotesDraft('');
+    setLessonPushForwardSuccess(
+      `Lesson details pushed to ${result.movedCount === 1 ? '1 next slot' : `${result.movedCount} next slots`}.`,
+    );
   }
 
   const scheduleVars = {
@@ -766,13 +835,18 @@ export default function ProjectCard({
                       Push lesson details down one step
                     </button>
                     <p className="lesson-modal-bump-help">
-                      Title, notes, and teacher move to the next slot that already has this class, scanning forward across
-                      the timetable (later days first, then later periods on the same day). This slot clears. The final
-                      matching slot must be empty so nothing is overwritten without warning.
+                      Title and notes move to the next slot that already has this class, scanning forward across the
+                      timetable (later days first, then later periods on the same day). This slot clears title/notes only.
+                      The final matching slot must be empty so nothing is overwritten without warning.
                     </p>
                     {lessonPushForwardError ? (
                       <p className="lesson-modal-note lesson-modal-note--warn" role="alert">
                         {lessonPushForwardError}
+                      </p>
+                    ) : null}
+                    {lessonPushForwardSuccess ? (
+                      <p className="lesson-modal-note" role="status">
+                        {lessonPushForwardSuccess}
                       </p>
                     ) : null}
                   </div>
