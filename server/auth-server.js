@@ -8,7 +8,7 @@ import Stripe from 'stripe';
 import { createDbPool, mapClassRow, runMigrations } from './db.js';
 
 const app = express();
-const PORT = Number(process.env.AUTH_PORT || 4000);
+const PORT = Number(process.env.PORT || process.env.AUTH_PORT || 4000);
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
 const SESSION_COOKIE = 'plannix_session';
 
@@ -34,6 +34,10 @@ app.use(
   }),
 );
 app.use(cookieParser());
+
+app.get('/', (_req, res) => {
+  res.sendStatus(200);
+});
 
 app.post(
   '/stripe/webhook',

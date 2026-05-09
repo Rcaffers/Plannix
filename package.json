@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start": "node server/auth-server.js",
     "server": "node server/auth-server.js",
     "server:migrate": "node server/migrate.js",
     "secrets:check": "gitleaks detect --source . --config .gitleaks.toml --baseline-path .gitleaks-baseline.json --redact --verbose",
