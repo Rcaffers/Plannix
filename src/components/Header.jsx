@@ -142,7 +142,7 @@ export default function Header({
   const navLinks = user
     ? [
         { label: 'Timetable', to: '/timetable' },
-        { label: 'Contact', href: '#contact' },
+        { label: 'Contact', to: '/contact' },
       ]
     : headerNavLinks;
 

@@ -89,6 +89,11 @@ export default function Footer({ user }) {
             </div>
             <div className="footer-nav-col" id="contact">
               <h3 className="footer-nav-heading">Contact</h3>
+              <ul className="footer-nav-list">
+                <li>
+                  <Link to="/contact">Contact us</Link>
+                </li>
+              </ul>
               <p className="footer-contact-text">
                 Interested in Plannix for your school or department? Compare plans above, or create an account to try the
                 Individual tier.

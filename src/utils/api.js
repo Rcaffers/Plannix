@@ -12,6 +12,20 @@ export async function parseJsonSafe(response) {
   }
 }
 
+export async function submitContactForm({ name, email, message }) {
+  const response = await fetch(`${API_BASE_URL}/api/contact`, {
+    method: 'POST',
+    headers: JSON_POST_HEADERS,
+    credentials: 'include',
+    body: JSON.stringify({ name, email, message }),
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not send your message.');
+  }
+  return payload;
+}
+
 export async function fetchAuthConfig() {
   const response = await fetch(`${API_BASE_URL}/auth/config`, {
     method: 'GET',
