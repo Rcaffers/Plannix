@@ -1,5 +1,8 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -21,6 +24,9 @@ const stripe = stripeSecretKey && stripePriceId ? new Stripe(stripeSecretKey) : 
 const db = createDbPool();
 const pendingSignups = new Map();
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DIST_DIR = path.join(__dirname, '..', 'dist');
+
 const COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: 'lax',
@@ -36,8 +42,8 @@ app.use(
 );
 app.use(cookieParser());
 
-app.get('/', (_req, res) => {
-  res.sendStatus(200);
+app.get('/health', (_req, res) => {
+  res.status(200).end();
 });
 
 app.post(
@@ -1279,6 +1285,22 @@ app.delete('/api/timetable/sessions', async (req, res) => {
     return res.status(500).json({ message: error.message || 'Failed to clear timetable sessions.' });
   }
 });
+
+if (fs.existsSync(DIST_DIR)) {
+  app.use(express.static(DIST_DIR, { index: ['index.html'] }));
+  app.get(/.*/, (req, res, next) => {
+    res.sendFile(path.join(DIST_DIR, 'index.html'), (err) => {
+      if (err) {
+        next(err);
+      }
+    });
+  });
+} else {
+  // eslint-disable-next-line no-console
+  console.warn(
+    `Static UI not found at ${DIST_DIR}. Run "npm run build" before deploy so the app shell is served on /.`,
+  );
+}
 
 async function startServer() {
   if (db && process.env.AUTO_RUN_MIGRATIONS === 'true') {
