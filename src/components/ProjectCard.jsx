@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAcademicYear } from '../context/AcademicYearContext';
 import { useTimetableLayout } from '../context/TimetableLayoutContext';
@@ -27,6 +27,9 @@ import {
   resolveSessionClassDisplay,
 } from '../utils/timetablePlannedClasses';
 import './ProjectCard.css';
+
+/** Phones, small laptops, and tablets through large iPad Pro landscape; plus any coarse-pointer primary device. */
+const COMPACT_TIMETABLE_QUERY = '(max-width: 1366px), (pointer: coarse)';
 
 function startOfWeek(date) {
   const result = new Date(date);
@@ -65,6 +68,15 @@ function asClassPlacementTemplate(sessions) {
 function formatWeekCommencing(date) {
   return new Intl.DateTimeFormat('en-GB', {
     weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
+}
+
+function formatVisibleCalendarDay(date) {
+  return new Intl.DateTimeFormat('en-GB', {
+    weekday: 'long',
     day: 'numeric',
     month: 'short',
     year: 'numeric',
@@ -150,6 +162,57 @@ export default function ProjectCard({
       return holidayLabelForLocalDate(academicYear, d);
     });
   }, [weekMode, weekStartDate, academicYear, dayCount]);
+
+  const [isCompactTimetable, setIsCompactTimetable] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(COMPACT_TIMETABLE_QUERY).matches,
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia(COMPACT_TIMETABLE_QUERY);
+    const onChange = () => setIsCompactTimetable(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  const isSingleDayTimetable = isCompactTimetable && weekMode === 'date';
+  const [compactDayIndex, setCompactDayIndex] = useState(0);
+  const compactDayInitRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (isSingleDayTimetable && !compactDayInitRef.current) {
+      compactDayInitRef.current = true;
+      setCompactDayIndex(todayColumnIndex >= 0 ? todayColumnIndex : 0);
+    }
+    if (!isSingleDayTimetable) {
+      compactDayInitRef.current = false;
+    }
+  }, [isSingleDayTimetable, todayColumnIndex]);
+
+  useEffect(() => {
+    setCompactDayIndex((i) => (i >= dayCount ? Math.max(0, dayCount - 1) : i));
+  }, [dayCount]);
+
+  const visibleCalendarDay = useMemo(() => {
+    if (weekMode !== 'date') {
+      return null;
+    }
+    const d = new Date(weekStartDate);
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() + compactDayIndex);
+    return d;
+  }, [weekMode, weekStartDate, compactDayIndex]);
+
+  const visibleDayTitle =
+    visibleCalendarDay && isSingleDayTimetable ? formatVisibleCalendarDay(visibleCalendarDay) : '';
+
+  const dayIndicesToRender = useMemo(() => {
+    if (isSingleDayTimetable) {
+      return [compactDayIndex];
+    }
+    return displayDayLabels.map((_, i) => i);
+  }, [isSingleDayTimetable, compactDayIndex, displayDayLabels]);
+
+  const gridDayCount = isSingleDayTimetable ? 1 : dayCount;
 
   const [sessions, setSessions] = useState(() => {
     return buildDefaultSessions(layout);
@@ -293,6 +356,33 @@ export default function ProjectCard({
 
   function jumpToCurrentWeek() {
     setWeekStartDate(startOfWeek(new Date()));
+  }
+
+  function moveCompactDay(delta) {
+    if (!isSingleDayTimetable || delta === 0) return;
+    const nextIndex = compactDayIndex + delta;
+    if (nextIndex < 0) {
+      moveWeek(-1);
+      setCompactDayIndex(dayCount - 1);
+      return;
+    }
+    if (nextIndex >= dayCount) {
+      moveWeek(1);
+      setCompactDayIndex(0);
+      return;
+    }
+    setCompactDayIndex(nextIndex);
+  }
+
+  function jumpToToday() {
+    const monday = startOfWeek(new Date());
+    setWeekStartDate(monday);
+    const now = new Date();
+    now.setHours(12, 0, 0, 0);
+    monday.setHours(12, 0, 0, 0);
+    const diffDays = Math.floor((now.getTime() - monday.getTime()) / 86400000);
+    const idx = diffDays >= 0 && diffDays < dayCount ? diffDays : 0;
+    setCompactDayIndex(idx);
   }
 
   function resolveSessionClass(session) {
@@ -716,48 +806,109 @@ export default function ProjectCard({
   }
 
   const scheduleVars = {
-    '--timetable-days': dayCount,
+    '--timetable-days': gridDayCount,
     '--timetable-periods': rowSegments.length,
   };
 
+  const scheduleHeadClass = [
+    'schedule-head',
+    dayLabels.length > 5 && !isSingleDayTimetable ? 'schedule-head--compact' : '',
+    isSingleDayTimetable ? 'schedule-head--single-day' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
     <article
-      className={`project-card${enableEditing && isEditingClasses ? ' project-card--editing' : ''}`}
+      className={`project-card${enableEditing && isEditingClasses ? ' project-card--editing' : ''}${
+        isSingleDayTimetable ? ' project-card--compact-day' : ''
+      }`}
     >
       <div className="schedule-card">
-        <div className="schedule-titlebar">
+        <div className={`schedule-titlebar${isSingleDayTimetable ? ' schedule-titlebar--stack' : ''}`}>
           <div className="schedule-titlebar-main">
             <strong>{project.title}</strong>
             <span>{project.subtitle}</span>
           </div>
           {weekMode === 'date' ? (
-            <div className="schedule-week-nav" aria-label="Week navigation">
-              <button
-                type="button"
-                className="schedule-week-arrow"
-                onClick={() => moveWeek(-1)}
-                aria-label="Go to previous week"
-              >
-                ←
-              </button>
-              <span className="schedule-week-label">Week commencing {weekCommencingLabel}</span>
-              <button
-                type="button"
-                className="schedule-week-today"
-                onClick={jumpToCurrentWeek}
-                aria-label="Jump to current week"
-              >
-                This week
-              </button>
-              <button
-                type="button"
-                className="schedule-week-arrow"
-                onClick={() => moveWeek(1)}
-                aria-label="Go to next week"
-              >
-                →
-              </button>
-            </div>
+            isSingleDayTimetable ? (
+              <div className="schedule-compact-nav">
+                <div className="schedule-day-nav" aria-label="Day navigation">
+                  <button
+                    type="button"
+                    className="schedule-day-arrow"
+                    onClick={() => moveCompactDay(-1)}
+                    aria-label="Previous day"
+                  >
+                    ←
+                  </button>
+                  <span className="schedule-day-label">{visibleDayTitle}</span>
+                  <button
+                    type="button"
+                    className="schedule-day-arrow"
+                    onClick={() => moveCompactDay(1)}
+                    aria-label="Next day"
+                  >
+                    →
+                  </button>
+                  <button
+                    type="button"
+                    className="schedule-day-today"
+                    onClick={jumpToToday}
+                    aria-label="Jump to today"
+                  >
+                    Today
+                  </button>
+                </div>
+                <div className="schedule-week-nav schedule-week-nav--compact-secondary" aria-label="Week navigation">
+                  <button
+                    type="button"
+                    className="schedule-week-step"
+                    onClick={() => moveWeek(-1)}
+                    aria-label="Previous week"
+                  >
+                    ‹ Week
+                  </button>
+                  <span className="schedule-week-secondary-label">Week commencing {weekCommencingLabel}</span>
+                  <button
+                    type="button"
+                    className="schedule-week-step"
+                    onClick={() => moveWeek(1)}
+                    aria-label="Next week"
+                  >
+                    Week ›
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="schedule-week-nav" aria-label="Week navigation">
+                <button
+                  type="button"
+                  className="schedule-week-arrow"
+                  onClick={() => moveWeek(-1)}
+                  aria-label="Go to previous week"
+                >
+                  ←
+                </button>
+                <span className="schedule-week-label">Week commencing {weekCommencingLabel}</span>
+                <button
+                  type="button"
+                  className="schedule-week-today"
+                  onClick={jumpToCurrentWeek}
+                  aria-label="Jump to current week"
+                >
+                  This week
+                </button>
+                <button
+                  type="button"
+                  className="schedule-week-arrow"
+                  onClick={() => moveWeek(1)}
+                  aria-label="Go to next week"
+                >
+                  →
+                </button>
+              </div>
+            )
           ) : (
             <div className="schedule-week-nav">
               <span className="schedule-week-label">{weekCommencingLabel}</span>
@@ -780,12 +931,14 @@ export default function ProjectCard({
           ) : null}
         </div>
         <div className="schedule-dynamic" style={scheduleVars}>
-          <div className="schedule-scroll">
-            <div className={`schedule-head${dayLabels.length > 5 ? ' schedule-head--compact' : ''}`}>
+          <div className={`schedule-scroll${isSingleDayTimetable ? ' schedule-scroll--single-day' : ''}`}>
+            <div className={scheduleHeadClass}>
               <span className="time-head">Time</span>
-              {displayDayLabels.map((day, dayIndex) => (
+              {dayIndicesToRender.map((dayIndex) => {
+                const day = displayDayLabels[dayIndex];
+                return (
                 <span
-                  key={day}
+                  key={`${day}-${dayIndex}`}
                   className={`day-head${columnHolidayLabels[dayIndex] ? ' day-head--holiday' : ''}${todayColumnIndex === dayIndex ? ' day-head--today' : ''}`}
                   title={
                     columnHolidayLabels[dayIndex]
@@ -795,10 +948,11 @@ export default function ProjectCard({
                 >
                   <span className="day-head-label">{day}</span>
                 </span>
-              ))}
+                );
+              })}
             </div>
 
-            <div className="schedule-grid">
+            <div className={`schedule-grid${isSingleDayTimetable ? ' schedule-grid--single-day' : ''}`}>
               <div className="time-col">
                 {rowSegments.map((seg) => (
                   <span key={seg.rowIndex} className="time-label">
@@ -816,11 +970,12 @@ export default function ProjectCard({
                 ))}
               </div>
 
-              {displayDayLabels.map((day, dayIndex) => {
+              {dayIndicesToRender.map((dayIndex) => {
+                const day = displayDayLabels[dayIndex];
                 const holidayLabel = columnHolidayLabels[dayIndex];
                 return (
                 <div
-                  key={day}
+                  key={`col-${day}-${dayIndex}`}
                   className={`day-col${holidayLabel ? ' day-col--holiday' : ''}${todayColumnIndex === dayIndex ? ' day-col--today' : ''}`}
                 >
                   {rowSegments.map((seg) => {
