@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import {
   getLoginValidationError,
@@ -115,6 +115,7 @@ export default function Header({
   onLogout,
   onSignup,
 }) {
+  const location = useLocation();
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isSignupOpen, setIsSignupOpen] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
@@ -133,7 +134,9 @@ export default function Header({
   const [signupPromotionApplying, setSignupPromotionApplying] = useState(false);
   const [signupPromotionAppliedCode, setSignupPromotionAppliedCode] = useState('');
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const userMenuRef = useRef(null);
+  const mobileNavRef = useRef(null);
   const stripePromise = useMemo(() => {
     if (!authConfig?.stripePublishableKey) return null;
     return loadStripe(authConfig.stripePublishableKey);
@@ -146,8 +149,46 @@ export default function Header({
       ]
     : headerNavLinks;
 
+  const closeMobileNav = () => setIsMobileNavOpen(false);
+
   useEffect(() => {
-    if (!isLoginOpen && !isSignupOpen && !isUserMenuOpen) {
+    setIsMobileNavOpen(false);
+  }, [location.pathname, location.hash]);
+
+  useEffect(() => {
+    if (isLoginOpen || isSignupOpen) {
+      setIsMobileNavOpen(false);
+    }
+  }, [isLoginOpen, isSignupOpen]);
+
+  useEffect(() => {
+    if (!isMobileNavOpen) {
+      return undefined;
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isMobileNavOpen]);
+
+  useEffect(() => {
+    if (!isMobileNavOpen) {
+      return undefined;
+    }
+
+    const onPointerDown = (event) => {
+      if (mobileNavRef.current && !mobileNavRef.current.contains(event.target)) {
+        setIsMobileNavOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [isMobileNavOpen]);
+
+  useEffect(() => {
+    if (!isLoginOpen && !isSignupOpen && !isUserMenuOpen && !isMobileNavOpen) {
       return undefined;
     }
 
@@ -156,12 +197,13 @@ export default function Header({
         setIsLoginOpen(false);
         setIsSignupOpen(false);
         setIsUserMenuOpen(false);
+        setIsMobileNavOpen(false);
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isLoginOpen, isSignupOpen, isUserMenuOpen]);
+  }, [isLoginOpen, isSignupOpen, isUserMenuOpen, isMobileNavOpen]);
 
   useEffect(() => {
     if (!isUserMenuOpen) {
@@ -387,8 +429,8 @@ export default function Header({
 
   return (
     <>
-      <header className="site-header">
-        <div className="container nav-shell">
+      <header className={`site-header${isMobileNavOpen ? ' site-header--mobile-open' : ''}`}>
+        <div className="container nav-shell" ref={mobileNavRef}>
           <div className="nav-left">
             <Link className="brand" to="/" aria-label="Plannix Home">
               <span className="brand-mark">
@@ -396,7 +438,7 @@ export default function Header({
               </span>
             </Link>
 
-            <nav className="main-nav" aria-label="Primary navigation">
+            <nav className="main-nav main-nav--wide" aria-label="Primary navigation">
               {navLinks.map((item) =>
                 item.href ? (
                   <a key={item.label} className="nav-link" href={item.href}>
@@ -416,7 +458,7 @@ export default function Header({
             </nav>
           </div>
 
-          <div className="nav-actions">
+          <div className="nav-actions nav-actions--wide">
             {user ? (
               <div className="nav-user-menu" ref={userMenuRef}>
                 <button
@@ -498,6 +540,101 @@ export default function Header({
                   {isAuthLoading ? 'Checking...' : 'Login'}
                 </button>
               </>
+            )}
+          </div>
+
+          <button
+            type="button"
+            className={`nav-mobile-burger${isMobileNavOpen ? ' nav-mobile-burger--open' : ''}`}
+            aria-expanded={isMobileNavOpen}
+            aria-controls="mobile-nav-panel"
+            id="mobile-nav-burger"
+            onClick={() => setIsMobileNavOpen((open) => !open)}
+            aria-label={isMobileNavOpen ? 'Close menu' : 'Open menu'}
+          >
+            <span className="nav-mobile-burger-box" aria-hidden>
+              <span className="nav-mobile-burger-line" />
+              <span className="nav-mobile-burger-line" />
+              <span className="nav-mobile-burger-line" />
+            </span>
+          </button>
+
+          <div
+            id="mobile-nav-panel"
+            className="mobile-nav-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Site menu"
+          >
+            <nav className="mobile-nav" aria-label="Site menu">
+              {navLinks.map((item) =>
+                item.href ? (
+                  <a key={item.label} className="mobile-nav-link" href={item.href} onClick={closeMobileNav}>
+                    {item.label}
+                  </a>
+                ) : (
+                  <NavLink
+                    key={item.label}
+                    to={item.to}
+                    end={item.to === '/'}
+                    className={({ isActive }) => `mobile-nav-link${isActive ? ' mobile-nav-link--active' : ''}`}
+                    onClick={closeMobileNav}
+                  >
+                    {item.label}
+                  </NavLink>
+                ),
+              )}
+            </nav>
+            {user ? (
+              <div className="mobile-nav-account">
+                <p className="mobile-nav-account-label">{user.name || user.email || 'Account'}</p>
+                <Link className="mobile-nav-link mobile-nav-link--sub" to="/settings" onClick={closeMobileNav}>
+                  Settings
+                </Link>
+                <Link
+                  className="mobile-nav-link mobile-nav-link--sub"
+                  to="/settings/subscription"
+                  onClick={closeMobileNav}
+                >
+                  Subscription
+                </Link>
+                <button
+                  type="button"
+                  className="mobile-nav-link mobile-nav-link--sub mobile-nav-link--button"
+                  onClick={() => {
+                    closeMobileNav();
+                    onLogout();
+                  }}
+                  disabled={isAuthLoading}
+                >
+                  Log out
+                </button>
+              </div>
+            ) : (
+              <div className="mobile-nav-auth">
+                <button
+                  type="button"
+                  className="mobile-nav-signup"
+                  onClick={() => {
+                    openSignup();
+                    closeMobileNav();
+                  }}
+                  disabled={isAuthLoading}
+                >
+                  Sign up
+                </button>
+                <button
+                  type="button"
+                  className="mobile-nav-login"
+                  onClick={() => {
+                    openLogin();
+                    closeMobileNav();
+                  }}
+                  disabled={isAuthLoading}
+                >
+                  {isAuthLoading ? 'Checking...' : 'Login'}
+                </button>
+              </div>
             )}
           </div>
         </div>

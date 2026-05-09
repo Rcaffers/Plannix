@@ -50,12 +50,21 @@ export default function App() {
   const [openSignupAfterCancel, setOpenSignupAfterCancel] = useState(false);
   const [isSubscriptionCheckLoading, setIsSubscriptionCheckLoading] = useState(false);
   const [isSubscriptionRequired, setIsSubscriptionRequired] = useState(false);
-  const isDemoUser = String(user?.email || '').toLowerCase() === 'teacher@plannix.test';
+  const isDemoUser =
+    String(user?.email || '')
+      .toLowerCase()
+      .trim() === 'teacher@plannix.test';
 
   const requiresPaidSubscription = Boolean(authConfig.signupRequiresPayment);
 
-  const checkSubscriptionAccess = async () => {
-    if (!requiresPaidSubscription || isDemoUser) {
+  /** Pass `userForCheck` after login/signup so the demo bypass does not read stale React state. */
+  const checkSubscriptionAccess = async (userForCheck = null) => {
+    const effectiveUser = userForCheck ?? user;
+    const isDemo =
+      String(effectiveUser?.email || '')
+        .toLowerCase()
+        .trim() === 'teacher@plannix.test';
+    if (!requiresPaidSubscription || isDemo) {
       setIsSubscriptionRequired(false);
       return true;
     }
@@ -179,7 +188,7 @@ export default function App() {
   const handleLogin = async ({ email, password }) => {
     const loggedInUser = await loginWithCredentials({ email, password });
     setUser(loggedInUser);
-    const hasAccess = await checkSubscriptionAccess();
+    const hasAccess = await checkSubscriptionAccess(loggedInUser);
     navigate(hasAccess ? '/timetable' : '/subscription-required');
     return loggedInUser;
   };
@@ -194,7 +203,9 @@ export default function App() {
   };
 
   const hasSubscriptionAccess =
-    !requiresPaidSubscription || (!isSubscriptionRequired && !isSubscriptionCheckLoading);
+    !requiresPaidSubscription ||
+    isDemoUser ||
+    (!isSubscriptionRequired && !isSubscriptionCheckLoading);
 
   const privateOrSubscriptionGate = (element) => {
     if (!user) {
