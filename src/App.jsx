@@ -10,6 +10,7 @@ import Footer from './components/Footer';
 import CookieConsent from './modals/CookieConsent';
 import Features from './pages/Features';
 import Contact from './pages/Contact';
+import ResetPassword from './pages/ResetPassword';
 import Settings from './pages/Settings';
 import AcademicYear from './pages/AcademicYear';
 import Classes from './pages/Classes';
@@ -267,6 +268,7 @@ export default function App() {
             />
             <Route path="/features" element={<Features user={user} />} />
             <Route path="/contact" element={<Contact user={user} />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/terms" element={<TermsGate />} />
             <Route path="/privacy" element={<PrivacyGate />} />
             <Route path="/settings" element={privateOrSubscriptionGate(<Settings />)} />

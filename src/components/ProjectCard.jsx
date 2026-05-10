@@ -91,6 +91,53 @@ function getIsoWeekNumber(date) {
   return Math.ceil(((utc - yearStart) / 86400000 + 1) / 7);
 }
 
+/** Calendar “today” as a column index (0 = Monday of `weekStartDate`) or -1 if today is outside that teaching week. */
+function getTodayColumnIndexForWeek({ weekStartDate, dayCount, weekMode }) {
+  if (weekMode !== 'date') {
+    return -1;
+  }
+  const now = new Date();
+  now.setHours(12, 0, 0, 0);
+  const monday = new Date(weekStartDate);
+  monday.setHours(12, 0, 0, 0);
+  const diffDays = Math.floor((now.getTime() - monday.getTime()) / 86400000);
+  if (diffDays < 0 || diffDays >= dayCount) {
+    return -1;
+  }
+  return diffDays;
+}
+
+/**
+ * First visible day on phone when “today” does not map to a column (e.g. weekend with Mon–Fri grid).
+ * If today is still the same calendar week as `weekStartDate` but after the last teaching day, use that last day (e.g. Friday).
+ * Otherwise fall back to Monday (0) for other weeks.
+ */
+function getCompactBootstrapDayIndex({ weekStartDate, dayCount, weekMode }) {
+  const inWeek = getTodayColumnIndexForWeek({ weekStartDate, dayCount, weekMode });
+  if (inWeek >= 0) {
+    return inWeek;
+  }
+  if (weekMode !== 'date' || dayCount < 1) {
+    return 0;
+  }
+  const now = new Date();
+  now.setHours(12, 0, 0, 0);
+  const monday = new Date(weekStartDate);
+  monday.setHours(12, 0, 0, 0);
+  const diffDays = Math.floor((now.getTime() - monday.getTime()) / 86400000);
+
+  const displayedMonday = startOfWeek(weekStartDate);
+  displayedMonday.setHours(12, 0, 0, 0);
+  const thisMonday = startOfWeek(now);
+  thisMonday.setHours(12, 0, 0, 0);
+  const sameCalendarWeek = displayedMonday.getTime() === thisMonday.getTime();
+
+  if (sameCalendarWeek && diffDays >= dayCount) {
+    return Math.max(0, dayCount - 1);
+  }
+  return 0;
+}
+
 export default function ProjectCard({
   project,
   enableEditing = true,
@@ -136,20 +183,10 @@ export default function ProjectCard({
     return formatWeekCommencing(weekStartDate);
   }, [fixedWeekLabel, layout.cycle, repeatingWeekKey, weekMode, weekStartDate]);
 
-  const todayColumnIndex = useMemo(() => {
-    if (weekMode !== 'date') {
-      return -1;
-    }
-    const now = new Date();
-    now.setHours(12, 0, 0, 0);
-    const monday = new Date(weekStartDate);
-    monday.setHours(12, 0, 0, 0);
-    const diffDays = Math.floor((now.getTime() - monday.getTime()) / 86400000);
-    if (diffDays < 0 || diffDays >= dayCount) {
-      return -1;
-    }
-    return diffDays;
-  }, [weekMode, weekStartDate, dayCount]);
+  const todayColumnIndex = useMemo(
+    () => getTodayColumnIndexForWeek({ weekStartDate, dayCount, weekMode }),
+    [weekMode, weekStartDate, dayCount],
+  );
 
   const columnHolidayLabels = useMemo(() => {
     if (weekMode !== 'date') {
@@ -176,17 +213,43 @@ export default function ProjectCard({
 
   const isSingleDayTimetable = isCompactTimetable && weekMode === 'date';
   const [compactDayIndex, setCompactDayIndex] = useState(0);
-  const compactDayInitRef = useRef(false);
+  const compactDayBootstrappedRef = useRef(false);
+  const weekStartRef = useRef(weekStartDate);
+  const dayCountRef = useRef(dayCount);
+  weekStartRef.current = weekStartDate;
+  dayCountRef.current = dayCount;
 
   useLayoutEffect(() => {
-    if (isSingleDayTimetable && !compactDayInitRef.current) {
-      compactDayInitRef.current = true;
-      setCompactDayIndex(todayColumnIndex >= 0 ? todayColumnIndex : 0);
-    }
     if (!isSingleDayTimetable) {
-      compactDayInitRef.current = false;
+      compactDayBootstrappedRef.current = false;
+      return;
     }
-  }, [isSingleDayTimetable, todayColumnIndex]);
+    if (compactDayBootstrappedRef.current) {
+      return;
+    }
+
+    const pickIndex = () =>
+      getCompactBootstrapDayIndex({
+        weekStartDate: weekStartRef.current,
+        dayCount: dayCountRef.current,
+        weekMode,
+      });
+
+    const finish = (idx) => {
+      if (compactDayBootstrappedRef.current) return;
+      const maxIdx = Math.max(0, dayCountRef.current - 1);
+      setCompactDayIndex(Math.min(maxIdx, Math.max(0, idx)));
+      compactDayBootstrappedRef.current = true;
+    };
+
+    if (todayColumnIndex >= 0) {
+      finish(pickIndex());
+      return;
+    }
+
+    const rafId = requestAnimationFrame(() => finish(pickIndex()));
+    return () => cancelAnimationFrame(rafId);
+  }, [isSingleDayTimetable, todayColumnIndex, weekMode]);
 
   useEffect(() => {
     setCompactDayIndex((i) => (i >= dayCount ? Math.max(0, dayCount - 1) : i));
@@ -204,6 +267,11 @@ export default function ProjectCard({
 
   const visibleDayTitle =
     visibleCalendarDay && isSingleDayTimetable ? formatVisibleCalendarDay(visibleCalendarDay) : '';
+
+  const scheduleDateInputValue = useMemo(() => {
+    if (!visibleCalendarDay) return '';
+    return formatDateKeyPart(visibleCalendarDay);
+  }, [visibleCalendarDay]);
 
   const dayIndicesToRender = useMemo(() => {
     if (isSingleDayTimetable) {
@@ -360,6 +428,7 @@ export default function ProjectCard({
 
   function moveCompactDay(delta) {
     if (!isSingleDayTimetable || delta === 0) return;
+    compactDayBootstrappedRef.current = true;
     const nextIndex = compactDayIndex + delta;
     if (nextIndex < 0) {
       moveWeek(-1);
@@ -377,12 +446,31 @@ export default function ProjectCard({
   function jumpToToday() {
     const monday = startOfWeek(new Date());
     setWeekStartDate(monday);
-    const now = new Date();
-    now.setHours(12, 0, 0, 0);
-    monday.setHours(12, 0, 0, 0);
-    const diffDays = Math.floor((now.getTime() - monday.getTime()) / 86400000);
-    const idx = diffDays >= 0 && diffDays < dayCount ? diffDays : 0;
+    const idx = getCompactBootstrapDayIndex({ weekStartDate: monday, dayCount, weekMode });
+    const maxIdx = Math.max(0, dayCount - 1);
+    setCompactDayIndex(Math.min(maxIdx, Math.max(0, idx)));
+    if (isSingleDayTimetable) {
+      compactDayBootstrappedRef.current = true;
+    }
+  }
+
+  function handleScheduleDateChange(event) {
+    const raw = event.target.value;
+    if (!raw || !isSingleDayTimetable) return;
+    const parts = raw.split('-').map((n) => parseInt(n, 10));
+    const [y, mo, d] = parts;
+    if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return;
+    const pickedNoon = new Date(y, mo - 1, d, 12, 0, 0, 0);
+    const monday = startOfWeek(pickedNoon);
+    const mondayNoon = new Date(monday);
+    mondayNoon.setHours(12, 0, 0, 0);
+    const diffDays = Math.floor((pickedNoon.getTime() - mondayNoon.getTime()) / 86400000);
+    setWeekStartDate(monday);
+    let idx = diffDays;
+    if (idx < 0) idx = 0;
+    if (idx >= dayCount) idx = dayCount - 1;
     setCompactDayIndex(idx);
+    compactDayBootstrappedRef.current = true;
   }
 
   function resolveSessionClass(session) {
@@ -833,7 +921,7 @@ export default function ProjectCard({
           {weekMode === 'date' ? (
             isSingleDayTimetable ? (
               <div className="schedule-compact-nav">
-                <div className="schedule-day-nav" aria-label="Day navigation">
+                <div className="schedule-day-nav-row" aria-label="Day navigation">
                   <button
                     type="button"
                     className="schedule-day-arrow"
@@ -842,7 +930,7 @@ export default function ProjectCard({
                   >
                     ←
                   </button>
-                  <span className="schedule-day-label">{visibleDayTitle}</span>
+                  <p className="schedule-day-label">{visibleDayTitle}</p>
                   <button
                     type="button"
                     className="schedule-day-arrow"
@@ -851,6 +939,8 @@ export default function ProjectCard({
                   >
                     →
                   </button>
+                </div>
+                <div className="schedule-compact-toolbar">
                   <button
                     type="button"
                     className="schedule-day-today"
@@ -859,25 +949,15 @@ export default function ProjectCard({
                   >
                     Today
                   </button>
-                </div>
-                <div className="schedule-week-nav schedule-week-nav--compact-secondary" aria-label="Week navigation">
-                  <button
-                    type="button"
-                    className="schedule-week-step"
-                    onClick={() => moveWeek(-1)}
-                    aria-label="Previous week"
-                  >
-                    ‹ Week
-                  </button>
-                  <span className="schedule-week-secondary-label">Week commencing {weekCommencingLabel}</span>
-                  <button
-                    type="button"
-                    className="schedule-week-step"
-                    onClick={() => moveWeek(1)}
-                    aria-label="Next week"
-                  >
-                    Week ›
-                  </button>
+                  <label className="schedule-date-picker">
+                    <input
+                      type="date"
+                      className="schedule-date-input"
+                      value={scheduleDateInputValue}
+                      onChange={handleScheduleDateChange}
+                      aria-label="Choose a date on the timetable"
+                    />
+                  </label>
                 </div>
               </div>
             ) : (

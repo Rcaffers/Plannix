@@ -595,6 +595,36 @@
   outline-offset: 1px;
 }
 
+.login-forgot-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: -4px 0 0;
+}
+
+.login-forgot-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #2f645e;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.login-forgot-link:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.login-forgot-lead {
+  margin: -6px 0 14px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: rgba(17, 17, 17, 0.72);
+}
+
 .login-message {
   margin: 2px 0 0;
   font-size: 0.88rem;

@@ -9,7 +9,7 @@ import {
 } from '../utils/authForms';
 import { SIGNUP_PAYMENT_CANCELLED_MESSAGE } from '../utils/authMessages';
 import { loadStripe } from '@stripe/stripe-js';
-import { applySignupPromotionCode } from '../utils/api';
+import { applySignupPromotionCode, requestPasswordReset } from '../utils/api';
 import { headerNavLinks } from '../utils/headerNav';
 import { PLANNIX_OPEN_LOGIN_EVENT, PLANNIX_OPEN_SIGNUP_EVENT } from '../utils/plannixEvents';
 import { formatMoneyMinor, formatSubscriptionPriceSummary } from '../utils/stripePriceFormat';
@@ -135,6 +135,10 @@ export default function Header({
   const [signupPromotionAppliedCode, setSignupPromotionAppliedCode] = useState('');
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [loginModalPane, setLoginModalPane] = useState('login');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotError, setForgotError] = useState('');
+  const [isForgotSubmitting, setIsForgotSubmitting] = useState(false);
   const userMenuRef = useRef(null);
   const mobileNavRef = useRef(null);
   const stripePromise = useMemo(() => {
@@ -233,6 +237,9 @@ export default function Header({
     setIsLoginOpen(false);
     setLoginError('');
     setLoginSuccess('');
+    setLoginModalPane('login');
+    setForgotEmail('');
+    setForgotError('');
     setIsSignupOpen(true);
     setSignupError(SIGNUP_PAYMENT_CANCELLED_MESSAGE);
     setSignupSuccess('');
@@ -243,6 +250,9 @@ export default function Header({
     setIsLoginOpen(false);
     setLoginError('');
     setLoginSuccess('');
+    setLoginModalPane('login');
+    setForgotEmail('');
+    setForgotError('');
   };
 
   const closeSignup = () => {
@@ -262,6 +272,8 @@ export default function Header({
     setIsSignupOpen(false);
     setSignupError('');
     setSignupSuccess('');
+    setLoginModalPane('login');
+    setForgotError('');
     setIsLoginOpen(true);
   };
 
@@ -269,6 +281,9 @@ export default function Header({
     setIsLoginOpen(false);
     setLoginError('');
     setLoginSuccess('');
+    setLoginModalPane('login');
+    setForgotEmail('');
+    setForgotError('');
     setIsSignupOpen(true);
     setPaymentClientSecret('');
     setPendingSubscriptionId('');
@@ -331,6 +346,25 @@ export default function Header({
       setLoginError(error.message || 'Login failed. Please try again.');
     } finally {
       setIsLoginSubmitting(false);
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (event) => {
+    event.preventDefault();
+    setForgotError('');
+    const email = forgotEmail.trim();
+    if (!email || !email.includes('@')) {
+      setForgotError('Please enter a valid email address.');
+      return;
+    }
+    setIsForgotSubmitting(true);
+    try {
+      await requestPasswordReset({ email });
+      setLoginModalPane('forgot-sent');
+    } catch (err) {
+      setForgotError(err.message || 'Could not send reset email. Please try again.');
+    } finally {
+      setIsForgotSubmitting(false);
     }
   };
 
@@ -646,7 +680,13 @@ export default function Header({
             className="login-modal"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="login-modal-title"
+            aria-labelledby={
+              loginModalPane === 'login'
+                ? 'login-modal-title'
+                : loginModalPane === 'forgot-email'
+                  ? 'forgot-modal-title'
+                  : 'forgot-sent-modal-title'
+            }
             onClick={stopModalCloseFromInnerClick}
           >
             <button
@@ -658,48 +698,136 @@ export default function Header({
               ×
             </button>
 
-            <p className="login-kicker">Welcome back</p>
-            <h2 id="login-modal-title">Log in to your account</h2>
+            {loginModalPane === 'login' ? (
+              <>
+                <p className="login-kicker">Welcome back</p>
+                <h2 id="login-modal-title">Log in to your account</h2>
 
-            <form className="login-form" onSubmit={handleLoginSubmit}>
-              <label htmlFor="login-email">Email</label>
-              <input
-                id="login-email"
-                type="email"
-                name="email"
-                placeholder="you@school.edu"
-                value={loginForm.email}
-                autoComplete="email"
-                onChange={(event) => setLoginForm((current) => ({ ...current, email: event.target.value }))}
-                disabled={isLoginSubmitting}
-              />
+                <form className="login-form" onSubmit={handleLoginSubmit}>
+                  <label htmlFor="login-email">Email</label>
+                  <input
+                    id="login-email"
+                    type="email"
+                    name="email"
+                    placeholder="you@school.edu"
+                    value={loginForm.email}
+                    autoComplete="email"
+                    onChange={(event) =>
+                      setLoginForm((current) => ({ ...current, email: event.target.value }))
+                    }
+                    disabled={isLoginSubmitting}
+                  />
 
-              <label htmlFor="login-password">Password</label>
-              <input
-                id="login-password"
-                type="password"
-                name="password"
-                placeholder="Enter your password"
-                value={loginForm.password}
-                autoComplete="current-password"
-                onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))}
-                disabled={isLoginSubmitting}
-              />
+                  <label htmlFor="login-password">Password</label>
+                  <input
+                    id="login-password"
+                    type="password"
+                    name="password"
+                    placeholder="Enter your password"
+                    value={loginForm.password}
+                    autoComplete="current-password"
+                    onChange={(event) =>
+                      setLoginForm((current) => ({ ...current, password: event.target.value }))
+                    }
+                    disabled={isLoginSubmitting}
+                  />
 
-              {loginError ? <p className="login-message error">{loginError}</p> : null}
-              {loginSuccess ? <p className="login-message success">{loginSuccess}</p> : null}
+                  <div className="login-forgot-row">
+                    <button
+                      type="button"
+                      className="login-forgot-link"
+                      onClick={() => {
+                        setForgotEmail(loginForm.email);
+                        setForgotError('');
+                        setLoginModalPane('forgot-email');
+                      }}
+                      disabled={isLoginSubmitting}
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
 
-              <button type="submit" className="login-submit" disabled={isLoginSubmitting}>
-                {isLoginSubmitting ? 'Logging in...' : 'Login'}
-              </button>
+                  {loginError ? <p className="login-message error">{loginError}</p> : null}
+                  {loginSuccess ? <p className="login-message success">{loginSuccess}</p> : null}
 
-              <p className="login-switch">
-                New to Plannix?{' '}
-                <button type="button" className="login-switch-link" onClick={openSignup} disabled={isLoginSubmitting}>
-                  Create an account
+                  <button type="submit" className="login-submit" disabled={isLoginSubmitting}>
+                    {isLoginSubmitting ? 'Logging in...' : 'Login'}
+                  </button>
+
+                  <p className="login-switch">
+                    New to Plannix?{' '}
+                    <button
+                      type="button"
+                      className="login-switch-link"
+                      onClick={openSignup}
+                      disabled={isLoginSubmitting}
+                    >
+                      Create an account
+                    </button>
+                  </p>
+                </form>
+              </>
+            ) : null}
+
+            {loginModalPane === 'forgot-email' ? (
+              <>
+                <p className="login-kicker">Password</p>
+                <h2 id="forgot-modal-title">Reset your password</h2>
+                <p className="login-forgot-lead">
+                  Enter your email and we will send you a link to choose a new password.
+                </p>
+                <form className="login-form" onSubmit={handleForgotPasswordSubmit}>
+                  <label htmlFor="forgot-email">Email</label>
+                  <input
+                    id="forgot-email"
+                    type="email"
+                    name="email"
+                    placeholder="you@school.edu"
+                    value={forgotEmail}
+                    autoComplete="email"
+                    onChange={(event) => setForgotEmail(event.target.value)}
+                    disabled={isForgotSubmitting}
+                  />
+                  {forgotError ? <p className="login-message error">{forgotError}</p> : null}
+                  <button type="submit" className="login-submit" disabled={isForgotSubmitting}>
+                    {isForgotSubmitting ? 'Sending…' : 'Send reset link'}
+                  </button>
+                  <p className="login-switch">
+                    <button
+                      type="button"
+                      className="login-switch-link"
+                      onClick={() => {
+                        setForgotError('');
+                        setLoginModalPane('login');
+                      }}
+                      disabled={isForgotSubmitting}
+                    >
+                      Back to log in
+                    </button>
+                  </p>
+                </form>
+              </>
+            ) : null}
+
+            {loginModalPane === 'forgot-sent' ? (
+              <>
+                <p className="login-kicker">Check your inbox</p>
+                <h2 id="forgot-sent-modal-title">Email sent</h2>
+                <p className="login-forgot-lead">
+                  If an account exists for that email, you will receive a link to reset your password shortly.
+                </p>
+                <button
+                  type="button"
+                  className="login-submit"
+                  onClick={() => {
+                    setLoginModalPane('login');
+                    setForgotError('');
+                  }}
+                >
+                  Back to log in
                 </button>
-              </p>
-            </form>
+              </>
+            ) : null}
           </div>
         </div>
       ) : null}

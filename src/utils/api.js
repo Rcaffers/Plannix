@@ -103,6 +103,44 @@ export async function submitContactForm({ name, email, message }) {
   return payload;
 }
 
+export async function requestPasswordReset({ email }) {
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+      method: 'POST',
+      headers: JSON_POST_HEADERS,
+      credentials: 'include',
+      body: JSON.stringify({ email }),
+    });
+  } catch (error) {
+    throw new Error(userFacingFetchErrorMessage(error, 'Could not start password reset.'));
+  }
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not start password reset.');
+  }
+  return payload;
+}
+
+export async function resetPasswordWithToken({ token, password }) {
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}/auth/reset-password`, {
+      method: 'POST',
+      headers: JSON_POST_HEADERS,
+      credentials: 'include',
+      body: JSON.stringify({ token, password }),
+    });
+  } catch (error) {
+    throw new Error(userFacingFetchErrorMessage(error, 'Could not reset your password.'));
+  }
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Could not reset your password.');
+  }
+  return payload;
+}
+
 export async function fetchAuthConfig() {
   const response = await fetch(`${API_BASE_URL}/auth/config`, {
     method: 'GET',
