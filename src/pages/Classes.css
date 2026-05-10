@@ -91,6 +91,12 @@
 
 .classes-input-timetable {
   margin-top: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.classes-input-timetable .schedule-scroll:not(.schedule-scroll--single-day) {
+  touch-action: pan-x pan-y;
 }
 
 .classes-form {
@@ -244,4 +250,11 @@
   font-size: 0.9rem;
   font-weight: 600;
   color: #276749;
+}
+
+/* Settings section pills: hidden on phones — same links live under Settings in the burger menu. */
+@media (max-width: 720px) {
+  .classes-subnav {
+    display: none;
+  }
 }

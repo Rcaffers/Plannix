@@ -404,3 +404,10 @@
   font-weight: 600;
   color: #276749;
 }
+
+/* Settings section pills: hidden on phones — links are under Settings in the burger menu. */
+@media (max-width: 720px) {
+  .classes-subnav {
+    display: none;
+  }
+}

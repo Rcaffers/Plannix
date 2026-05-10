@@ -301,12 +301,14 @@
 .schedule-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  width: 100%;
 }
 
 .schedule-head {
   display: grid;
-  grid-template-columns: 80px repeat(var(--timetable-days, 5), minmax(min(100px, 16vw), 1fr));
-  min-width: calc(80px + var(--timetable-days, 5) * 72px);
+  grid-template-columns: 80px repeat(var(--timetable-days, 5), minmax(100px, 1fr));
+  min-width: calc(80px + var(--timetable-days, 5) * 100px);
   border-bottom: 1px solid #e6dfd4;
   background: #f6f1e8;
 }
@@ -339,8 +341,8 @@
 
 .schedule-grid {
   display: grid;
-  grid-template-columns: 80px repeat(var(--timetable-days, 5), minmax(min(100px, 16vw), 1fr));
-  min-width: calc(80px + var(--timetable-days, 5) * 72px);
+  grid-template-columns: 80px repeat(var(--timetable-days, 5), minmax(100px, 1fr));
+  min-width: calc(80px + var(--timetable-days, 5) * 100px);
   min-height: max(320px, calc(var(--timetable-periods, 5) * 56px));
 }
 
@@ -911,10 +913,12 @@
 
   .schedule-head:not(.schedule-head--single-day),
   .schedule-grid:not(.schedule-grid--single-day) {
-    grid-template-columns: 64px repeat(5, minmax(82px, 1fr));
+    grid-template-columns: 72px repeat(var(--timetable-days, 5), minmax(100px, 1fr));
+    min-width: calc(72px + var(--timetable-days, 5) * 100px);
   }
 
   .schedule-grid--single-day {
-    grid-template-columns: 64px minmax(0, 1fr);
+    grid-template-columns: 72px minmax(0, 1fr);
+    min-width: 0;
   }
 }

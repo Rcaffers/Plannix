@@ -11,6 +11,7 @@ import { SIGNUP_PAYMENT_CANCELLED_MESSAGE } from '../utils/authMessages';
 import { loadStripe } from '@stripe/stripe-js';
 import { applySignupPromotionCode, requestPasswordReset } from '../utils/api';
 import { headerNavLinks } from '../utils/headerNav';
+import { SETTINGS_SUBNAV_ITEMS } from './SettingsSubnav';
 import { PLANNIX_OPEN_LOGIN_EVENT, PLANNIX_OPEN_SIGNUP_EVENT } from '../utils/plannixEvents';
 import { formatMoneyMinor, formatSubscriptionPriceSummary } from '../utils/stripePriceFormat';
 import { buildSubscriptionSignupReturnUrl } from '../utils/stripeSignupUrl';
@@ -135,6 +136,7 @@ export default function Header({
   const [signupPromotionAppliedCode, setSignupPromotionAppliedCode] = useState('');
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [mobileSettingsExpanded, setMobileSettingsExpanded] = useState(false);
   const [loginModalPane, setLoginModalPane] = useState('login');
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotError, setForgotError] = useState('');
@@ -158,6 +160,15 @@ export default function Header({
   useEffect(() => {
     setIsMobileNavOpen(false);
   }, [location.pathname, location.hash]);
+
+  useEffect(() => {
+    if (!isMobileNavOpen) {
+      return;
+    }
+    const onSettings =
+      location.pathname.startsWith('/settings') || location.pathname.startsWith('/classes');
+    setMobileSettingsExpanded(onSettings);
+  }, [isMobileNavOpen, location.pathname]);
 
   useEffect(() => {
     if (isLoginOpen || isSignupOpen) {
@@ -622,16 +633,41 @@ export default function Header({
             {user ? (
               <div className="mobile-nav-account">
                 <p className="mobile-nav-account-label">{user.name || user.email || 'Account'}</p>
-                <Link className="mobile-nav-link mobile-nav-link--sub" to="/settings" onClick={closeMobileNav}>
-                  Settings
-                </Link>
-                <Link
-                  className="mobile-nav-link mobile-nav-link--sub"
-                  to="/settings/subscription"
-                  onClick={closeMobileNav}
-                >
-                  Subscription
-                </Link>
+                <div className="mobile-nav-settings-block">
+                  <button
+                    type="button"
+                    className="mobile-nav-settings-trigger"
+                    aria-expanded={mobileSettingsExpanded}
+                    aria-controls="mobile-nav-settings-sections"
+                    id="mobile-nav-settings-toggle"
+                    onClick={() => setMobileSettingsExpanded((open) => !open)}
+                  >
+                    <span>Settings</span>
+                    <span className="mobile-nav-settings-chevron" aria-hidden />
+                  </button>
+                  {mobileSettingsExpanded ? (
+                    <div
+                      id="mobile-nav-settings-sections"
+                      className="mobile-nav-settings-nested"
+                      role="group"
+                      aria-labelledby="mobile-nav-settings-toggle"
+                    >
+                      {SETTINGS_SUBNAV_ITEMS.map((item) => (
+                        <NavLink
+                          key={`${item.to}${item.end ? '-end' : ''}`}
+                          to={item.to}
+                          end={Boolean(item.end)}
+                          className={({ isActive }) =>
+                            `mobile-nav-link mobile-nav-link--sub${isActive ? ' mobile-nav-link--active' : ''}`
+                          }
+                          onClick={closeMobileNav}
+                        >
+                          {item.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
                 <button
                   type="button"
                   className="mobile-nav-link mobile-nav-link--sub mobile-nav-link--button"
