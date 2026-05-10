@@ -656,13 +656,14 @@
   grid-area: burger;
   align-self: center;
   justify-self: end;
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   margin: 0;
   padding: 0;
   border: 1px solid var(--stroke);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 4px 18px rgba(20, 20, 20, 0.06);
   color: var(--text);
   cursor: pointer;
   flex-shrink: 0;
@@ -711,12 +712,15 @@
   display: none;
   grid-area: panel;
   width: 100%;
-  margin-top: 10px;
-  padding: 12px 0 16px;
-  border-top: 1px solid rgba(63, 127, 120, 0.2);
-  background: linear-gradient(180deg, rgba(252, 250, 246, 0.98), rgba(244, 249, 244, 0.96));
-  box-shadow: 0 16px 40px rgba(20, 20, 20, 0.08);
-  border-radius: 0 0 14px 14px;
+  margin-top: 12px;
+  padding: 16px 14px 18px;
+  border: 1px solid var(--stroke);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  border-radius: 16px;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .site-header--mobile-open .mobile-nav-panel {
@@ -732,8 +736,8 @@
 
 .mobile-nav-link {
   display: block;
-  padding: 12px 4px;
-  border-radius: 10px;
+  padding: 12px 12px;
+  border-radius: 12px;
   font-size: 1.05rem;
   font-weight: 600;
   color: rgba(17, 17, 17, 0.88);
@@ -767,11 +771,11 @@
 
 .mobile-nav-account {
   margin-top: 10px;
-  padding-top: 12px;
+  padding-top: 14px;
   border-top: 1px dashed rgba(63, 127, 120, 0.28);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .mobile-nav-account-label {
@@ -784,11 +788,11 @@
 
 .mobile-nav-auth {
   margin-top: 14px;
-  padding-top: 14px;
+  padding-top: 16px;
   border-top: 1px dashed rgba(63, 127, 120, 0.28);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .mobile-nav-signup {

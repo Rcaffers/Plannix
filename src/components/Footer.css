@@ -128,7 +128,13 @@
 .footer-legal {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
   gap: 10px 18px;
+}
+
+.footer-legal-text--short {
+  display: none;
 }
 
 .footer-legal a {
@@ -164,23 +170,115 @@
   }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 720px) {
+  .footer-shell {
+    padding: 24px 18px;
+    border-radius: 22px;
+  }
+
   .footer-nav {
     grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .footer-nav-col {
+    padding: 20px 0 22px;
+  }
+
+  .footer-nav-col:first-child {
+    padding-top: 4px;
+  }
+
+  .footer-nav-col:not(:last-child) {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   }
 
   .footer-nav-col:last-child {
     grid-column: auto;
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+
+  .footer-nav-heading {
+    margin-bottom: 14px;
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+  }
+
+  .footer-nav-list {
+    gap: 4px;
+  }
+
+  .footer-nav-list a,
+  .footer-link-button {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 8px 12px;
+    margin: 0 -12px;
+    border-radius: 12px;
+    font-size: 0.94rem;
+  }
+
+  .footer-nav-list a:hover,
+  .footer-link-button:hover {
+    background: rgba(255, 255, 255, 0.06);
+    text-decoration: none;
+  }
+
+  .footer-contact-text {
+    margin-top: 12px;
+    font-size: 0.86rem;
+    line-height: 1.5;
   }
 
   .footer-bottom {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
+    gap: 20px;
+    padding-top: 20px;
+    margin-top: 24px;
   }
-}
 
-@media (max-width: 720px) {
-  .footer-shell {
-    padding: 24px;
+  .footer-copy {
+    line-height: 1.45;
+  }
+
+  .footer-legal {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .footer-legal-text--full {
+    display: none;
+  }
+
+  .footer-legal-text--short {
+    display: inline;
+  }
+
+  .footer-legal a {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 48px;
+    padding: 12px 16px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    font-size: 0.92rem;
+    text-decoration: none;
+  }
+
+  .footer-legal a:hover {
+    background: rgba(255, 255, 255, 0.11);
+    text-decoration: none;
+  }
+
+  .footer-legal a:focus-visible {
+    border-radius: 14px;
   }
 }

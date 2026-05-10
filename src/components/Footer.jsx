@@ -104,17 +104,20 @@ export default function Footer({ user }) {
 
         <div className="footer-bottom">
           <span className="footer-copy">© {new Date().getFullYear()} Plannix. All rights reserved.</span>
-          <div className="footer-legal">
-            <a href="/terms" onClick={openTermsModal}>
-              Terms &amp; conditions
+          <nav className="footer-legal" aria-label="Legal and cookies">
+            <a href="/terms" onClick={openTermsModal} aria-label="Terms and conditions">
+              <span className="footer-legal-text footer-legal-text--full">Terms &amp; conditions</span>
+              <span className="footer-legal-text footer-legal-text--short">Terms</span>
             </a>
-            <a href="/privacy" onClick={openPrivacyModal}>
-              Privacy
+            <a href="/privacy" onClick={openPrivacyModal} aria-label="Privacy policy">
+              <span className="footer-legal-text footer-legal-text--full">Privacy policy</span>
+              <span className="footer-legal-text footer-legal-text--short">Privacy</span>
             </a>
-            <a href="#cookies" onClick={openCookieSettings}>
-              Cookie settings
+            <a href="#cookies" onClick={openCookieSettings} aria-label="Cookie settings">
+              <span className="footer-legal-text footer-legal-text--full">Cookie settings</span>
+              <span className="footer-legal-text footer-legal-text--short">Cookies</span>
             </a>
-          </div>
+          </nav>
         </div>
       </div>
     </footer>
