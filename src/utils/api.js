@@ -4,6 +4,29 @@ export const JSON_POST_HEADERS = {
   'Content-Type': 'application/json',
 };
 
+function isLikelyNetworkFailure(error) {
+  if (!error) return false;
+  if (error instanceof TypeError) return true;
+  const msg = String(error.message || '').toLowerCase();
+  return (
+    msg.includes('failed to fetch') ||
+    msg.includes('load failed') ||
+    msg.includes('networkerror') ||
+    msg.includes('network request failed')
+  );
+}
+
+/** Maps thrown fetch errors (e.g. Safari “Load failed”) to text that explains deployment/CORS. */
+export function userFacingFetchErrorMessage(error, fallback) {
+  if (isLikelyNetworkFailure(error)) {
+    return (
+      'Could not reach the Plannix server. Check your connection. ' +
+      'On the live site, the build must set VITE_API_BASE_URL to your API, and the API must list this site’s exact URL in FRONTEND_ORIGIN (including https and www).'
+    );
+  }
+  return String(error?.message || fallback || 'Something went wrong.');
+}
+
 export async function parseJsonSafe(response) {
   try {
     return await response.json();
@@ -82,12 +105,17 @@ export async function completePaidSignupSubscription(subscriptionId) {
 }
 
 export async function loginWithCredentials({ email, password }) {
-  const response = await fetch(`${API_BASE_URL}/auth/login`, {
-    method: 'POST',
-    headers: JSON_POST_HEADERS,
-    credentials: 'include',
-    body: JSON.stringify({ email, password }),
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: JSON_POST_HEADERS,
+      credentials: 'include',
+      body: JSON.stringify({ email, password }),
+    });
+  } catch (error) {
+    throw new Error(userFacingFetchErrorMessage(error, 'Unable to log in.'));
+  }
 
   const payload = await parseJsonSafe(response);
 
@@ -100,10 +128,15 @@ export async function loginWithCredentials({ email, password }) {
     return loggedInUser;
   }
 
-  const meResponse = await fetch(`${API_BASE_URL}/auth/me`, {
-    method: 'GET',
-    credentials: 'include',
-  });
+  let meResponse;
+  try {
+    meResponse = await fetch(`${API_BASE_URL}/auth/me`, {
+      method: 'GET',
+      credentials: 'include',
+    });
+  } catch (error) {
+    throw new Error(userFacingFetchErrorMessage(error, 'Unable to log in.'));
+  }
 
   const mePayload = await parseJsonSafe(meResponse);
   return mePayload?.user ?? mePayload ?? null;
@@ -139,12 +172,17 @@ export async function applySignupPromotionCode({ subscriptionId, promotionCode }
 }
 
 export async function signupAccount({ name, email, password }) {
-  const response = await fetch(`${API_BASE_URL}/auth/signup`, {
-    method: 'POST',
-    headers: JSON_POST_HEADERS,
-    credentials: 'include',
-    body: JSON.stringify({ name, email, password }),
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}/auth/signup`, {
+      method: 'POST',
+      headers: JSON_POST_HEADERS,
+      credentials: 'include',
+      body: JSON.stringify({ name, email, password }),
+    });
+  } catch (error) {
+    throw new Error(userFacingFetchErrorMessage(error, 'Unable to create your account right now.'));
+  }
 
   const payload = await parseJsonSafe(response);
   if (!response.ok) {

@@ -13,8 +13,57 @@ import { createDbPool, mapClassRow, runMigrations } from './db.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || process.env.AUTH_PORT || 4000);
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
+/** Trust reverse proxy (DigitalOcean, Render, etc.) so `X-Forwarded-Proto` / host are correct for CORS and cookies. */
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 1) || 1);
+
+/** Comma-separated list (e.g. `https://app.example.com,https://www.example.com`). Login uses POST + JSON → CORS preflight; origin must be allowed or browsers show “Load failed”. */
+const FRONTEND_ORIGINS = String(process.env.FRONTEND_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map((s) => s.trim().replace(/\/$/, ''))
+  .filter(Boolean);
 const SESSION_COOKIE = 'plannix_session';
+
+function inferredPublicOrigin(req) {
+  const host = String(req.get('x-forwarded-host') || req.get('host') || '')
+    .split(',')[0]
+    .trim();
+  if (!host) {
+    return '';
+  }
+  let proto = String(req.get('x-forwarded-proto') || (req.secure ? 'https' : 'http'))
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+  if (proto !== 'https' && proto !== 'http') {
+    proto = 'https';
+  }
+  if (host.endsWith('.ondigitalocean.app') && proto === 'http') {
+    proto = 'https';
+  }
+  return `${proto}://${host}`;
+}
+
+function corsDelegate(req, callback) {
+  const requestOrigin = req.headers.origin;
+  if (!requestOrigin) {
+    callback(null, { origin: true, credentials: true });
+    return;
+  }
+  if (FRONTEND_ORIGINS.includes(requestOrigin)) {
+    callback(null, { origin: true, credentials: true });
+    return;
+  }
+  const inferred = inferredPublicOrigin(req);
+  if (inferred && requestOrigin === inferred) {
+    callback(null, { origin: true, credentials: true });
+    return;
+  }
+  if (process.env.CORS_DEBUG === 'true') {
+    // eslint-disable-next-line no-console
+    console.error('[cors] blocked', { requestOrigin, FRONTEND_ORIGINS, inferred, host: req.get('host') });
+  }
+  callback(null, { origin: false, credentials: true });
+}
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
 const stripePriceId = process.env.STRIPE_PRICE_ID || '';
@@ -34,12 +83,7 @@ const COOKIE_OPTIONS = {
   maxAge: 1000 * 60 * 60 * 24,
 };
 
-app.use(
-  cors({
-    origin: FRONTEND_ORIGIN,
-    credentials: true,
-  }),
-);
+app.use(cors(corsDelegate));
 app.use(cookieParser());
 
 app.get('/health', (_req, res) => {
