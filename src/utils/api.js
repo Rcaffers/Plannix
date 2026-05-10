@@ -1,4 +1,57 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+/**
+ * Resolves the API origin for fetch(). Vite bakes VITE_API_BASE_URL at build time—local .env values
+ * like http://localhost:4000 break production (browser cannot reach your laptop). We also avoid
+ * mixed content (https page → http API) and ignore loopback URLs when the page is not local.
+ */
+function computeApiBaseUrl() {
+  let raw = import.meta.env.VITE_API_BASE_URL;
+  let trimmed = typeof raw === 'string' ? raw.trim() : '';
+  if (trimmed.endsWith('/')) {
+    trimmed = trimmed.slice(0, -1);
+  }
+
+  if (typeof window !== 'undefined' && window.location) {
+    const host = window.location.hostname;
+    const pageIsLocal = host === 'localhost' || host === '127.0.0.1';
+
+    if (trimmed) {
+      const lower = trimmed.toLowerCase();
+      const pointsAtLoopback =
+        lower.includes('localhost') ||
+        lower.includes('127.0.0.1') ||
+        /:\/\/0\.0\.0\.0/.test(lower);
+      if (!pageIsLocal && pointsAtLoopback) {
+        trimmed = '';
+      }
+    }
+
+    if (trimmed && window.location.protocol === 'https:') {
+      try {
+        const u = new URL(trimmed);
+        if (u.protocol === 'http:') {
+          u.protocol = 'https:';
+          trimmed = `${u.origin}${u.pathname === '/' ? '' : u.pathname.replace(/\/$/, '')}`;
+        }
+      } catch {
+        trimmed = '';
+      }
+    }
+  }
+
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    const u = new URL(trimmed);
+    const path = u.pathname === '/' ? '' : u.pathname.replace(/\/$/, '');
+    return `${u.origin}${path}`;
+  } catch {
+    return '';
+  }
+}
+
+export const API_BASE_URL = computeApiBaseUrl();
 
 export const JSON_POST_HEADERS = {
   'Content-Type': 'application/json',
@@ -21,7 +74,8 @@ export function userFacingFetchErrorMessage(error, fallback) {
   if (isLikelyNetworkFailure(error)) {
     return (
       'Could not reach the Plannix server. Check your connection. ' +
-      'On the live site, the build must set VITE_API_BASE_URL to your API, and the API must list this site’s exact URL in FRONTEND_ORIGIN (including https and www).'
+      'On the live site: do not bake in a local API URL (remove VITE_API_BASE_URL from the build, or set it to your public https API). ' +
+      'The API must allow this site in CORS (FRONTEND_ORIGIN) and use COOKIE_SECURE on https.'
     );
   }
   return String(error?.message || fallback || 'Something went wrong.');

@@ -38,7 +38,7 @@ Configure the server with `.env` (see your hosting provider for secrets). Common
 
 Client build:
 
-- `VITE_API_BASE_URL` — leave empty when the API is served from the same origin as the UI; otherwise set to the public API base URL
+- `VITE_API_BASE_URL` — leave **unset** when the API is served from the **same** host as the UI (typical `npm start` / DigitalOcean single service). Never deploy a build that still contains a **local** URL (e.g. `http://localhost:4000` from your machine’s `.env`)—the browser cannot reach it. For a **separate** API host, set this to the public **https** base URL (no trailing slash).
 
 ## Secrets scanning (Gitleaks)
 
