@@ -282,6 +282,45 @@ export default function ProjectCard({
 
   const gridDayCount = isSingleDayTimetable ? 1 : dayCount;
 
+  /** iOS Safari often ignores `repeat(var(--n), …px)`; inline columns guarantee scrollWidth. */
+  const [viewportNarrowForTimetable, setViewportNarrowForTimetable] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+    const mq = window.matchMedia('(max-width: 1024px)');
+    const onChange = () => setViewportNarrowForTimetable(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  const mobileFixedTimetableStyle = useMemo(() => {
+    if (!viewportNarrowForTimetable || isSingleDayTimetable || gridDayCount < 1) {
+      return null;
+    }
+    const dayPx = 118;
+    const timePx = 72;
+    return {
+      gridTemplateColumns: `${timePx}px repeat(${gridDayCount}, ${dayPx}px)`,
+      width: 'max-content',
+      minWidth: `${timePx + gridDayCount * dayPx}px`,
+      flexShrink: 0,
+    };
+  }, [viewportNarrowForTimetable, isSingleDayTimetable, gridDayCount]);
+
+  const mobileScrollTrackStyle = useMemo(
+    () =>
+      mobileFixedTimetableStyle
+        ? {
+            width: 'max-content',
+            minWidth: '100%',
+            alignItems: 'flex-start',
+          }
+        : null,
+    [mobileFixedTimetableStyle],
+  );
+
   const [sessions, setSessions] = useState(() => {
     return buildDefaultSessions(layout);
   });
@@ -1012,27 +1051,34 @@ export default function ProjectCard({
         </div>
         <div className="schedule-dynamic" style={scheduleVars}>
           <div className={`schedule-scroll${isSingleDayTimetable ? ' schedule-scroll--single-day' : ''}`}>
-            <div className={scheduleHeadClass}>
-              <span className="time-head">Time</span>
-              {dayIndicesToRender.map((dayIndex) => {
-                const day = displayDayLabels[dayIndex];
-                return (
-                <span
-                  key={`${day}-${dayIndex}`}
-                  className={`day-head${columnHolidayLabels[dayIndex] ? ' day-head--holiday' : ''}${todayColumnIndex === dayIndex ? ' day-head--today' : ''}`}
-                  title={
-                    columnHolidayLabels[dayIndex]
-                      ? `Holiday: ${columnHolidayLabels[dayIndex]}`
-                      : undefined
-                  }
-                >
-                  <span className="day-head-label">{day}</span>
-                </span>
-                );
-              })}
-            </div>
+            <div
+              className={`schedule-scroll-track${isSingleDayTimetable ? ' schedule-scroll-track--single-day' : ''}`}
+              style={mobileScrollTrackStyle ?? undefined}
+            >
+              <div className={scheduleHeadClass} style={mobileFixedTimetableStyle ?? undefined}>
+                <span className="time-head">Time</span>
+                {dayIndicesToRender.map((dayIndex) => {
+                  const day = displayDayLabels[dayIndex];
+                  return (
+                  <span
+                    key={`${day}-${dayIndex}`}
+                    className={`day-head${columnHolidayLabels[dayIndex] ? ' day-head--holiday' : ''}${todayColumnIndex === dayIndex ? ' day-head--today' : ''}`}
+                    title={
+                      columnHolidayLabels[dayIndex]
+                        ? `Holiday: ${columnHolidayLabels[dayIndex]}`
+                        : undefined
+                    }
+                  >
+                    <span className="day-head-label">{day}</span>
+                  </span>
+                  );
+                })}
+              </div>
 
-            <div className={`schedule-grid${isSingleDayTimetable ? ' schedule-grid--single-day' : ''}`}>
+              <div
+                className={`schedule-grid${isSingleDayTimetable ? ' schedule-grid--single-day' : ''}`}
+                style={mobileFixedTimetableStyle ?? undefined}
+              >
               <div className="time-col">
                 {rowSegments.map((seg) => (
                   <span key={seg.rowIndex} className="time-label">
@@ -1130,6 +1176,7 @@ export default function ProjectCard({
                 </div>
                 );
               })}
+              </div>
             </div>
           </div>
         </div>

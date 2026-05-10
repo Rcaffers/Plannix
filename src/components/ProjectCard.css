@@ -17,7 +17,8 @@
 
 .schedule-card {
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-width: 0;
   background: #fcfaf6;
 }
 
@@ -296,13 +297,38 @@
   --timetable-days: 5;
   --timetable-periods: 5;
   --today-col-inner-line: rgba(56, 114, 108, 0.38);
+  min-width: 0;
 }
 
 .schedule-scroll {
   overflow-x: auto;
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior-x: contain;
   width: 100%;
+}
+
+.schedule-scroll:not(.schedule-scroll--single-day) {
+  min-width: 0;
+}
+
+/* Keeps the grid wider than the viewport on mobile WebKit; without this, 1fr columns
+   can collapse to the scrollport width and horizontal scroll snaps back to 0. */
+.schedule-scroll:not(.schedule-scroll--single-day) {
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: auto;
+}
+
+.schedule-scroll-track {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.schedule-scroll-track--single-day {
+  width: 100%;
+  min-width: 0;
 }
 
 .schedule-head {
@@ -911,14 +937,15 @@
     margin-left: 0;
   }
 
-  .schedule-head:not(.schedule-head--single-day),
-  .schedule-grid:not(.schedule-grid--single-day) {
-    grid-template-columns: 72px repeat(var(--timetable-days, 5), minmax(100px, 1fr));
-    min-width: calc(72px + var(--timetable-days, 5) * 100px);
-  }
-
   .schedule-grid--single-day {
     grid-template-columns: 72px minmax(0, 1fr);
     min-width: 0;
+    width: 100%;
+  }
+}
+
+@media (max-width: 1024px) {
+  .schedule-scroll:not(.schedule-scroll--single-day) {
+    touch-action: pan-x pan-y;
   }
 }

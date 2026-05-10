@@ -1,5 +1,7 @@
 .page-shell {
-  overflow: clip;
+  /* Allow nested horizontal overflow (timetable); clip only vertically. */
+  overflow-x: visible;
+  overflow-y: clip;
 }
 
 .content-section {

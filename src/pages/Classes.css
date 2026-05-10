@@ -95,10 +95,6 @@
   min-width: 0;
 }
 
-.classes-input-timetable .schedule-scroll:not(.schedule-scroll--single-day) {
-  touch-action: pan-x pan-y;
-}
-
 .classes-form {
   display: grid;
   gap: 18px;
