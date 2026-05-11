@@ -19,7 +19,7 @@ import {
   TIMETABLE_CYCLE,
 } from '../utils/timetableLayout';
 import { loadTimetableEditModeFromStorage, saveTimetableEditModeToStorage } from '../utils/timetableEditModeStorage';
-import { fetchClassesPlan, fetchTimetableSessions, saveTimetableSessions } from '../utils/api';
+import { clearTimetableSessionsForLayout, fetchClassesPlan, fetchTimetableSessions, saveTimetableSessions } from '../utils/api';
 import {
   computeAvailableClassOptions,
   getPlannedClassEntries,
@@ -483,23 +483,39 @@ export default function ProjectCard({
   }
 
   function handleClearTimetable() {
-    if (!enableEditing || sessions.length === 0) {
+    if (!enableEditing) {
       return;
     }
-    const clearsBothWeeks = layout.cycle === TIMETABLE_CYCLE.TWO_WEEK && weekMode === 'fixed';
-    const confirmMessage = clearsBothWeeks
-      ? 'Clear all classes from both Week A and Week B timetables?'
-      : 'Clear all classes from this timetable?';
-    if (!window.confirm(confirmMessage)) {
+    const clearsAllStoredWeeks = weekMode === 'fixed';
+    if (!clearsAllStoredWeeks && sessions.length === 0) {
+      return;
+    }
+
+    if (clearsAllStoredWeeks) {
+      if (
+        !window.confirm(
+          'This removes every stored class placement for this timetable layout: Week A/B (input) and all calendar weeks on the main timetable. Continue?',
+        )
+      ) {
+        return;
+      }
+      clearTimetableSessionsForLayout({ layoutKey })
+        .then(() => {
+          setSessions(buildDefaultSessions(layout));
+        })
+        .catch(() => {
+          window.alert('Could not clear all timetable data. Check your connection and try again.');
+        });
+      closeLessonModal();
+      return;
+    }
+
+    if (!window.confirm('Clear all classes from this timetable?')) {
       return;
     }
     const emptySessions = [];
     setSessions(emptySessions);
     saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: emptySessions }).catch(() => {});
-    if (clearsBothWeeks) {
-      const otherWeekKey = activeWeekKey === 'cycle-1' ? 'cycle-2' : 'cycle-1';
-      saveTimetableSessions({ layoutKey, weekKey: otherWeekKey, sessions: emptySessions }).catch(() => {});
-    }
     closeLessonModal();
   }
 
@@ -1092,7 +1108,7 @@ export default function ProjectCard({
                 type="button"
                 className="schedule-edit-toggle schedule-edit-toggle--danger"
                 onClick={handleClearTimetable}
-                disabled={sessions.length === 0}
+                disabled={weekMode !== 'fixed' && sessions.length === 0}
               >
                 Clear timetable
               </button>
