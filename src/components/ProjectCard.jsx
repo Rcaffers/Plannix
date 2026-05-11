@@ -11,7 +11,7 @@ import {
   pushLessonDetailsForwardAlongSameClassAhead,
   pushLessonDetailsForwardAcrossWeeks,
 } from '../utils/timetablePushClassForward';
-import { countFullHolidayWeeksBeforeMonday, holidayLabelForLocalDate } from '../utils/academicYear';
+import { countFullHolidayWeeksBeforeMonday, getAcademicTimetableMondayBounds, holidayLabelForLocalDate } from '../utils/academicYear';
 import {
   buildDefaultSessions,
   makeLayoutKey,
@@ -45,6 +45,26 @@ function formatDateKeyPart(date) {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+function clampWeekStartForDateMode(weekMonday, bounds) {
+  const w = startOfWeek(new Date(weekMonday));
+  if (!bounds?.minMonday && !bounds?.maxMonday) {
+    return w;
+  }
+  if (bounds.minMonday) {
+    const minT = startOfWeek(new Date(bounds.minMonday)).getTime();
+    if (w.getTime() < minT) {
+      return new Date(minT);
+    }
+  }
+  if (bounds.maxMonday) {
+    const maxT = startOfWeek(new Date(bounds.maxMonday)).getTime();
+    if (w.getTime() > maxT) {
+      return new Date(maxT);
+    }
+  }
+  return w;
 }
 
 function makeDateModeWeekKey(layout, weekStartDate, repeatingWeekKey) {
@@ -147,6 +167,10 @@ export default function ProjectCard({
 }) {
   const { layout, dayLabels, rowSegments } = useTimetableLayout();
   const { academicYear } = useAcademicYear();
+  const timetableMondayBounds = useMemo(
+    () => getAcademicTimetableMondayBounds(academicYear),
+    [academicYear],
+  );
   const isTwoWeekCycle = layout.cycle === TIMETABLE_CYCLE.TWO_WEEK;
   const displayDayLabels = useMemo(() => {
     if (!isTwoWeekCycle) return dayLabels;
@@ -155,6 +179,13 @@ export default function ProjectCard({
   const dayCount = displayDayLabels.length;
   const layoutKey = useMemo(() => makeLayoutKey(layout), [layout]);
   const [weekStartDate, setWeekStartDate] = useState(() => startOfWeek(new Date()));
+
+  useEffect(() => {
+    if (weekMode !== 'date') {
+      return;
+    }
+    setWeekStartDate((cur) => clampWeekStartForDateMode(cur, timetableMondayBounds));
+  }, [weekMode, timetableMondayBounds]);
   const isoWeekNumber = useMemo(() => getIsoWeekNumber(weekStartDate), [weekStartDate]);
   const repeatingWeekKey = useMemo(() => {
     if (layout.cycle !== TIMETABLE_CYCLE.TWO_WEEK) return 'cycle-1';
@@ -173,6 +204,26 @@ export default function ProjectCard({
     const fullHolidayWeeksBefore = countFullHolidayWeeksBeforeMonday(academicYear, date);
     const adjustedIso = getIsoWeekNumber(date) + fullHolidayWeeksBefore;
     return adjustedIso % 2 === 0 ? 'cycle-2' : 'cycle-1';
+  }
+
+  async function fetchInheritanceTemplateSessionsForWeekDate(weekDate) {
+    const primaryCycle = repeatingWeekKeyForDate(weekDate);
+    const keys =
+      layout.cycle === TIMETABLE_CYCLE.TWO_WEEK
+        ? [primaryCycle, primaryCycle === 'cycle-1' ? 'cycle-2' : 'cycle-1']
+        : [primaryCycle];
+    for (const wk of keys) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const inherited = await fetchTimetableSessions({ layoutKey, weekKey: wk });
+        if (inherited && inherited.length) {
+          return asClassPlacementTemplate(pruneSessionsToGrid(inherited, layout));
+        }
+      } catch {
+        /* try next cycle key */
+      }
+    }
+    return [];
   }
   const weekCommencingLabel = useMemo(() => {
     if (weekMode !== 'date') return fixedWeekLabel;
@@ -336,11 +387,10 @@ export default function ProjectCard({
           return;
         }
         if (weekMode === 'date') {
-          const inheritedWeekKey = repeatingWeekKeyForDate(weekStartDate);
-          const inherited = await fetchTimetableSessions({ layoutKey, weekKey: inheritedWeekKey });
+          const inherited = await fetchInheritanceTemplateSessionsForWeekDate(weekStartDate);
           if (cancelled) return;
           if (inherited && inherited.length) {
-            setSessions(asClassPlacementTemplate(pruneSessionsToGrid(inherited, layout)));
+            setSessions(inherited);
             return;
           }
         }
@@ -457,12 +507,16 @@ export default function ProjectCard({
     setWeekStartDate((current) => {
       const next = new Date(current);
       next.setDate(next.getDate() + offset * 7);
-      return next;
+      if (weekMode !== 'date') {
+        return next;
+      }
+      return clampWeekStartForDateMode(next, timetableMondayBounds);
     });
   }
 
   function jumpToCurrentWeek() {
-    setWeekStartDate(startOfWeek(new Date()));
+    const mon = startOfWeek(new Date());
+    setWeekStartDate(weekMode === 'date' ? clampWeekStartForDateMode(mon, timetableMondayBounds) : mon);
   }
 
   function moveCompactDay(delta) {
@@ -483,7 +537,10 @@ export default function ProjectCard({
   }
 
   function jumpToToday() {
-    const monday = startOfWeek(new Date());
+    let monday = startOfWeek(new Date());
+    if (weekMode === 'date') {
+      monday = clampWeekStartForDateMode(monday, timetableMondayBounds);
+    }
     setWeekStartDate(monday);
     const idx = getCompactBootstrapDayIndex({ weekStartDate: monday, dayCount, weekMode });
     const maxIdx = Math.max(0, dayCount - 1);
@@ -500,7 +557,10 @@ export default function ProjectCard({
     const [y, mo, d] = parts;
     if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return;
     const pickedNoon = new Date(y, mo - 1, d, 12, 0, 0, 0);
-    const monday = startOfWeek(pickedNoon);
+    let monday = startOfWeek(pickedNoon);
+    if (weekMode === 'date') {
+      monday = clampWeekStartForDateMode(monday, timetableMondayBounds);
+    }
     const mondayNoon = new Date(monday);
     mondayNoon.setHours(12, 0, 0, 0);
     const diffDays = Math.floor((pickedNoon.getTime() - mondayNoon.getTime()) / 86400000);
@@ -712,16 +772,11 @@ export default function ProjectCard({
 
     const inheritedCache = new Map();
     const fetchInheritedTemplate = async (weekDate) => {
-      const inheritedWeekKey = repeatingWeekKeyForDate(weekDate);
-      if (!inheritedCache.has(inheritedWeekKey)) {
-        inheritedCache.set(
-          inheritedWeekKey,
-          fetchTimetableSessions({ layoutKey, weekKey: inheritedWeekKey })
-            .then((inherited) => asClassPlacementTemplate(pruneSessionsToGrid(inherited, layout)))
-            .catch(() => []),
-        );
+      const primary = repeatingWeekKeyForDate(weekDate);
+      if (!inheritedCache.has(primary)) {
+        inheritedCache.set(primary, fetchInheritanceTemplateSessionsForWeekDate(weekDate));
       }
-      return inheritedCache.get(inheritedWeekKey);
+      return inheritedCache.get(primary);
     };
 
     const fetchTargets = orderedWeekKeys
@@ -856,16 +911,11 @@ export default function ProjectCard({
 
     const inheritedCache = new Map();
     const fetchInheritedTemplate = async (weekDate) => {
-      const inheritedWeekKey = repeatingWeekKeyForDate(weekDate);
-      if (!inheritedCache.has(inheritedWeekKey)) {
-        inheritedCache.set(
-          inheritedWeekKey,
-          fetchTimetableSessions({ layoutKey, weekKey: inheritedWeekKey })
-            .then((inherited) => asClassPlacementTemplate(pruneSessionsToGrid(inherited, layout)))
-            .catch(() => []),
-        );
+      const primary = repeatingWeekKeyForDate(weekDate);
+      if (!inheritedCache.has(primary)) {
+        inheritedCache.set(primary, fetchInheritanceTemplateSessionsForWeekDate(weekDate));
       }
-      return inheritedCache.get(inheritedWeekKey);
+      return inheritedCache.get(primary);
     };
 
     const fetchTargets = orderedWeekKeys

@@ -89,6 +89,38 @@ export function isFullCalendarWeekHoliday(academicYear, weekMonday) {
 
 const DEFAULT_LOOKBACK_WEEKS = 52 * 12;
 
+/** Monday 00:00 local for the ISO week containing `date` (matches timetable week columns). */
+function startOfWeekMondayLocal(date) {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  const day = result.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  result.setDate(result.getDate() + diff);
+  return result;
+}
+
+/**
+ * First/last Monday of the timetable window when an academic start date is set:
+ * from the Monday of the week containing that date through the Monday of the week
+ * containing (start + 365 days). Used to clamp calendar navigation on the main timetable.
+ */
+export function getAcademicTimetableMondayBounds(academicYear) {
+  const ymd = String(academicYear?.startDate || '').trim();
+  if (!isValidYmd(ymd)) {
+    return { minMonday: null, maxMonday: null };
+  }
+  const [y, m, d] = ymd.split('-').map((x) => parseInt(x, 10));
+  const start = new Date(y, m - 1, d, 12, 0, 0, 0);
+  if (Number.isNaN(start.getTime())) {
+    return { minMonday: null, maxMonday: null };
+  }
+  const minMonday = startOfWeekMondayLocal(start);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 365);
+  const maxMonday = startOfWeekMondayLocal(end);
+  return { minMonday, maxMonday };
+}
+
 /**
  * Counts Mon-start school weeks strictly before `weekMonday` where every weekday is a holiday.
  * Used to shift two-week timetable (A/B) so a full holiday week does not break alternation.
