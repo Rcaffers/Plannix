@@ -228,7 +228,16 @@ on public.plannix_organisation_user_access_roles
 for select
 to authenticated
 using (
-  (select private.plannix_is_organisation_member(organisation_id))
+  exists (
+    select 1
+    from public.plannix_organisation_users ou
+    where ou.id = plannix_organisation_user_access_roles.organisation_user_id
+      and (
+        select private.plannix_is_organisation_member(
+          ou.organisation_id
+        )
+      )
+  )
 );
 
 create policy "Members can view organisation department users"
