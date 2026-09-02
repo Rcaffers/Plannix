@@ -32,6 +32,37 @@ on function private.plannix_is_organisation_member(uuid)
 to authenticated;
 
 -- ============================================================
+-- SHARED ORGANISATION PROFILE HELPER
+-- ============================================================
+
+create or replace function private.plannix_shares_organisation_with_user(
+  target_user_id uuid
+)
+returns boolean
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select exists (
+    select 1
+    from public.plannix_organisation_users current_ou
+    join public.plannix_organisation_users target_ou
+      on target_ou.organisation_id = current_ou.organisation_id
+    where current_ou.user_id = (select auth.uid())
+      and target_ou.user_id = target_user_id
+  );
+$$;
+
+revoke execute
+on function private.plannix_shares_organisation_with_user(uuid)
+from public;
+
+grant execute
+on function private.plannix_shares_organisation_with_user(uuid)
+to authenticated;
+
+-- ============================================================
 -- ENABLE ROW LEVEL SECURITY
 -- ============================================================
 
@@ -88,6 +119,16 @@ for select
 to authenticated
 using (
   id = (select auth.uid())
+);
+
+-- Users can also view profiles belonging to people who share
+-- one of their organisations.
+create policy "Users can view profiles in their organisations"
+on public.plannix_users
+for select
+to authenticated
+using (
+  (select private.plannix_shares_organisation_with_user(id))
 );
 
 -- A signed-in user can update their own Plannix profile.

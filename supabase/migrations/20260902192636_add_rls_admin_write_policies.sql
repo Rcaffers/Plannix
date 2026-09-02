@@ -52,6 +52,16 @@ with check (
 -- ORGANISATION MEMBERSHIP ADMIN POLICIES
 -- ============================================================
 
+-- Organisation Admins can view all memberships
+-- belonging to organisations they administer.
+create policy "Organisation admins can view organisation members"
+on public.plannix_organisation_users
+for select
+to authenticated
+using (
+  (select private.plannix_is_organisation_admin(organisation_id))
+);
+
 -- Organisation Admins can add users to their organisation.
 create policy "Organisation admins can add organisation members"
 on public.plannix_organisation_users
@@ -1185,6 +1195,32 @@ with check (
 create policy "Organisation admins can remove year group position users"
 on public.plannix_year_group_position_users
 for delete
+to authenticated
+using (
+  (select private.plannix_is_organisation_admin(organisation_id))
+);
+
+-- Organisation Admins can view all memberships
+-- belonging to organisations they administer.
+create policy "Organisation admins can view organisation members"
+on public.plannix_organisation_users
+for select
+to authenticated
+using (
+  (select private.plannix_is_organisation_admin(organisation_id))
+);
+
+-- ============================================================
+-- ADMIN READ ACCESS TO ORGANISATION MEMBERS
+-- ============================================================
+
+-- Normal users can already see their own membership row.
+-- This additional policy allows Organisation Admins to see
+-- all membership rows within organisations they administer.
+
+create policy "Organisation admins can view organisation members"
+on public.plannix_organisation_users
+for select
 to authenticated
 using (
   (select private.plannix_is_organisation_admin(organisation_id))
