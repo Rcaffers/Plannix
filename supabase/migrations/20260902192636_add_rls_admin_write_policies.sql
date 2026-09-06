@@ -1202,6 +1202,9 @@ using (
 
 -- Organisation Admins can view all memberships
 -- belonging to organisations they administer.
+drop policy if exists "Organisation admins can view organisation members"
+on public.plannix_organisation_users;
+
 create policy "Organisation admins can view organisation members"
 on public.plannix_organisation_users
 for select
