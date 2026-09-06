@@ -614,7 +614,7 @@ using (
   and exists (
     select 1
     from public.plannix_timetable_sessions ts
-    where ts.id = plannix_session_teachers.timetable_session_id
+    where ts.id = plannix_session_teachers.session_id
       and ts.organisation_id = plannix_session_teachers.organisation_id
       and (
         select private.plannix_student_is_in_class(
@@ -875,39 +875,60 @@ to authenticated;
 drop policy if exists "Users can view profiles in their organisations"
 on public.plannix_users;
 
--- Admin, Staff and Read Only can see profiles of users
--- who share one of their organisations.
+-- ============================================================
+-- STAFF PROFILE VISIBILITY HELPER
+-- ============================================================
+
+create or replace function private.plannix_staff_can_view_user(
+  target_user_id uuid
+)
+returns boolean
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select exists (
+    select 1
+    from public.plannix_organisation_users current_ou
+    join public.plannix_organisation_users target_ou
+      on target_ou.organisation_id = current_ou.organisation_id
+    where current_ou.user_id = (select auth.uid())
+      and target_ou.user_id = target_user_id
+      and (
+        private.plannix_has_access_role(
+          current_ou.organisation_id,
+          'Organisation Admin'
+        )
+        or
+        private.plannix_has_access_role(
+          current_ou.organisation_id,
+          'Staff'
+        )
+        or
+        private.plannix_has_access_role(
+          current_ou.organisation_id,
+          'Read Only'
+        )
+      )
+  );
+$$;
+
+revoke execute
+on function private.plannix_staff_can_view_user(uuid)
+from public;
+
+grant execute
+on function private.plannix_staff_can_view_user(uuid)
+to authenticated;
+
+
 create policy "Staff roles can view organisation profiles"
 on public.plannix_users
 for select
 to authenticated
 using (
-  (
-    select private.plannix_shares_organisation_with_user(id)
-  )
-  and (
-    exists (
-      select 1
-      from public.plannix_organisation_users ou
-      where ou.user_id = (select auth.uid())
-        and (
-          private.plannix_has_access_role(
-            ou.organisation_id,
-            'Organisation Admin'
-          )
-          or
-          private.plannix_has_access_role(
-            ou.organisation_id,
-            'Staff'
-          )
-          or
-          private.plannix_has_access_role(
-            ou.organisation_id,
-            'Read Only'
-          )
-        )
-    )
-  )
+  (select private.plannix_staff_can_view_user(id))
 );
 
 -- Students can only see profiles of teachers attached
