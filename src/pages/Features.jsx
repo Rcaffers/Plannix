@@ -7,10 +7,10 @@ export default function Features({ user }) {
     <main className="features-page">
       <div className="container features-inner">
         <header className="features-header">
-          <p className="features-kicker">Plans</p>
-          <h1 className="features-title">Choose the level that fits you</h1>
+          <p className="features-kicker">Features</p>
+          <h1 className="features-title">Explore what Plannix can do</h1>
           <p className="features-lead">
-            Three ways to use Plannix—each tier adds depth for individuals, whole schools, and enterprise-style
+            Three feature areas for using Plannix as an individual, across a whole school, or in enterprise-style
             operations.
           </p>
         </header>

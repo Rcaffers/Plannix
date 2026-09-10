@@ -27,9 +27,6 @@ export const env = Object.freeze({
   corsDebug: process.env.CORS_DEBUG === 'true',
   autoRunMigrations: process.env.AUTO_RUN_MIGRATIONS === 'true',
   enableDemoUser: process.env.ENABLE_DEMO_USER === 'true',
-  stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
-  stripePriceId: process.env.STRIPE_PRICE_ID || '',
-  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
   distDirectory: path.join(serverDirectory, '..', '..', 'dist'),
 });
 

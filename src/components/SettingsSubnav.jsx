@@ -5,7 +5,6 @@ export const SETTINGS_SUBNAV_ITEMS = [
   { to: '/settings/academic-year', label: 'Academic year' },
   { to: '/classes', end: true, label: 'Classes' },
   { to: '/classes/input', label: 'Input classes' },
-  { to: '/settings/subscription', label: 'Subscription' },
 ];
 
 export default function SettingsSubnav() {

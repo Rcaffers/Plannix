@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import SettingsSubnav from '../components/SettingsSubnav';
+import { deleteAccount } from '../utils/api';
 import { useTimetableLayout } from '../context/TimetableLayoutContext';
 import { DEFAULT_LUNCH, DEFAULT_REGISTRATION, TIMETABLE_CYCLE } from '../utils/timetableLayout';
 import './Settings.css';
@@ -23,6 +24,8 @@ export default function Settings() {
   const { layout, setLayout, resetLayout } = useTimetableLayout();
   const [draft, setDraft] = useState(layout);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [accountError, setAccountError] = useState('');
 
   useEffect(() => {
     setDraft(layout);
@@ -37,6 +40,27 @@ export default function Settings() {
 
   function handleResetTimetable() {
     resetLayout();
+  }
+
+  async function handleDeleteAccount() {
+    const confirmed = window.confirm(
+      'Delete your account and remove all timetable/class data? This cannot be undone.',
+    );
+    if (!confirmed) return;
+    const secondConfirm = window.confirm(
+      'Final confirmation: this permanently deletes your account data. Continue?',
+    );
+    if (!secondConfirm) return;
+
+    setAccountError('');
+    setIsDeletingAccount(true);
+    try {
+      await deleteAccount();
+      window.location.assign('/');
+    } catch (error) {
+      setAccountError(error.message || 'Could not delete account.');
+      setIsDeletingAccount(false);
+    }
   }
 
   function setBreakCount(count) {
@@ -324,6 +348,24 @@ export default function Settings() {
           </div>
           {savedFlash ? <p className="settings-saved" role="status">Timetable layout saved.</p> : null}
         </form>
+
+        <section className="settings-timetable-form settings-danger-zone">
+          <h2 className="settings-section-title">Delete account</h2>
+          <p className="settings-hint">
+            Permanently remove your account and all of its timetable and class data.
+          </p>
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="settings-reset settings-reset--danger"
+              onClick={handleDeleteAccount}
+              disabled={isDeletingAccount}
+            >
+              {isDeletingAccount ? 'Deleting account…' : 'Delete account'}
+            </button>
+          </div>
+          {accountError ? <p className="settings-hint settings-hint--error">{accountError}</p> : null}
+        </section>
       </div>
     </main>
   );

@@ -8,7 +8,7 @@ export default function PrivacyLegalContent() {
         </h2>
         <p>
           The <strong>data controller</strong> for personal data processed in connection with the <strong>Plannix</strong>{' '}
-          website and service is the legal entity operating Plannix, identified in signup, billing, or site contact
+          website and service is the legal entity operating Plannix, identified in signup or site contact
           materials (the <strong>“we”</strong>, <strong>“us”</strong>, or <strong>“controller”</strong>). If you are unsure
           who the controller is, use the contact details in the site footer or your account communications.
         </p>
@@ -24,7 +24,7 @@ export default function PrivacyLegalContent() {
         </h2>
         <p>
           This privacy notice describes how we process <strong>personal data</strong> when you visit our website, create
-          an account, use Plannix, or interact with us (for example support or payment). It is intended to meet the
+          an account, use Plannix, or interact with us (for example through support). It is intended to meet the
           transparency requirements of the <strong>General Data Protection Regulation</strong> (EU) 2016/679 (
           <strong>GDPR</strong>) and, where applicable, the UK GDPR and the Data Protection Act 2018.
         </p>
@@ -49,11 +49,6 @@ export default function PrivacyLegalContent() {
           data where you have a lawful basis to do so).
         </p>
         <p>
-          <strong>Transaction and billing:</strong> subscription or payment-related data processed by our payment
-          provider (for example Stripe), such as transaction IDs, plan type, and billing status. We do not store full
-          payment card numbers on our servers when payments are handled by the provider.
-        </p>
-        <p>
           <strong>Technical and usage data:</strong> IP address, browser type, device identifiers, approximate location
           derived from IP, timestamps, and information collected via cookies or similar technologies where applicable
           (see section 8).
@@ -70,7 +65,7 @@ export default function PrivacyLegalContent() {
         <p>We process personal data only where a lawful basis applies. Typically:</p>
         <p>
           <strong>Performance of a contract</strong> (Art. 6(1)(b) GDPR): to provide Plannix, create and manage your
-          account, process payments for paid plans, and deliver features you subscribe to.
+          account and deliver the service features you use.
         </p>
         <p>
           <strong>Legitimate interests</strong> (Art. 6(1)(f) GDPR): to secure the service, prevent abuse and fraud,
@@ -97,8 +92,8 @@ export default function PrivacyLegalContent() {
           and under contracts that require appropriate security and confidentiality. Categories may include:
         </p>
         <p>
-          <strong>Hosting and infrastructure</strong> (servers, storage), <strong>payment processing</strong> (e.g.
-          Stripe or comparable providers), <strong>email or transactional messaging</strong>, and{' '}
+          <strong>Hosting and infrastructure</strong> (servers, storage),{' '}
+          <strong>email or transactional messaging</strong>, and{' '}
           <strong>analytics or security</strong> tools where used.
         </p>
         <p>

@@ -272,26 +272,8 @@
   color: #276749;
 }
 
-.settings-subscription-card {
-  padding: 14px 14px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(63, 127, 120, 0.2);
-  background: rgba(255, 255, 255, 0.55);
-  display: grid;
-  gap: 6px;
-}
-
-.settings-subscription-plan {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  color: #244b47;
-}
-
-.settings-subscription-meta {
-  margin: 0;
-  font-size: 0.9rem;
-  color: rgba(17, 17, 17, 0.78);
+.settings-danger-zone {
+  margin-top: 24px;
 }
 
 .settings-fieldset {

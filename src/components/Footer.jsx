@@ -49,7 +49,7 @@ export default function Footer({ user }) {
                   <Link to="/">Home</Link>
                 </li>
                 <li>
-                  <Link to="/features">Plans &amp; pricing</Link>
+                  <Link to="/features">Features</Link>
                 </li>
                 <li>
                   <Link to="/timetable">Timetable</Link>

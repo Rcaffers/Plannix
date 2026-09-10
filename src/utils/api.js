@@ -141,25 +141,6 @@ export async function resetPasswordWithToken({ token, password }) {
   return payload;
 }
 
-export async function fetchAuthConfig() {
-  const response = await fetch(`${API_BASE_URL}/auth/config`, {
-    method: 'GET',
-    credentials: 'include',
-  });
-  if (!response.ok) {
-    return null;
-  }
-  const data = await parseJsonSafe(response);
-  if (data && typeof data.signupRequiresPayment === 'boolean') {
-    return {
-      signupRequiresPayment: data.signupRequiresPayment,
-      stripePublishableKey:
-        typeof data.stripePublishableKey === 'string' ? data.stripePublishableKey : '',
-    };
-  }
-  return null;
-}
-
 export async function fetchAuthMe() {
   const response = await fetch(`${API_BASE_URL}/auth/me`, {
     method: 'GET',
@@ -170,30 +151,6 @@ export async function fetchAuthMe() {
   }
   const data = await parseJsonSafe(response);
   return { ok: true, user: data?.user ?? data ?? null };
-}
-
-export async function completePaidSignupSession(sessionId) {
-  const response = await fetch(`${API_BASE_URL}/auth/signup/complete`, {
-    method: 'POST',
-    headers: JSON_POST_HEADERS,
-    credentials: 'include',
-    body: JSON.stringify({ session_id: sessionId }),
-  });
-  const payload = await parseJsonSafe(response);
-  const user = response.ok && payload?.user ? payload.user : null;
-  return { user };
-}
-
-export async function completePaidSignupSubscription(subscriptionId) {
-  const response = await fetch(`${API_BASE_URL}/auth/signup/complete-subscription`, {
-    method: 'POST',
-    headers: JSON_POST_HEADERS,
-    credentials: 'include',
-    body: JSON.stringify({ subscription_id: subscriptionId }),
-  });
-  const payload = await parseJsonSafe(response);
-  const user = response.ok && payload?.user ? payload.user : null;
-  return { user };
 }
 
 export async function loginWithCredentials({ email, password }) {
@@ -241,28 +198,6 @@ export async function logoutSession() {
   });
 }
 
-export async function applySignupPromotionCode({ subscriptionId, promotionCode }) {
-  const response = await fetch(`${API_BASE_URL}/auth/signup/apply-promotion-code`, {
-    method: 'POST',
-    headers: JSON_POST_HEADERS,
-    credentials: 'include',
-    body: JSON.stringify({
-      subscription_id: subscriptionId,
-      promotion_code: promotionCode,
-    }),
-  });
-  const payload = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(payload?.message || 'Could not apply that promotion code.');
-  }
-  return {
-    clientSecret: payload.clientSecret,
-    subscriptionId: payload.subscriptionId || subscriptionId,
-    subscriptionPrice: payload.subscriptionPrice ?? null,
-    dueToday: payload.dueToday ?? null,
-  };
-}
-
 export async function signupAccount({ name, email, password }) {
   let response;
   try {
@@ -281,23 +216,8 @@ export async function signupAccount({ name, email, password }) {
     throw new Error(payload?.message || 'Unable to create your account right now.');
   }
 
-  if (payload?.clientSecret) {
-    return {
-      redirecting: true,
-      clientSecret: payload.clientSecret,
-      subscriptionId: payload.subscriptionId || '',
-      subscriptionPrice: payload.subscriptionPrice ?? null,
-      dueToday: payload.dueToday ?? null,
-      user: null,
-    };
-  }
-
-  if (payload?.checkoutUrl) {
-    return { redirecting: true, checkoutUrl: payload.checkoutUrl, user: null };
-  }
-
   const createdUser = payload?.user ?? payload ?? null;
-  return { redirecting: false, user: createdUser };
+  return { user: createdUser };
 }
 
 export async function fetchHolidayCountries() {
@@ -345,38 +265,6 @@ export async function fetchPublicHolidays({ countryCode, year }) {
     throw new Error(payload?.message || 'Could not load public holidays.');
   }
   return Array.isArray(payload?.holidays) ? payload.holidays : [];
-}
-
-export async function fetchSubscriptionSummary() {
-  const response = await fetch(`${API_BASE_URL}/billing/subscription-summary`, {
-    method: 'GET',
-    credentials: 'include',
-  });
-  const payload = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(payload?.message || 'Could not load subscription details.');
-  }
-  return {
-    enabled: Boolean(payload?.enabled),
-    subscription: payload?.subscription ?? null,
-    warning: String(payload?.warning || '').trim(),
-  };
-}
-
-export async function createBillingPortalSession({ mode = '', subscriptionId = '' } = {}) {
-  const response = await fetch(`${API_BASE_URL}/billing/portal-session`, {
-    method: 'POST',
-    headers: JSON_POST_HEADERS,
-    credentials: 'include',
-    body: JSON.stringify({ mode, subscriptionId }),
-  });
-  const payload = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(payload?.message || 'Could not open billing portal.');
-  }
-  return {
-    url: String(payload?.url || ''),
-  };
 }
 
 export async function deleteAccount() {

@@ -18,7 +18,7 @@ export default function TermsLegalContent() {
         </h3>
         <p>
           The service <strong>Plannix</strong> is operated by the business identified on this website and in signup or
-          billing communications (the <strong>“provider”</strong>). For pre-contract information required under the EU
+          site communications (the <strong>“provider”</strong>). For pre-contract information required under the EU
           Consumer Rights Directive (2011/83/EU) and similar UK rules, we publish contact details (including an email
           address for enquiries) in the footer or contact area of this site. You may request a copy of these terms in a
           durable medium at any time using that contact.
@@ -31,8 +31,8 @@ export default function TermsLegalContent() {
         </h3>
         <p>
           Plannix provides planning and timetable tools for educators, including account-based features as described on
-          the site at the time you subscribe or register. We may update or adjust features to improve security,
-          compatibility, or compliance; where a change materially reduces core functionality you have paid for, we will
+          the site at the time you register. We may update or adjust features to improve security,
+          compatibility, or compliance; where a change materially reduces core functionality, we will
           aim to give reasonable notice when practicable.
         </p>
       </section>
@@ -50,13 +50,11 @@ export default function TermsLegalContent() {
 
       <section className="terms-modal-section" aria-labelledby="terms-m-s4">
         <h3 id="terms-m-s4" className="terms-modal-section-title">
-          4. Price, billing &amp; taxes
+          4. Free access
         </h3>
         <p>
-          Prices, billing intervals, and currency are shown before you complete payment. Recurring subscriptions are
-          charged through our payment processor (e.g. Stripe) until cancelled in accordance with your plan and the
-          processor’s flows. Applicable VAT or other taxes may be added where required by law; the checkout or invoice
-          will show the amounts that apply to your purchase.
+          Plannix is currently provided without a subscription fee or payment requirement. We will provide clear notice
+          before introducing any paid service or materially changing the basis on which the service is offered.
         </p>
       </section>
 
@@ -73,24 +71,23 @@ export default function TermsLegalContent() {
           For <strong>digital content or services</strong> delivered immediately, the law allows the withdrawal right to
           end early if you <strong>expressly request immediate performance</strong> and{' '}
           <strong>acknowledge that you lose the right to withdraw</strong> once delivery or performance has begun. By
-          completing signup and payment where those acknowledgements are shown, you consent to immediate access where
+          completing signup where those acknowledgements are shown, you consent to immediate access where
           applicable.
         </p>
         <p>
           How to exercise any statutory right (including cancellation or withdrawal where still available) will follow the
-          process stated at checkout, in your account area, or via the contact details we publish. If you believe you
+          process stated in your account area or via the contact details we publish. If you believe you
           retain a withdrawal right, contact us without delay using the site contact details.
         </p>
       </section>
 
       <section className="terms-modal-section" aria-labelledby="terms-m-s6">
         <h3 id="terms-m-s6" className="terms-modal-section-title">
-          6. Ending your subscription
+          6. Ending your account
         </h3>
         <p>
-          You may cancel recurring billing according to the instructions we or our payment provider give (for example
-          through your customer billing portal or by contacting us). Cancellation stops future renewals; it does not
-          necessarily refund amounts already charged unless required by law or our stated policy.
+          You may stop using Plannix at any time and can delete your account through the account settings. Account
+          deletion permanently removes the account data covered by that action, subject to any retention required by law.
         </p>
       </section>
 
@@ -129,9 +126,8 @@ export default function TermsLegalContent() {
         <p>
           Nothing in these terms excludes or limits liability that cannot be limited under applicable law (including
           liability for death or personal injury caused by negligence, fraud, or other mandatory rights). Subject to
-          that, our total liability for claims arising from the service in any twelve-month period is limited to the fees
-          you paid to us for the service in that period, except where a higher minimum applies for consumers under
-          national law.
+          that, our liability is limited to the extent permitted by applicable law, including any mandatory protections
+          that apply to consumers under national law.
         </p>
       </section>
 
@@ -141,7 +137,7 @@ export default function TermsLegalContent() {
         </h3>
         <p>
           We may update these terms; the “Last updated” date will change and, where required, we will notify you or seek
-          acceptance before changes affect an ongoing subscription. Questions or notices should be sent using the contact
+          acceptance before material changes affect your use of the service. Questions or notices should be sent using the contact
           details published on this website.
         </p>
         <p>
