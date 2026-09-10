@@ -52,5 +52,11 @@ CI runs Gitleaks via `.github/workflows/gitleaks.yml`.
 ## Project layout
 
 - `src/` — React app (pages, components, contexts, utilities)
-- `server/auth-server.js` — Express app: auth, billing, timetable APIs, static `dist`
+- `src/App.jsx` — app composition, route gates, and auth/subscription session state
+- `server/app.js` — import-safe Express application entry point
+- `server/server.js` — environment validation, application initialization, and HTTP startup
+- `server/auth-server.js` — legacy auth and database routes retained during the staged refactor
+- `server/config/` — environment and CORS configuration
+- `server/middleware/` — API 404 and fallback error responses
+- `server/routes/` — route groups for contact, billing, holidays, and planner data APIs
 - `server/sql/` — database migrations

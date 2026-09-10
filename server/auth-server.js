@@ -2,7 +2,6 @@ import 'dotenv/config';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -10,78 +9,33 @@ import bcrypt from 'bcryptjs';
 import Stripe from 'stripe';
 import { Resend } from 'resend';
 import { createDbPool, mapClassRow, runMigrations } from './db.js';
+import {
+  COOKIE_OPTIONS,
+  DIST_DIR,
+  FRONTEND_ORIGINS,
+  PORT,
+  PRIMARY_FRONTEND_ORIGIN,
+  SESSION_COOKIE,
+  corsDelegate,
+  inferredPublicOrigin,
+  stripePriceId,
+  stripeSecretKey,
+  stripeWebhookSecret,
+} from './config.js';
+import { env } from './config/env.js';
+import { errorHandler, logRouteError, notFoundHandler, sendError } from './errors.js';
+import { registerBillingRoutes } from './routes/billing-routes.js';
+import { registerContactRoutes } from './routes/contact-routes.js';
+import { registerHolidayRoutes } from './routes/holiday-routes.js';
+import { registerPlannerRoutes } from './routes/planner-routes.js';
 
-const app = express();
-const PORT = Number(process.env.PORT || process.env.AUTH_PORT || 4000);
+export const app = express();
 /** Trust reverse proxy (DigitalOcean, Render, etc.) so `X-Forwarded-Proto` / host are correct for CORS and cookies. */
-app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 1) || 1);
-
-/** Comma-separated list (e.g. `https://app.example.com,https://www.example.com`). Login uses POST + JSON → CORS preflight; origin must be allowed or browsers show “Load failed”. */
-const FRONTEND_ORIGINS = String(process.env.FRONTEND_ORIGIN || 'http://localhost:5173')
-  .split(',')
-  .map((s) => s.trim().replace(/\/$/, ''))
-  .filter(Boolean);
-const SESSION_COOKIE = 'plannix_session';
-
-function inferredPublicOrigin(req) {
-  const host = String(req.get('x-forwarded-host') || req.get('host') || '')
-    .split(',')[0]
-    .trim();
-  if (!host) {
-    return '';
-  }
-  let proto = String(req.get('x-forwarded-proto') || (req.secure ? 'https' : 'http'))
-    .split(',')[0]
-    .trim()
-    .toLowerCase();
-  if (proto !== 'https' && proto !== 'http') {
-    proto = 'https';
-  }
-  if (host.endsWith('.ondigitalocean.app') && proto === 'http') {
-    proto = 'https';
-  }
-  return `${proto}://${host}`;
-}
-
-function corsDelegate(req, callback) {
-  const requestOrigin = req.headers.origin;
-  if (!requestOrigin) {
-    callback(null, { origin: true, credentials: true });
-    return;
-  }
-  if (FRONTEND_ORIGINS.includes(requestOrigin)) {
-    callback(null, { origin: true, credentials: true });
-    return;
-  }
-  const inferred = inferredPublicOrigin(req);
-  if (inferred && requestOrigin === inferred) {
-    callback(null, { origin: true, credentials: true });
-    return;
-  }
-  if (process.env.CORS_DEBUG === 'true') {
-    // eslint-disable-next-line no-console
-    console.error('[cors] blocked', { requestOrigin, FRONTEND_ORIGINS, inferred, host: req.get('host') });
-  }
-  callback(null, { origin: false, credentials: true });
-}
-
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
-const stripePriceId = process.env.STRIPE_PRICE_ID || '';
-const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
+app.set('trust proxy', env.trustProxyHops);
 
 const stripe = stripeSecretKey && stripePriceId ? new Stripe(stripeSecretKey) : null;
 const db = createDbPool();
 const pendingSignups = new Map();
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DIST_DIR = path.join(__dirname, '..', 'dist');
-
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  sameSite: 'lax',
-  secure: process.env.COOKIE_SECURE === 'true',
-  maxAge: 1000 * 60 * 60 * 24,
-};
 
 app.use(cors(corsDelegate));
 app.use(cookieParser());
@@ -112,8 +66,7 @@ app.post(
         try {
           await fulfillPaidCheckout(session.id);
         } catch (e) {
-          // eslint-disable-next-line no-console
-          console.error('checkout.session.completed fulfillment error:', e);
+          logRouteError('checkout.session.completed fulfillment error', e);
         }
       }
     }
@@ -556,77 +509,13 @@ async function fetchUkBankHolidaysForYear(year) {
     .filter((entry) => /^\d{4}-\d{2}-\d{2}$/.test(entry.date) && entry.date.startsWith(`${year}-`));
 }
 
-app.post('/api/contact', async (req, res) => {
-  const rawMessage = String(req.body?.message || '').trim();
-  let name = String(req.body?.name || '').trim();
-  let email = normalizeEmailInput(req.body?.email);
-
-  let sessionUser = null;
-  if (db) {
-    try {
-      sessionUser = await getSessionUser(req);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('contact: session lookup failed', err);
-      sessionUser = null;
-    }
-  }
-
-  if (sessionUser) {
-    name = String(sessionUser.name || '').trim() || name;
-    email = normalizeEmailInput(sessionUser.email) || email;
-  }
-
-  if (!name) {
-    return res.status(400).json({ message: 'Name is required.' });
-  }
-  if (!email || !email.includes('@')) {
-    return res.status(400).json({ message: 'A valid email is required.' });
-  }
-  if (rawMessage.length < 3) {
-    return res.status(400).json({ message: 'Please enter a message (at least a few characters).' });
-  }
-  if (rawMessage.length > 10000) {
-    return res.status(400).json({ message: 'Message is too long.' });
-  }
-
-  const apiKey = String(process.env.RESEND_API_KEY || '').trim();
-  const toEmail = String(process.env.CONTACT_TO_EMAIL || '').trim();
-  const fromEmail = String(
-    process.env.CONTACT_FROM_EMAIL || 'Plannix <noreply@plannix.co.uk>',
-  ).trim();
-
-  if (!apiKey || !toEmail) {
-    return res.status(503).json({
-      message:
-        'Contact form is not configured. Set RESEND_API_KEY and CONTACT_TO_EMAIL on the server.',
-    });
-  }
-
-  const resend = new Resend(apiKey);
-  const loggedInNote = sessionUser
-    ? '<p><em>Sent from a signed-in Plannix account.</em></p>'
-    : '';
-
-  const { error } = await resend.emails.send({
-    from: fromEmail,
-    to: toEmail,
-    replyTo: email,
-    subject: `Plannix contact: ${name}`,
-    html: `<p><strong>Name:</strong> ${escapeHtml(name)}</p>
-<p><strong>Email:</strong> ${escapeHtml(email)}</p>
-${loggedInNote}
-<p><strong>Message:</strong></p>
-<p>${escapeHtml(rawMessage).replace(/\n/g, '<br/>')}</p>`,
-  });
-
-  if (error) {
-    // eslint-disable-next-line no-console
-    console.error('Resend contact error:', error);
-    return res.status(502).json({ message: 'Could not send your message. Please try again later.' });
-  }
-
-  return res.json({ ok: true });
+registerContactRoutes({
+  app,
+  db,
+  escapeHtml,
+  getSessionUser,
+  logRouteError,
+  normalizeEmailInput,
 });
 
 app.get('/auth/config', (req, res) => {
@@ -718,9 +607,7 @@ app.post('/auth/forgot-password', async (req, res) => {
   try {
     await dbReplacePasswordResetToken(user.id, tokenHash, ttlHours);
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('forgot-password: token insert failed', err);
-    return res.status(500).json({ message: 'Could not start password reset. Please try again.' });
+    return sendError(res, err, 'Could not start password reset. Please try again.');
   }
 
   const resetUrl = `${publicBase.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(rawToken)}`;
@@ -738,8 +625,7 @@ app.post('/auth/forgot-password', async (req, res) => {
   });
 
   if (error) {
-    // eslint-disable-next-line no-console
-    console.error('Resend forgot-password error:', error);
+    logRouteError('Resend forgot-password error', error);
     return res.status(502).json({ message: 'Could not send reset email. Please try again later.' });
   }
 
@@ -765,9 +651,7 @@ app.post('/auth/reset-password', async (req, res) => {
   try {
     newHash = await bcrypt.hash(password, 10);
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('reset-password: hash failed', err);
-    return res.status(500).json({ message: 'Could not reset password. Please try again.' });
+    return sendError(res, err, 'Could not reset password. Please try again.');
   }
 
   try {
@@ -779,9 +663,7 @@ app.post('/auth/reset-password', async (req, res) => {
     }
     return res.json({ ok: true });
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('reset-password error:', err);
-    return res.status(500).json({ message: 'Could not reset password. Please try again.' });
+    return sendError(res, err, 'Could not reset password. Please try again.');
   }
 });
 
@@ -857,8 +739,7 @@ app.post('/auth/signup', async (req, res) => {
       });
     } catch (err) {
       pendingSignups.delete(pendingSignupId);
-      // eslint-disable-next-line no-console
-      console.error('Stripe subscription create error:', err);
+      logRouteError('Stripe subscription create error', err);
       const stripeMsg =
         err?.raw?.message || err?.message || 'Unable to start subscription with Stripe.';
       return res.status(502).json({
@@ -934,8 +815,7 @@ app.post('/auth/signup/apply-promotion-code', async (req, res) => {
     if (err.statusCode) {
       return res.status(err.statusCode).json({ message: err.message });
     }
-    // eslint-disable-next-line no-console
-    console.error('apply-promotion-code error:', err);
+    logRouteError('apply-promotion-code error', err);
     const stripeMsg = err?.raw?.message || err?.message || 'Unable to apply that promotion code.';
     return res.status(400).json({ message: stripeMsg });
   }
@@ -965,9 +845,7 @@ app.post('/auth/signup/complete', async (req, res) => {
     await attachSessionCookie(res, user.id);
     return res.json({ user: toPublicUser(user) });
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('signup/complete error:', err);
-    return res.status(502).json({ message: 'Unable to verify payment with Stripe.' });
+    return sendError(res, err, 'Unable to verify payment with Stripe.', 502);
   }
 });
 
@@ -995,9 +873,7 @@ app.post('/auth/signup/complete-subscription', async (req, res) => {
     await attachSessionCookie(res, user.id);
     return res.json({ user: toPublicUser(user) });
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('signup/complete-subscription error:', err);
-    return res.status(502).json({ message: 'Unable to verify subscription with Stripe.' });
+    return sendError(res, err, 'Unable to verify subscription with Stripe.', 502);
   }
 });
 
@@ -1028,466 +904,46 @@ app.delete('/account', async (req, res) => {
     });
     await withAuthDbSession((client) => client.query('DELETE FROM plannix_users WHERE id = $1', [user.id]));
   } catch (error) {
-    return res.status(500).json({ message: error.message || 'Could not delete account data.' });
+    return sendError(res, error, 'Could not delete account data.');
   }
   await removeAllSessionsForUser(user.id);
   clearSessionCookie(res);
   return res.status(204).send();
 });
 
-app.get('/billing/subscription-summary', async (req, res) => {
-  if (!requireDb(res)) {
-    return;
-  }
-  const user = await requireSessionUser(req, res);
-  if (!user) return;
-  if (!stripe) {
-    return res.json({
-      enabled: false,
-      subscription: null,
-    });
-  }
-  try {
-    const customer = await findStripeCustomerByEmail(user.email);
-    if (!customer) {
-      return res.json({
-        enabled: true,
-        subscription: null,
-      });
-    }
-    const subscription = await findLatestStripeSubscriptionForCustomer(customer.id);
-    if (!subscription) {
-      return res.json({
-        enabled: true,
-        subscription: null,
-      });
-    }
-    return res.json({
-      enabled: true,
-      subscription: {
-        id: subscription.id,
-        status: subscription.status,
-        cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
-        currentPeriodEnd: subscription.current_period_end || null,
-        canceledAt: subscription.canceled_at || null,
-        price: subscriptionPricePayloadFromSubscription(subscription),
-      },
-    });
-  } catch (error) {
-    // Degrade gracefully when Stripe has transient connectivity issues.
-    return res.json({
-      enabled: true,
-      subscription: null,
-      warning:
-        'An error occurred with our connection to Stripe. Please retry in a moment.',
-    });
-  }
+registerBillingRoutes({
+  app,
+  findLatestStripeSubscriptionForCustomer,
+  findStripeCustomerByEmail,
+  inferredPublicOrigin,
+  logRouteError,
+  primaryFrontendOrigin: PRIMARY_FRONTEND_ORIGIN,
+  requireDb,
+  requireSessionUser,
+  sendError,
+  stripe,
+  subscriptionPricePayloadFromSubscription,
 });
 
-app.post('/billing/portal-session', async (req, res) => {
-  if (!requireDb(res)) {
-    return;
-  }
-  const user = await requireSessionUser(req, res);
-  if (!user) return;
-  if (!stripe) {
-    return res.status(503).json({ message: 'Billing is not enabled on this server.' });
-  }
-  const mode = String(req.body?.mode || '').trim().toLowerCase();
-  const subscriptionId = String(req.body?.subscriptionId || '').trim();
-  try {
-    const customer = await findStripeCustomerByEmail(user.email);
-    if (!customer) {
-      return res.status(404).json({ message: 'No Stripe customer found for this account yet.' });
-    }
-    const payload = {
-      customer: customer.id,
-      return_url: `${FRONTEND_ORIGIN}/settings/subscription`,
-    };
-    if (mode === 'cancel' && subscriptionId) {
-      payload.flow_data = {
-        type: 'subscription_cancel',
-        subscription_cancel: {
-          subscription: subscriptionId,
-        },
-      };
-    }
-    const session = await stripe.billingPortal.sessions.create(payload);
-    return res.json({ url: session.url });
-  } catch (error) {
-    return res.status(502).json({ message: error.message || 'Could not open billing portal.' });
-  }
+registerHolidayRoutes({
+  app,
+  fetchJsonOrThrow,
+  fetchUkBankHolidaysForYear,
+  normalizeCountryCode,
+  parseCoordinate,
+  sendError,
 });
 
-app.get('/holidays/countries', async (req, res) => {
-  try {
-    const data = await fetchJsonOrThrow('https://date.nager.at/api/v3/AvailableCountries');
-    const countries = Array.isArray(data)
-      ? data
-          .map((entry) => ({
-            countryCode: normalizeCountryCode(entry?.countryCode),
-            name: String(entry?.name || '').trim(),
-          }))
-          .filter((entry) => entry.countryCode && entry.name)
-          .sort((a, b) => a.name.localeCompare(b.name))
-      : [];
-    return res.json({ countries });
-  } catch (error) {
-    return res.status(502).json({ message: error.message || 'Could not load country list.' });
-  }
+registerPlannerRoutes({
+  app,
+  mapClassRow,
+  requireDb,
+  requireSessionUser,
+  sendError,
+  withUserDbSession,
 });
 
-app.get('/holidays/resolve-country', async (req, res) => {
-  const lat = parseCoordinate(req.query.lat);
-  const lng = parseCoordinate(req.query.lng);
-  if (lat == null || lng == null) {
-    return res.status(400).json({ message: 'lat and lng query parameters are required.' });
-  }
-  try {
-    const params = new URLSearchParams({
-      format: 'jsonv2',
-      lat: String(lat),
-      lon: String(lng),
-      zoom: '3',
-      addressdetails: '1',
-    });
-    const data = await fetchJsonOrThrow(`https://nominatim.openstreetmap.org/reverse?${params}`, {
-      headers: {
-        'User-Agent': 'Plannix/1.0 holiday-import',
-      },
-    });
-    const countryCode = normalizeCountryCode(data?.address?.country_code);
-    const countryName = String(data?.address?.country || '').trim();
-    if (!countryCode) {
-      return res.status(404).json({ message: 'Could not determine country from that location.' });
-    }
-    return res.json({
-      countryCode,
-      countryName: countryName || countryCode,
-    });
-  } catch (error) {
-    return res.status(502).json({ message: error.message || 'Could not resolve country from location.' });
-  }
-});
-
-app.get('/holidays/public', async (req, res) => {
-  const countryCode = normalizeCountryCode(req.query.country);
-  const year = Number.parseInt(String(req.query.year || ''), 10);
-  if (!countryCode || !Number.isInteger(year) || year < 1900 || year > 2100) {
-    return res.status(400).json({ message: 'Valid country and year query parameters are required.' });
-  }
-  try {
-    if (countryCode === 'GB') {
-      const ukHolidays = await fetchUkBankHolidaysForYear(year);
-      if (ukHolidays.length > 0) {
-        return res.json({ holidays: ukHolidays });
-      }
-    }
-
-    const data = await fetchJsonOrThrow(
-      `https://date.nager.at/api/v3/PublicHolidays/${year}/${countryCode}`,
-    );
-    const holidays = Array.isArray(data)
-      ? data
-          .map((entry) => ({
-            date: String(entry?.date || '').trim(),
-            localName: String(entry?.localName || '').trim(),
-            name: String(entry?.name || '').trim(),
-          }))
-          .filter((entry) => /^\d{4}-\d{2}-\d{2}$/.test(entry.date))
-      : [];
-    return res.json({ holidays });
-  } catch (error) {
-    return res.status(502).json({ message: error.message || 'Could not load public holidays.' });
-  }
-});
-
-app.post('/admin/migrate', async (req, res) => {
-  if (!requireDb(res)) {
-    return;
-  }
-  const token = process.env.MIGRATION_TOKEN || '';
-  const provided = String(req.headers['x-migration-token'] || '');
-  if (token && provided !== token) {
-    return res.status(403).json({ message: 'Invalid migration token.' });
-  }
-  try {
-    await runMigrations(db);
-    return res.json({ ok: true });
-  } catch (error) {
-    return res.status(500).json({ message: error.message || 'Migration failed.' });
-  }
-});
-
-app.get('/api/classes', async (req, res) => {
-  if (!requireDb(res)) {
-    return;
-  }
-  const user = await requireSessionUser(req, res);
-  if (!user) return;
-  try {
-    const result = await withUserDbSession(user.id, (client) =>
-      client.query(
-        `SELECT id, name, frequency, cadence
-         FROM plannix_classes
-         WHERE user_id = $1
-         ORDER BY sort_order ASC, created_at ASC`,
-        [user.id],
-      ),
-    );
-    return res.json({
-      entries: result.rows.map(mapClassRow),
-    });
-  } catch (error) {
-    return res.status(500).json({ message: error.message || 'Failed to load classes.' });
-  }
-});
-
-app.put('/api/classes', async (req, res) => {
-  if (!requireDb(res)) {
-    return;
-  }
-  const user = await requireSessionUser(req, res);
-  if (!user) return;
-
-  const entries = Array.isArray(req.body?.entries) ? req.body.entries : [];
-  const cadence = req.body?.cadence === 'two-weeks' ? 'two-weeks' : 'week';
-  const normalizedEntries = entries
-    .map((entry, index) => ({
-      id: entry?.id ? String(entry.id) : null,
-      name: String(entry?.name || '').trim(),
-      frequency: Math.max(0, Number.parseInt(entry?.frequency, 10) || 0),
-      cadence: entry?.cadence === 'two-weeks' ? 'two-weeks' : cadence,
-      sortOrder: index,
-    }))
-    .filter((entry) => entry.name);
-
-  try {
-    await withUserDbSession(user.id, async (client) => {
-      await client.query('DELETE FROM plannix_classes WHERE user_id = $1', [user.id]);
-
-      for (const entry of normalizedEntries) {
-        await client.query(
-          `INSERT INTO plannix_classes (id, user_id, name, frequency, cadence, sort_order, updated_at)
-           VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, NOW())`,
-          [entry.id, user.id, entry.name, entry.frequency, entry.cadence, entry.sortOrder],
-        );
-      }
-    });
-    return res.json({
-      cadence,
-      entries: normalizedEntries.map((entry) => ({
-        id: entry.id,
-        name: entry.name,
-        frequency: entry.frequency,
-        cadence: entry.cadence,
-      })),
-    });
-  } catch (error) {
-    return res.status(500).json({ message: error.message || 'Failed to save classes.' });
-  }
-});
-
-app.get('/api/timetable/layout', async (req, res) => {
-  if (!requireDb(res)) {
-    return;
-  }
-  const user = await requireSessionUser(req, res);
-  if (!user) return;
-  try {
-    const result = await withUserDbSession(user.id, (client) =>
-      client.query('SELECT layout FROM plannix_timetable_layouts WHERE user_id = $1', [user.id]),
-    );
-    return res.json({ layout: result.rows[0]?.layout || null });
-  } catch (error) {
-    return res.status(500).json({ message: error.message || 'Failed to load timetable layout.' });
-  }
-});
-
-app.put('/api/timetable/layout', async (req, res) => {
-  if (!requireDb(res)) {
-    return;
-  }
-  const user = await requireSessionUser(req, res);
-  if (!user) return;
-  const layout = req.body?.layout;
-  if (!layout || typeof layout !== 'object') {
-    return res.status(400).json({ message: 'layout object is required.' });
-  }
-  try {
-    await withUserDbSession(user.id, (client) =>
-      client.query(
-        `INSERT INTO plannix_timetable_layouts (user_id, layout, updated_at)
-         VALUES ($1, $2::jsonb, NOW())
-         ON CONFLICT (user_id)
-         DO UPDATE SET layout = EXCLUDED.layout, updated_at = NOW()`,
-        [user.id, JSON.stringify(layout)],
-      ),
-    );
-    return res.json({ ok: true });
-  } catch (error) {
-    return res.status(500).json({ message: error.message || 'Failed to save timetable layout.' });
-  }
-});
-
-app.get('/api/academic-year', async (req, res) => {
-  if (!requireDb(res)) {
-    return;
-  }
-  const user = await requireSessionUser(req, res);
-  if (!user) return;
-  try {
-    const result = await withUserDbSession(user.id, (client) =>
-      client.query('SELECT plan FROM plannix_academic_years WHERE user_id = $1', [user.id]),
-    );
-    return res.json({ plan: result.rows[0]?.plan || null });
-  } catch (error) {
-    return res.status(500).json({ message: error.message || 'Failed to load academic year.' });
-  }
-});
-
-app.put('/api/academic-year', async (req, res) => {
-  if (!requireDb(res)) {
-    return;
-  }
-  const user = await requireSessionUser(req, res);
-  if (!user) return;
-  const plan = req.body?.plan;
-  if (!plan || typeof plan !== 'object') {
-    return res.status(400).json({ message: 'plan object is required.' });
-  }
-  try {
-    await withUserDbSession(user.id, (client) =>
-      client.query(
-        `INSERT INTO plannix_academic_years (user_id, plan, updated_at)
-         VALUES ($1, $2::jsonb, NOW())
-         ON CONFLICT (user_id)
-         DO UPDATE SET plan = EXCLUDED.plan, updated_at = NOW()`,
-        [user.id, JSON.stringify(plan)],
-      ),
-    );
-    return res.json({ ok: true });
-  } catch (error) {
-    return res.status(500).json({ message: error.message || 'Failed to save academic year.' });
-  }
-});
-
-app.get('/api/timetable/sessions', async (req, res) => {
-  if (!requireDb(res)) {
-    return;
-  }
-  const user = await requireSessionUser(req, res);
-  if (!user) return;
-  const layoutKey = String(req.query.layoutKey || '').trim();
-  const weekKey = String(req.query.weekKey || '').trim();
-  if (!layoutKey) {
-    return res.status(400).json({ message: 'layoutKey query parameter is required.' });
-  }
-  try {
-    const result = await withUserDbSession(user.id, (client) =>
-      client.query(
-        `SELECT s.day, s.time, s.class_id AS "classId",
-                COALESCE(c.name, s.class_name, '') AS class,
-                COALESCE(s.teacher, '') AS teacher,
-                COALESCE(s.title, '') AS title,
-                COALESCE(s.notes, '') AS notes,
-                COALESCE(s.meta, '') AS meta
-         FROM plannix_timetable_sessions s
-         LEFT JOIN plannix_classes c ON c.id = s.class_id
-         WHERE s.user_id = $1 AND s.layout_key = $2 AND s.week_key = $3
-         ORDER BY s.day ASC, s.time ASC`,
-        [user.id, layoutKey, weekKey],
-      ),
-    );
-    return res.json({ sessions: result.rows });
-  } catch (error) {
-    return res.status(500).json({ message: error.message || 'Failed to load timetable sessions.' });
-  }
-});
-
-app.put('/api/timetable/sessions', async (req, res) => {
-  if (!requireDb(res)) {
-    return;
-  }
-  const user = await requireSessionUser(req, res);
-  if (!user) return;
-  const layoutKey = String(req.body?.layoutKey || '').trim();
-  const weekKey = String(req.body?.weekKey || '').trim();
-  const sessionsPayload = Array.isArray(req.body?.sessions) ? req.body.sessions : null;
-  if (!layoutKey || !sessionsPayload) {
-    return res.status(400).json({ message: 'layoutKey and sessions are required.' });
-  }
-
-  const normalized = sessionsPayload.map((session) => ({
-    day: Number.parseInt(session?.day, 10) || 0,
-    time: Number.parseInt(session?.time, 10) || 0,
-    classId: session?.classId ? String(session.classId) : null,
-    className: String(session?.class || '').trim(),
-    teacher: String(session?.teacher || '').trim(),
-    title: String(session?.title || '').trim(),
-    notes: String(session?.notes || '')
-      .trim()
-      .slice(0, 4000),
-    meta: String(session?.meta || '').trim(),
-  }));
-
-  try {
-    await withUserDbSession(user.id, async (client) => {
-      await client.query(
-        'DELETE FROM plannix_timetable_sessions WHERE user_id = $1 AND layout_key = $2 AND week_key = $3',
-        [user.id, layoutKey, weekKey],
-      );
-
-      for (const session of normalized) {
-        await client.query(
-          `INSERT INTO plannix_timetable_sessions
-            (user_id, layout_key, week_key, day, time, class_id, class_name, teacher, title, notes, meta, updated_at)
-           VALUES
-            ($1, $2, $3, $4, $5, $6::uuid, $7, $8, $9, $10, $11, NOW())`,
-          [
-            user.id,
-            layoutKey,
-            weekKey,
-            session.day,
-            session.time,
-            session.classId,
-            session.className,
-            session.teacher,
-            session.title,
-            session.notes,
-            session.meta,
-          ],
-        );
-      }
-    });
-    return res.json({ ok: true });
-  } catch (error) {
-    return res.status(500).json({ message: error.message || 'Failed to save timetable sessions.' });
-  }
-});
-
-app.delete('/api/timetable/sessions', async (req, res) => {
-  if (!requireDb(res)) {
-    return;
-  }
-  const user = await requireSessionUser(req, res);
-  if (!user) return;
-  const layoutKey = String(req.query.layoutKey || '').trim();
-  if (!layoutKey) {
-    return res.status(400).json({ message: 'layoutKey query parameter is required.' });
-  }
-  try {
-    await withUserDbSession(user.id, (client) =>
-      client.query(
-        'DELETE FROM plannix_timetable_sessions WHERE user_id = $1 AND layout_key = $2',
-        [user.id, layoutKey],
-      ),
-    );
-    return res.json({ ok: true });
-  } catch (error) {
-    return res.status(500).json({ message: error.message || 'Failed to clear timetable sessions.' });
-  }
-});
+app.use(notFoundHandler);
 
 if (fs.existsSync(DIST_DIR)) {
   app.use(express.static(DIST_DIR, { index: ['index.html'] }));
@@ -1505,50 +961,53 @@ if (fs.existsSync(DIST_DIR)) {
   );
 }
 
-async function startServer() {
-  if (db && process.env.AUTO_RUN_MIGRATIONS === 'true') {
+app.use(errorHandler);
+
+export async function initializeApplication() {
+  if (db && env.autoRunMigrations) {
     try {
       await runMigrations(db);
       // eslint-disable-next-line no-console
       console.log('Database migrations applied.');
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to apply migrations on startup:', error);
+      logRouteError('Failed to apply migrations on startup', error);
+      throw error;
     }
   }
 
-  if (db) {
+  if (db && env.enableDemoUser && env.nodeEnv !== 'production') {
     try {
       await ensureDemoUser();
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to ensure demo user:', error);
+      logRouteError('Failed to ensure demo user', error);
+      throw error;
     }
   }
 
-  app.listen(PORT, () => {
-  // eslint-disable-next-line no-console
-    console.log(`Auth server listening on http://localhost:${PORT}`);
-  // eslint-disable-next-line no-console
-    console.log('Demo login: teacher@plannix.test / Password123!');
-    if (stripe && stripePriceId) {
-      // eslint-disable-next-line no-console
-      console.log('Stripe signup: enabled (Subscription Payment Element mode).');
-    } else {
-      // eslint-disable-next-line no-console
-      console.log('Stripe signup: disabled (set STRIPE_SECRET_KEY and STRIPE_PRICE_ID to require payment).');
-    }
-    if (!db) {
-      // eslint-disable-next-line no-console
-      console.log('DB persistence: disabled (set SUPABASE_DB_URL to enable).');
-      if (process.env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_PUBLISHABLE_KEY) {
-        // eslint-disable-next-line no-console
-        console.log(
-          'Supabase client env detected, but server persistence needs SUPABASE_DB_URL (or SUPABASE_POOLER_URL).',
-        );
-      }
-    }
-  });
 }
 
-startServer();
+export function logStartupStatus() {
+  // eslint-disable-next-line no-console
+  console.log(`Auth server listening on http://localhost:${PORT}`);
+  if (env.enableDemoUser && env.nodeEnv !== 'production') {
+    // eslint-disable-next-line no-console
+    console.log('Demo login: teacher@plannix.test / Password123!');
+  }
+  if (stripe && stripePriceId) {
+    // eslint-disable-next-line no-console
+    console.log('Stripe signup: enabled (Subscription Payment Element mode).');
+  } else {
+    // eslint-disable-next-line no-console
+    console.log('Stripe signup: disabled (set STRIPE_SECRET_KEY and STRIPE_PRICE_ID to require payment).');
+  }
+  if (!db) {
+    // eslint-disable-next-line no-console
+    console.log('DB persistence: disabled (set SUPABASE_DB_URL to enable).');
+    if (process.env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_PUBLISHABLE_KEY) {
+      // eslint-disable-next-line no-console
+      console.log(
+        'Supabase client env detected, but server persistence needs SUPABASE_DB_URL (or SUPABASE_POOLER_URL).',
+      );
+    }
+  }
+}
