@@ -2,6 +2,30 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
+const checkMigrationRemovalScript = `
+  process.env.AUTO_RUN_MIGRATIONS = 'true';
+  process.env.ENABLE_DEMO_USER = 'false';
+  process.env.SUPABASE_DB_URL = '';
+  process.env.SUPABASE_POOLER_URL = '';
+  process.env.DATABASE_URL = '';
+  const database = await import('./server/db.js');
+  if ('runMigrations' in database) process.exit(1);
+  const { default: app } = await import('./server/app.js');
+  const { initializeApplication } = await import('./server/auth-server.js');
+  if (!app || typeof initializeApplication !== 'function') process.exit(2);
+  if (String(initializeApplication).toLowerCase().includes('migration')) process.exit(3);
+  await initializeApplication();
+`;
+
+test('application import and startup have no automatic legacy migration path', () => {
+  const result = spawnSync(
+    process.execPath,
+    ['--input-type=module', '--eval', checkMigrationRemovalScript],
+    { cwd: process.cwd(), env: { ...process.env }, encoding: 'utf8' },
+  );
+  assert.equal(result.status, 0, result.stderr);
+});
+
 const checkRemovedRoutesScript = `
   const { default: app } = await import('./server/app.js');
   const server = app.listen(0, '127.0.0.1');

@@ -7,7 +7,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
 import { Resend } from 'resend';
-import { createDbPool, mapClassRow, runMigrations } from './db.js';
+import { createDbPool, mapClassRow } from './db.js';
 import {
   COOKIE_OPTIONS,
   DIST_DIR,
@@ -559,17 +559,6 @@ if (fs.existsSync(DIST_DIR)) {
 app.use(errorHandler);
 
 export async function initializeApplication() {
-  if (db && env.autoRunMigrations) {
-    try {
-      await runMigrations(db);
-      // eslint-disable-next-line no-console
-      console.log('Database migrations applied.');
-    } catch (error) {
-      logRouteError('Failed to apply migrations on startup', error);
-      throw error;
-    }
-  }
-
   if (db && env.enableDemoUser && env.nodeEnv !== 'production') {
     try {
       await ensureDemoUser();

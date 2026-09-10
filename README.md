@@ -58,4 +58,4 @@ CI runs Gitleaks via `.github/workflows/gitleaks.yml`.
 - `server/config/` — environment and CORS configuration
 - `server/middleware/` — API 404 and fallback error responses
 - `server/routes/` — route groups for contact, holidays, and planner data APIs
-- `server/sql/` — database migrations
+- `supabase/migrations/` — schema migrations managed through the Supabase migration workflow

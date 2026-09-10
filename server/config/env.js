@@ -25,7 +25,6 @@ export const env = Object.freeze({
   frontendOrigins: parseOrigins(process.env.FRONTEND_ORIGIN),
   cookieSecure: process.env.COOKIE_SECURE === 'true',
   corsDebug: process.env.CORS_DEBUG === 'true',
-  autoRunMigrations: process.env.AUTO_RUN_MIGRATIONS === 'true',
   enableDemoUser: process.env.ENABLE_DEMO_USER === 'true',
   distDirectory: path.join(serverDirectory, '..', '..', 'dist'),
 });
