@@ -7,6 +7,7 @@
     "dev": "vite",
     "start": "node server/server.js",
     "server": "node server/server.js",
+    "test:auth": "node --test src/utils/supabaseAuth.test.js",
     "test:server": "node --test server/**/*.test.js",
     "secrets:check": "gitleaks detect --source . --config .gitleaks.toml --baseline-path .gitleaks-baseline.json --redact --verbose",
     "prepare": "simple-git-hooks",

@@ -37,7 +37,11 @@ Configure the server with `.env` (see your hosting provider for secrets). Common
 
 Client build:
 
+- `VITE_SUPABASE_URL` — public Supabase project URL used by the browser client
+- `VITE_SUPABASE_PUBLISHABLE_KEY` — public/publishable Supabase browser key
 - `VITE_API_BASE_URL` — leave **unset** when the API is served from the **same** host as the UI (typical `npm start` / DigitalOcean single service). Never deploy a build that still contains a **local** URL (e.g. `http://localhost:4000` from your machine’s `.env`)—the browser cannot reach it. For a **separate** API host, set this to the public **https** base URL (no trailing slash).
+
+Never expose a privileged Supabase key through a `VITE_` variable. Vite embeds these variables in browser code.
 
 ## Secrets scanning (Gitleaks)
 
