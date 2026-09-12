@@ -32,5 +32,9 @@ export function corsDelegate(req, callback) {
       host: req.get('host'),
     });
   }
-  callback(null, { origin: allowed, credentials: true });
+  callback(null, {
+    origin: allowed,
+    credentials: true,
+    exposedHeaders: ['X-Request-ID'],
+  });
 }

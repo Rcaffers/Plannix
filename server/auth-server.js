@@ -19,6 +19,7 @@ import {
 } from './config.js';
 import { env } from './config/env.js';
 import { errorHandler, logRouteError, notFoundHandler, sendError } from './errors.js';
+import { requestId } from './middleware/requestId.js';
 import { registerContactRoutes } from './routes/contact-routes.js';
 import { registerHolidayRoutes } from './routes/holiday-routes.js';
 import { registerPlannerRoutes } from './routes/planner-routes.js';
@@ -30,6 +31,7 @@ app.set('trust proxy', env.trustProxyHops);
 
 const db = createDbPool();
 
+app.use(requestId);
 app.use(cors(corsDelegate));
 app.use(cookieParser());
 
@@ -37,7 +39,7 @@ app.get('/health', (_req, res) => {
   res.status(200).end();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 
 function toPublicUser(user) {
   return {
@@ -573,10 +575,6 @@ export async function initializeApplication() {
 export function logStartupStatus() {
   // eslint-disable-next-line no-console
   console.log(`Auth server listening on http://localhost:${PORT}`);
-  if (env.enableDemoUser && env.nodeEnv !== 'production') {
-    // eslint-disable-next-line no-console
-    console.log('Demo login: teacher@plannix.test / Password123!');
-  }
   if (!db) {
     // eslint-disable-next-line no-console
     console.log('DB persistence: disabled (set SUPABASE_DB_URL to enable).');

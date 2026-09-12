@@ -1,3 +1,5 @@
+import { sendPublicError } from './errorHandler.js';
+
 const API_PREFIXES = ['/account', '/admin', '/api', '/auth', '/holidays'];
 const REMOVED_API_PATHS = new Set([
   '/billing/portal-session',
@@ -13,5 +15,9 @@ export function notFound(req, res, next) {
     next();
     return;
   }
-  res.status(404).json({ message: `No API route found for ${req.method} ${req.originalUrl}.` });
+  return sendPublicError(
+    res,
+    `No API route found for ${req.method} ${req.originalUrl}.`,
+    404,
+  );
 }

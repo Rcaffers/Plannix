@@ -6,6 +6,7 @@ import cors from 'cors';
 import express from 'express';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { notFound } from '../middleware/notFound.js';
+import { requestId } from '../middleware/requestId.js';
 import { createSessionCookieAttacher, registerSignupRoute } from './signup-route.js';
 
 const COOKIE_NAME = 'plannix_session';
@@ -29,6 +30,7 @@ function validateSignupPayload({ name, email, password }) {
 function createIsolatedSignupApp({ existingUser = null, createUserError = null, secure = false } = {}) {
   const calls = { createdUsers: [], sessions: [] };
   const app = express();
+  app.use(requestId);
   app.use(cors());
   app.use(cookieParser());
   app.use(express.json());
@@ -173,4 +175,23 @@ test('configured signup app sanitises rejected database errors', async () => {
     message: 'Unexpected server error. Check server logs for details.',
   });
   assert.doesNotMatch(JSON.stringify(payload), new RegExp(internalMessage, 'i'));
+  assert.match(response.headers.get('x-request-id'), /^[0-9a-f-]{36}$/);
+});
+
+test('configured signup app translates a unique-constraint race to 409', async () => {
+  const uniqueError = Object.assign(new Error('private duplicate detail'), {
+    code: '23505',
+    constraint: 'plannix_users_email_key',
+  });
+  const { app } = createIsolatedSignupApp({ createUserError: uniqueError });
+  const response = await request(
+    app,
+    '/auth/signup',
+    signupRequest({ name: 'Test Teacher', email: 'teacher@example.test', password: 'password123' }),
+  );
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), {
+    message: 'A record with those details already exists.',
+  });
+  assert.match(response.headers.get('x-request-id'), /^[0-9a-f-]{36}$/);
 });
