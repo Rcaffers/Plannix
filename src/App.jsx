@@ -20,9 +20,11 @@ import PrivacyGate from './pages/PrivacyGate';
 import TermsModal from './modals/TermsModal';
 import PrivacyModal from './modals/PrivacyModal';
 import ScrollToTop from './components/ScrollToTop';
-import { fetchAuthMe, loginWithCredentials, logoutSession, signupAccount } from './utils/api';
+import { createSupabaseAuthController, privateRouteState } from './utils/supabaseAuthController';
 import { TimetableLayoutProvider } from './context/TimetableLayoutContext';
 import { AcademicYearProvider } from './context/AcademicYearContext';
+
+const authController = createSupabaseAuthController();
 
 export default function App() {
   const navigate = useNavigate();
@@ -31,36 +33,24 @@ export default function App() {
   useEffect(() => {
     let isMounted = true;
 
-    const loadSession = async () => {
-      try {
-        const { ok, user: nextUser } = await fetchAuthMe();
-        if (!isMounted) {
-          return;
-        }
-        if (!ok) {
-          setUser(null);
-          return;
-        }
-        setUser(nextUser);
-      } catch {
-        if (isMounted) {
-          setUser(null);
-        }
-      } finally {
-        if (isMounted) {
-          setIsAuthLoading(false);
-        }
-      }
-    };
-
-    loadSession();
+    const cleanup = authController.subscribe({
+      onUser: (nextUser) => { if (isMounted) { setUser(nextUser); setIsAuthLoading(false); } },
+      onSignedOut: () => { if (isMounted) { setUser(null); setIsAuthLoading(false); } },
+      onError: () => { if (isMounted) { setUser(null); setIsAuthLoading(false); } },
+    });
+    authController.restoreSession().then((nextUser) => {
+      if (isMounted) setUser(nextUser);
+    }).finally(() => {
+      if (isMounted) setIsAuthLoading(false);
+    });
     return () => {
       isMounted = false;
+      cleanup();
     };
   }, []);
 
   const handleLogin = async ({ email, password }) => {
-    const loggedInUser = await loginWithCredentials({ email, password });
+    const loggedInUser = await authController.login({ email, password });
     setUser(loggedInUser);
     navigate('/timetable');
     return loggedInUser;
@@ -68,14 +58,20 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await logoutSession();
+      await authController.logout();
+    } catch {
+      // Local access is cleared even when the remote sign-out request fails.
     } finally {
       setUser(null);
     }
   };
 
   const privateRoute = (element) => {
-    if (!user) {
+    const state = privateRouteState({ isAuthLoading, user });
+    if (state === 'loading') {
+      return <main aria-busy="true"><p role="status">Checking your session…</p></main>;
+    }
+    if (state === 'public') {
       return (
         <main>
           <Hero user={null} />
@@ -87,11 +83,10 @@ export default function App() {
     return element;
   };
 
-  const handleSignup = async ({ name, email, password }) => {
-    const result = await signupAccount({ name, email, password });
-    const { user: createdUser } = result;
-    setUser(createdUser);
-    return createdUser;
+  const handleSignup = async (details) => {
+    const result = await authController.signup(details);
+    if (result.authenticated) setUser(result.user);
+    return result;
   };
 
   return (

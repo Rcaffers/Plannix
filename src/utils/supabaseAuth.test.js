@@ -37,6 +37,7 @@ function createMockClient({ profile = null } = {}) {
       },
       async updateUser(input) { calls.updateUser = input; return calls.updateResult; },
     },
+    async rpc(name) { calls.rpc = name; return calls.rpcResult || { data: [], error: null }; },
     from(table) { calls.profileTable = table; return profileBuilder; },
   };
   return {
@@ -193,6 +194,14 @@ test('logout and recovery email use Supabase Auth with the expected redirect', a
     email: 'recover@example.test',
     options: { redirectTo: 'https://app.plannix.test/reset-password' },
   });
+});
+
+test('personal organisation onboarding uses the no-argument RPC', async () => {
+  const mock = createMockClient();
+  mock.calls.rpcResult = { data: [{ organisation_id: 'org', organisation_user_id: 'membership' }], error: null };
+  const result = await createSupabaseAuthAdapter({ client: mock.client, location }).ensurePersonalOrganisation();
+  assert.equal(mock.calls.rpc, 'plannix_ensure_personal_organisation');
+  assert.deepEqual(result, { organisation_id: 'org', organisation_user_id: 'membership' });
 });
 
 test('password update requires a recovery session and Supabase errors retain safe metadata', async () => {

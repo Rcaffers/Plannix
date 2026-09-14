@@ -4,6 +4,8 @@ import {
   getLoginValidationError,
   getSignupValidationError,
   loginSuccessMessage,
+  signupConfirmationMessage,
+  signupSubmission,
   signupSuccessMessage,
 } from '../utils/authForms';
 import { requestPasswordReset } from '../utils/api';
@@ -23,7 +25,7 @@ export default function Header({
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isSignupOpen, setIsSignupOpen] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
-  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '' });
+  const [signupForm, setSignupForm] = useState({ firstName: '', lastName: '', email: '', password: '' });
   const [isLoginSubmitting, setIsLoginSubmitting] = useState(false);
   const [isSignupSubmitting, setIsSignupSubmitting] = useState(false);
   const [loginError, setLoginError] = useState('');
@@ -193,6 +195,14 @@ export default function Header({
     event.stopPropagation();
   };
 
+  const handleLogout = async () => {
+    setIsUserMenuOpen(false);
+    setIsMobileNavOpen(false);
+    setIsLoginOpen(false);
+    setIsSignupOpen(false);
+    await onLogout();
+  };
+
   const handleLoginSubmit = async (event) => {
     event.preventDefault();
     setLoginError('');
@@ -246,11 +256,9 @@ export default function Header({
     setSignupError('');
     setSignupSuccess('');
 
-    const name = signupForm.name.trim();
-    const email = signupForm.email.trim();
-    const password = signupForm.password;
+    const details = signupSubmission(signupForm);
 
-    const signupValidationError = getSignupValidationError({ name, email, password });
+    const signupValidationError = getSignupValidationError(details);
     if (signupValidationError) {
       setSignupError(signupValidationError);
       return;
@@ -258,13 +266,14 @@ export default function Header({
 
     setIsSignupSubmitting(true);
     try {
-      const result = await onSignup({ name, email, password });
-      const createdUser = result;
-      setSignupSuccess(signupSuccessMessage(createdUser));
-      setSignupForm({ name: '', email: '', password: '' });
-      setTimeout(() => {
-        closeSignup();
-      }, 500);
+      const result = await onSignup(details);
+      setSignupForm({ firstName: '', lastName: '', email: '', password: '' });
+      if (result.confirmationPending) {
+        setSignupSuccess(signupConfirmationMessage());
+      } else {
+        setSignupSuccess(signupSuccessMessage(result.user));
+        setTimeout(() => closeSignup(), 500);
+      }
     } catch (error) {
       setSignupError(error.message || 'Sign up failed. Please try again.');
     } finally {
@@ -349,7 +358,7 @@ export default function Header({
                       role="menuitem"
                       onClick={() => {
                         setIsUserMenuOpen(false);
-                        onLogout();
+                        handleLogout();
                       }}
                       disabled={isAuthLoading}
                     >
@@ -465,7 +474,7 @@ export default function Header({
                   className="mobile-nav-link mobile-nav-link--sub mobile-nav-link--button"
                   onClick={() => {
                     closeMobileNav();
-                    onLogout();
+                    handleLogout();
                   }}
                   disabled={isAuthLoading}
                 >
@@ -682,15 +691,27 @@ export default function Header({
             <h2 id="signup-modal-title">Create your individual account</h2>
 
             <form className="login-form" onSubmit={handleSignupSubmit}>
-                <label htmlFor="signup-name">Full name</label>
+                <label htmlFor="signup-first-name">First name</label>
                 <input
-                  id="signup-name"
+                  id="signup-first-name"
                   type="text"
-                  name="name"
-                  placeholder="Jane Doe"
-                  value={signupForm.name}
-                  autoComplete="name"
-                  onChange={(event) => setSignupForm((current) => ({ ...current, name: event.target.value }))}
+                  name="firstName"
+                  placeholder="Jane"
+                  value={signupForm.firstName}
+                  autoComplete="given-name"
+                  onChange={(event) => setSignupForm((current) => ({ ...current, firstName: event.target.value }))}
+                  disabled={isSignupSubmitting}
+                />
+
+                <label htmlFor="signup-last-name">Last name</label>
+                <input
+                  id="signup-last-name"
+                  type="text"
+                  name="lastName"
+                  placeholder="Doe"
+                  value={signupForm.lastName}
+                  autoComplete="family-name"
+                  onChange={(event) => setSignupForm((current) => ({ ...current, lastName: event.target.value }))}
                   disabled={isSignupSubmitting}
                 />
 

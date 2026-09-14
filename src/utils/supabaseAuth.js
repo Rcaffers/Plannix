@@ -149,14 +149,14 @@ export function createSupabaseAuthAdapter({
     },
 
     subscribeToAuthChanges(callback) {
-      const { data } = client.auth.onAuthStateChange(async (event, session) => {
+      const { data } = client.auth.onAuthStateChange((event, session) => {
         if (event === 'PASSWORD_RECOVERY' && session?.access_token) {
           recoveryAccessTokens.add(session.access_token);
         }
         callback({
           event,
           session: session || null,
-          user: session?.user ? await mappedUser(session.user) : null,
+          user: session?.user ? mapSupabaseUser(session.user) : null,
         });
       });
       return () => data?.subscription?.unsubscribe();
@@ -165,6 +165,12 @@ export function createSupabaseAuthAdapter({
     async logout() {
       const { error } = await client.auth.signOut();
       if (error) throw authError(error, 'Unable to log out.');
+    },
+
+    async ensurePersonalOrganisation() {
+      const { data, error } = await client.rpc('plannix_ensure_personal_organisation');
+      if (error) throw authError(error, 'Unable to finish setting up your account.');
+      return Array.isArray(data) ? data[0] || null : data || null;
     },
 
     async sendPasswordRecovery(email) {
