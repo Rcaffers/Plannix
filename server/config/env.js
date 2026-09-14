@@ -26,8 +26,23 @@ export const env = Object.freeze({
   cookieSecure: process.env.COOKIE_SECURE === 'true',
   corsDebug: process.env.CORS_DEBUG === 'true',
   enableDemoUser: process.env.ENABLE_DEMO_USER === 'true',
+  supabaseUrl: String(process.env.SUPABASE_URL || '').trim(),
+  supabasePublishableKey: String(process.env.SUPABASE_PUBLISHABLE_KEY || '').trim(),
   distDirectory: path.join(serverDirectory, '..', '..', 'dist'),
 });
+
+export function requireSupabasePublicConfig(config = env) {
+  const missing = [];
+  if (!config.supabaseUrl) missing.push('SUPABASE_URL');
+  if (!config.supabasePublishableKey) missing.push('SUPABASE_PUBLISHABLE_KEY');
+  if (missing.length) {
+    throw new Error(`Missing server Supabase public configuration: ${missing.join(', ')}.`);
+  }
+  return {
+    url: config.supabaseUrl,
+    publishableKey: config.supabasePublishableKey,
+  };
+}
 
 export function validateProductionEnv(config = env) {
   if (config.nodeEnv === 'production' && config.enableDemoUser) {

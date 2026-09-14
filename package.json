@@ -11,6 +11,7 @@
     "test:frontend-auth": "node --test src/utils/supabaseAuthController.test.js",
     "test:recovery": "node --test src/utils/supabaseRecovery.test.js",
     "test:server": "node --test server/**/*.test.js",
+    "test:server-auth": "node --test server/middleware/requireSupabaseAuth.test.js",
     "secrets:check": "gitleaks detect --source . --config .gitleaks.toml --baseline-path .gitleaks-baseline.json --redact --verbose",
     "prepare": "simple-git-hooks",
     "build": "vite build",

@@ -578,11 +578,5 @@ export function logStartupStatus() {
   if (!db) {
     // eslint-disable-next-line no-console
     console.log('DB persistence: disabled (set SUPABASE_DB_URL to enable).');
-    if (process.env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_PUBLISHABLE_KEY) {
-      // eslint-disable-next-line no-console
-      console.log(
-        'Supabase client env detected, but server persistence needs SUPABASE_DB_URL (or SUPABASE_POOLER_URL).',
-      );
-    }
   }
 }
