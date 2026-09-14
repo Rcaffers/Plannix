@@ -8,7 +8,7 @@ import {
   signupSubmission,
   signupSuccessMessage,
 } from '../utils/authForms';
-import { requestPasswordReset } from '../utils/api';
+import { supabaseRecovery } from '../utils/supabaseRecovery';
 import { headerNavLinks } from '../utils/headerNav';
 import { SETTINGS_SUBNAV_ITEMS } from './SettingsSubnav';
 import { PLANNIX_OPEN_LOGIN_EVENT, PLANNIX_OPEN_SIGNUP_EVENT } from '../utils/plannixEvents';
@@ -242,7 +242,7 @@ export default function Header({
     }
     setIsForgotSubmitting(true);
     try {
-      await requestPasswordReset({ email });
+      await supabaseRecovery.request(email);
       setLoginModalPane('forgot-sent');
     } catch (err) {
       setForgotError(err.message || 'Could not send reset email. Please try again.');

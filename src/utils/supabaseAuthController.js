@@ -35,6 +35,7 @@ export function createSupabaseAuthController({
   let activeSetup = null;
   let ready = null;
   let authGeneration = 0;
+  const recoveryTokens = new Set();
 
   async function signOutAfterFailure() {
     ready = null;
@@ -45,6 +46,7 @@ export function createSupabaseAuthController({
     const token = session?.access_token;
     const setupKey = session?.user?.id || token;
     if (!token) throw new PublicAuthError(SETUP_ERROR);
+    if (recoveryTokens.has(token)) throw new PublicAuthError(SETUP_ERROR);
     if (ready?.token === token) return ready.user;
     if (activeSetup?.key === setupKey) return activeSetup.promise;
     const generation = authGeneration;
@@ -55,6 +57,9 @@ export function createSupabaseAuthController({
         if (!validatedUser?.id) throw new SupabaseAuthError('Invalid session.');
         const initialProfile = await auth.loadProfile(validatedUser);
         if (!initialProfile) throw new SupabaseAuthError('Profile unavailable.');
+        if (generation !== authGeneration || recoveryTokens.has(token)) {
+          throw new SupabaseAuthError('Recovery sessions cannot access the application.');
+        }
         await auth.ensurePersonalOrganisation();
         const profile = await auth.loadProfile(validatedUser);
         if (!profile) throw new SupabaseAuthError('Profile unavailable.');
@@ -111,6 +116,13 @@ export function createSupabaseAuthController({
       let active = true;
       let publishedToken = null;
       const cleanup = auth.subscribeToAuthChanges(({ event, session }) => {
+        if (event === 'PASSWORD_RECOVERY') {
+          if (session?.access_token) recoveryTokens.add(session.access_token);
+          authGeneration += 1;
+          ready = null;
+          schedule(() => { if (active) onSignedOut?.(); });
+          return;
+        }
         schedule(() => {
           if (!active) return;
           if (event === 'SIGNED_OUT') {
@@ -120,7 +132,7 @@ export function createSupabaseAuthController({
             onSignedOut?.();
             return;
           }
-          if (event === 'PASSWORD_RECOVERY' || !session) return;
+          if (!session) return;
           establish(session).then(
             (user) => {
               if (active && publishedToken !== session.access_token) {

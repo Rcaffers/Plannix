@@ -105,6 +105,40 @@ test('subscription cleanup prevents scheduled state changes and logout uses Supa
   assert.equal(mock.calls.includes('logout'), true);
 });
 
+test('a recovery session is never published as an authenticated application user', async () => {
+  const queued = [];
+  const mock = mockAuth();
+  let published = false;
+  const controller = createSupabaseAuthController({ auth: mock.auth, schedule: (task) => queued.push(task) });
+  controller.subscribe({ onUser: () => { published = true; } });
+  mock.emit('PASSWORD_RECOVERY');
+  queued.splice(0).forEach((task) => task());
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(published, false);
+  assert.equal(mock.calls.includes('onboard'), false);
+});
+
+test('a recovery event interrupting restoration prevents onboarding', async () => {
+  const queued = [];
+  let releaseProfile;
+  const mock = mockAuth({
+    async loadProfile() {
+      mock.calls.push('profile');
+      await new Promise((resolve) => { releaseProfile = resolve; });
+      return profile;
+    },
+  });
+  const controller = createSupabaseAuthController({ auth: mock.auth, schedule: (task) => queued.push(task) });
+  controller.subscribe({});
+  const restoring = controller.restoreSession();
+  await new Promise((resolve) => setImmediate(resolve));
+  mock.emit('PASSWORD_RECOVERY');
+  queued.splice(0).forEach((task) => task());
+  releaseProfile();
+  assert.equal(await restoring, null);
+  assert.equal(mock.calls.includes('onboard'), false);
+});
+
 test('private route states distinguish restoration, public, and onboarded access', () => {
   assert.equal(privateRouteState({ isAuthLoading: true, user: null }), 'loading');
   assert.equal(privateRouteState({ isAuthLoading: false, user: null }), 'public');
@@ -135,6 +169,5 @@ test('production React no longer imports or calls the four legacy Express auth h
   }
   assert.match(header, /name="firstName"/);
   assert.match(header, /name="lastName"/);
-  assert.match(api, /auth\/forgot-password/);
   assert.match(api, /`\$\{API_BASE_URL\}\/account`/);
 });

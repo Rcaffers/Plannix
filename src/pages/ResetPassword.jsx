@@ -1,44 +1,41 @@
-import { useMemo, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { resetPasswordWithToken } from '../utils/api';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { dispatchOpenLoginModal } from '../utils/plannixEvents';
+import { INVALID_RECOVERY_MESSAGE, MAX_PASSWORD_LENGTH, supabaseRecovery, validateRecoveryPasswords } from '../utils/supabaseRecovery';
 import './ResetPassword.css';
 
 export default function ResetPassword() {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const token = useMemo(() => String(searchParams.get('token') || '').trim(), [searchParams]);
 
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [status, setStatus] = useState('idle');
+  const [status, setStatus] = useState('checking');
   const [error, setError] = useState('');
 
   const isSubmitting = status === 'submitting';
+  const isReady = status === 'ready';
+
+  useEffect(() => supabaseRecovery.subscribe({
+    onReady: () => { setStatus('ready'); setError(''); },
+    onInvalid: (message) => { setStatus('invalid'); setError(message); },
+  }), []);
 
   async function handleSubmit(event) {
     event.preventDefault();
     setError('');
-    if (!token) {
-      setError('This reset link is missing or invalid.');
-      return;
-    }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
-      return;
-    }
-    if (password !== confirm) {
-      setError('Passwords do not match.');
+    const validation = validateRecoveryPasswords(password, confirm);
+    if (!isReady || validation) {
+      setError(validation || INVALID_RECOVERY_MESSAGE);
       return;
     }
 
     setStatus('submitting');
     try {
-      await resetPasswordWithToken({ token, password });
+      await supabaseRecovery.update(password, confirm);
       setStatus('done');
     } catch (err) {
-      setStatus('idle');
-      setError(err.message || 'Could not reset your password.');
+      setStatus('ready');
+      setError(err.message || 'Your password could not be updated. Please request a new reset link and try again.');
     }
   }
 
@@ -78,7 +75,9 @@ export default function ResetPassword() {
           <div className="reset-password-card">
             <p className="reset-password-kicker">Account</p>
             <h1 className="reset-password-title">Choose a new password</h1>
-            {!token ? (
+            {status === 'checking' ? (
+              <p className="reset-password-lead" role="status">Checking your password reset link…</p>
+            ) : !isReady ? (
               <p className="reset-password-lead reset-password-lead--warn" role="alert">
                 This reset link is missing or invalid. Request a new link from the log in screen.
               </p>
@@ -96,8 +95,9 @@ export default function ResetPassword() {
                   autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  disabled={isSubmitting || !token}
+                  disabled={isSubmitting || !isReady}
                   minLength={8}
+                  maxLength={MAX_PASSWORD_LENGTH}
                   required
                 />
               </div>
@@ -110,8 +110,9 @@ export default function ResetPassword() {
                   autoComplete="new-password"
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
-                  disabled={isSubmitting || !token}
+                  disabled={isSubmitting || !isReady}
                   minLength={8}
+                  maxLength={MAX_PASSWORD_LENGTH}
                   required
                 />
               </div>
@@ -125,7 +126,7 @@ export default function ResetPassword() {
               <button
                 type="submit"
                 className="reset-password-primary"
-                disabled={isSubmitting || !token}
+                disabled={isSubmitting || !isReady}
               >
                 {isSubmitting ? 'Saving…' : 'Save new password'}
               </button>
