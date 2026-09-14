@@ -20,6 +20,7 @@ import {
 import { env } from './config/env.js';
 import { errorHandler, logRouteError, notFoundHandler, sendError } from './errors.js';
 import { requestId } from './middleware/requestId.js';
+import { registerAccountRoutes } from './routes/account-routes.js';
 import { registerContactRoutes } from './routes/contact-routes.js';
 import { registerHolidayRoutes } from './routes/holiday-routes.js';
 import { registerPlannerRoutes } from './routes/planner-routes.js';
@@ -170,13 +171,6 @@ async function getSessionUser(req) {
 async function deleteSessionById(sessionId) {
   if (!sessionId) return;
   await withAuthDbSession((client) => client.query('DELETE FROM plannix_sessions WHERE id = $1', [sessionId]));
-}
-
-async function removeAllSessionsForUser(userId) {
-  if (!userId) return;
-  await withAuthDbSession((client) =>
-    client.query('DELETE FROM plannix_sessions WHERE user_id = $1', [userId]),
-  );
 }
 
 async function withAuthDbSession(work) {
@@ -499,28 +493,7 @@ app.post('/auth/logout', async (req, res) => {
   return res.status(204).send();
 });
 
-app.delete('/account', async (req, res) => {
-  if (!requireDb(res)) {
-    return;
-  }
-  const user = await requireSessionUser(req, res);
-  if (!user) return;
-
-  try {
-    await withUserDbSession(user.id, async (client) => {
-      await client.query('DELETE FROM plannix_timetable_sessions WHERE user_id = $1', [user.id]);
-      await client.query('DELETE FROM plannix_timetable_layouts WHERE user_id = $1', [user.id]);
-      await client.query('DELETE FROM plannix_classes WHERE user_id = $1', [user.id]);
-      await client.query('DELETE FROM plannix_academic_years WHERE user_id = $1', [user.id]);
-    });
-    await withAuthDbSession((client) => client.query('DELETE FROM plannix_users WHERE id = $1', [user.id]));
-  } catch (error) {
-    return sendError(res, error, 'Could not delete account data.');
-  }
-  await removeAllSessionsForUser(user.id);
-  clearSessionCookie(res);
-  return res.status(204).send();
-});
+registerAccountRoutes({ app });
 
 registerHolidayRoutes({
   app,
