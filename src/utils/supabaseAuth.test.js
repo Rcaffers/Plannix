@@ -30,7 +30,11 @@ function createMockClient({ profile = null } = {}) {
         authCallback = callback;
         return { data: { subscription: { unsubscribe } } };
       },
-      async signOut() { calls.signOut = true; return calls.signOutResult || { error: null }; },
+      async signOut(options) {
+        calls.signOut = true;
+        calls.signOutInputs = [...(calls.signOutInputs || []), options];
+        return calls.signOutResult || { error: null };
+      },
       async resetPasswordForEmail(email, options) {
         calls.recovery = { email, options };
         return calls.recoveryResult || { error: null };
@@ -194,6 +198,13 @@ test('logout and recovery email use Supabase Auth with the expected redirect', a
     email: 'recover@example.test',
     options: { redirectTo: 'https://app.plannix.test/reset-password' },
   });
+});
+
+test('account deletion cleanup removes only the local Supabase session', async () => {
+  const mock = createMockClient();
+  const auth = createSupabaseAuthAdapter({ client: mock.client, location });
+  await auth.logoutLocal();
+  assert.deepEqual(mock.calls.signOutInputs.at(-1), { scope: 'local' });
 });
 
 test('personal organisation onboarding uses the no-argument RPC', async () => {

@@ -53,6 +53,10 @@ export function TimetableLayoutProvider({ children, user }) {
     setLayoutAndPersist({ ...DEFAULT_TIMETABLE_LAYOUT });
   }, [setLayoutAndPersist]);
 
+  const clearUserLayout = useCallback(() => {
+    setLayoutState(normalizeLayout(DEFAULT_TIMETABLE_LAYOUT));
+  }, []);
+
   const value = useMemo(() => {
     const normalized = normalizeLayout(layout);
     const rowSegments = buildRowSegments(normalized);
@@ -60,10 +64,11 @@ export function TimetableLayoutProvider({ children, user }) {
       layout: normalized,
       setLayout: setLayoutAndPersist,
       resetLayout,
+      clearUserLayout,
       dayLabels: buildDayColumnLabels(normalized),
       rowSegments,
     };
-  }, [layout, setLayoutAndPersist, resetLayout]);
+  }, [layout, setLayoutAndPersist, resetLayout, clearUserLayout]);
 
   return <TimetableLayoutContext.Provider value={value}>{children}</TimetableLayoutContext.Provider>;
 }

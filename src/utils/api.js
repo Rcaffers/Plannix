@@ -4,7 +4,7 @@
  * mixed content (https page → http API) and ignore loopback URLs when the page is not local.
  */
 function computeApiBaseUrl() {
-  let raw = import.meta.env.VITE_API_BASE_URL;
+  let raw = import.meta.env?.VITE_API_BASE_URL;
   let trimmed = typeof raw === 'string' ? raw.trim() : '';
   if (trimmed.endsWith('/')) {
     trimmed = trimmed.slice(0, -1);
@@ -89,6 +89,18 @@ export async function parseJsonSafe(response) {
   }
 }
 
+const CANONICAL_REQUEST_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+export class ApiError extends Error {
+  constructor(message, { status = 0, requestId = null } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.requestId = CANONICAL_REQUEST_ID.test(String(requestId || '')) ? requestId : null;
+  }
+}
+
 export async function submitContactForm({ name, email, message }) {
   const response = await fetch(`${API_BASE_URL}/api/contact`, {
     method: 'POST',
@@ -150,14 +162,23 @@ export async function fetchPublicHolidays({ countryCode, year }) {
   return Array.isArray(payload?.holidays) ? payload.holidays : [];
 }
 
-export async function deleteAccount() {
-  const response = await fetch(`${API_BASE_URL}/account`, {
+export async function deleteAccount({ password, accessToken, fetchImpl = fetch }) {
+  const response = await fetchImpl(`${API_BASE_URL}/account`, {
     method: 'DELETE',
-    credentials: 'include',
+    credentials: 'omit',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ password }),
   });
+  if (response.status === 204) return;
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
-    throw new Error(payload?.message || 'Could not delete account.');
+    throw new ApiError(payload?.message || 'Could not delete account.', {
+      status: response.status,
+      requestId: response.headers.get('x-request-id'),
+    });
   }
 }
 

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import SettingsSubnav from '../components/SettingsSubnav';
-import { deleteAccount } from '../utils/api';
+import { createAccountDeletionController } from '../utils/accountDeletion';
 import { useTimetableLayout } from '../context/TimetableLayoutContext';
+import { useAcademicYear } from '../context/AcademicYearContext';
 import { DEFAULT_LUNCH, DEFAULT_REGISTRATION, TIMETABLE_CYCLE } from '../utils/timetableLayout';
 import './Settings.css';
 
@@ -20,16 +21,50 @@ function ensureRegistration(d) {
   return d.registration && typeof d.registration === 'object' ? d.registration : { ...DEFAULT_REGISTRATION };
 }
 
-export default function Settings() {
-  const { layout, setLayout, resetLayout } = useTimetableLayout();
+export default function Settings({
+  clearAuthenticatedUser,
+  getAccountDeletionSession,
+  signOutAfterAccountDeletion,
+}) {
+  const { layout, setLayout, resetLayout, clearUserLayout } = useTimetableLayout();
+  const { clearUserAcademicYear } = useAcademicYear();
   const [draft, setDraft] = useState(layout);
   const [savedFlash, setSavedFlash] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [accountError, setAccountError] = useState('');
+  const [accountErrorReference, setAccountErrorReference] = useState('');
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const deletePasswordRef = useRef('');
+
+  const deletionController = useMemo(() => createAccountDeletionController({
+    getSession: getAccountDeletionSession,
+    clearSensitiveState: () => {
+      deletePasswordRef.current = '';
+      setDeletePassword('');
+    },
+    clearAuthenticatedUser,
+    clearUserCaches: () => {
+      clearUserLayout();
+      clearUserAcademicYear();
+    },
+    signOut: signOutAfterAccountDeletion,
+    replaceLocation: (path) => window.location.replace(path),
+  }), [
+    clearAuthenticatedUser,
+    clearUserAcademicYear,
+    clearUserLayout,
+    getAccountDeletionSession,
+    signOutAfterAccountDeletion,
+  ]);
 
   useEffect(() => {
     setDraft(layout);
   }, [layout]);
+
+  useEffect(() => () => {
+    deletePasswordRef.current = '';
+  }, []);
 
   function handleSubmit(event) {
     event.preventDefault();
@@ -42,23 +77,33 @@ export default function Settings() {
     resetLayout();
   }
 
-  async function handleDeleteAccount() {
-    const confirmed = window.confirm(
-      'Delete your account and remove all timetable/class data? This cannot be undone.',
-    );
-    if (!confirmed) return;
-    const secondConfirm = window.confirm(
-      'Final confirmation: this permanently deletes your account data. Continue?',
-    );
-    if (!secondConfirm) return;
+  function clearDeletionForm() {
+    deletePasswordRef.current = '';
+    setDeletePassword('');
+  }
 
+  function closeDeleteDialog() {
+    if (isDeletingAccount) return;
+    clearDeletionForm();
     setAccountError('');
+    setAccountErrorReference('');
+    setIsDeleteDialogOpen(false);
+  }
+
+  async function handleDeleteAccount(event) {
+    event.preventDefault();
+    if (isDeletingAccount) return;
+    setAccountError('');
+    setAccountErrorReference('');
     setIsDeletingAccount(true);
     try {
-      await deleteAccount();
-      window.location.assign('/');
+      await deletionController.submit(deletePasswordRef.current);
+      setIsDeleteDialogOpen(false);
     } catch (error) {
-      setAccountError(error.message || 'Could not delete account.');
+      setAccountError(error.message || 'Could not delete your account. Please try again.');
+      setAccountErrorReference(error.requestId || '');
+    } finally {
+      clearDeletionForm();
       setIsDeletingAccount(false);
     }
   }
@@ -358,14 +403,78 @@ export default function Settings() {
             <button
               type="button"
               className="settings-reset settings-reset--danger"
-              onClick={handleDeleteAccount}
+              onClick={() => {
+                setAccountError('');
+                setAccountErrorReference('');
+                setIsDeleteDialogOpen(true);
+              }}
               disabled={isDeletingAccount}
             >
-              {isDeletingAccount ? 'Deleting account…' : 'Delete account'}
+              Delete account
             </button>
           </div>
-          {accountError ? <p className="settings-hint settings-hint--error">{accountError}</p> : null}
         </section>
+
+        {isDeleteDialogOpen ? (
+          <div className="settings-dialog-backdrop">
+            <section
+              className="settings-delete-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-account-title"
+              aria-describedby="delete-account-description"
+            >
+              <h2 id="delete-account-title" className="settings-section-title">
+                Permanently delete account?
+              </h2>
+              <p id="delete-account-description" className="settings-hint">
+                This permanently removes your personal organisation, timetable, classes, and account. This cannot be undone.
+              </p>
+              <form onSubmit={handleDeleteAccount} className="settings-delete-form">
+                <div className="settings-field">
+                  <label htmlFor="delete-account-password">Current password</label>
+                  <input
+                    id="delete-account-password"
+                    type="password"
+                    autoComplete="current-password"
+                    minLength={8}
+                    maxLength={128}
+                    required
+                    value={deletePassword}
+                    disabled={isDeletingAccount}
+                    onChange={(event) => {
+                      deletePasswordRef.current = event.target.value;
+                      setDeletePassword(event.target.value);
+                    }}
+                  />
+                </div>
+                {accountError ? (
+                  <div className="settings-delete-error" role="alert">
+                    <p>{accountError}</p>
+                    {accountErrorReference ? <p>Reference: {accountErrorReference}</p> : null}
+                  </div>
+                ) : null}
+                <div className="settings-actions">
+                  <button
+                    type="button"
+                    className="settings-reset"
+                    onClick={closeDeleteDialog}
+                    disabled={isDeletingAccount}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="settings-reset settings-reset--danger"
+                    disabled={isDeletingAccount || deletePassword.length < 8 || deletePassword.length > 128}
+                  >
+                    {isDeletingAccount ? 'Deleting account…' : 'Permanently delete account'}
+                  </button>
+                </div>
+              </form>
+            </section>
+          </div>
+        ) : null}
       </div>
     </main>
   );

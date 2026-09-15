@@ -66,6 +66,10 @@ export default function App() {
     }
   };
 
+  const clearAuthenticatedUser = () => {
+    setUser(null);
+  };
+
   const privateRoute = (element) => {
     const state = privateRouteState({ isAuthLoading, user });
     if (state === 'loading') {
@@ -123,7 +127,16 @@ export default function App() {
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/terms" element={<TermsGate />} />
             <Route path="/privacy" element={<PrivacyGate />} />
-            <Route path="/settings" element={privateRoute(<Settings />)} />
+            <Route
+              path="/settings"
+              element={privateRoute(
+                <Settings
+                  clearAuthenticatedUser={clearAuthenticatedUser}
+                  getAccountDeletionSession={() => authController.getCurrentSession()}
+                  signOutAfterAccountDeletion={() => authController.clearAfterAccountDeletion()}
+                />,
+              )}
+            />
             <Route path="/settings/academic-year" element={privateRoute(<AcademicYear />)} />
             <Route path="/classes" element={privateRoute(<Classes />)} />
             <Route path="/classes/input" element={privateRoute(<Classes />)} />

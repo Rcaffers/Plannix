@@ -167,6 +167,11 @@ export function createSupabaseAuthAdapter({
       if (error) throw authError(error, 'Unable to log out.');
     },
 
+    async logoutLocal() {
+      const { error } = await client.auth.signOut({ scope: 'local' });
+      if (error) throw authError(error, 'Unable to clear the local session.');
+    },
+
     async ensurePersonalOrganisation() {
       const { data, error } = await client.rpc('plannix_ensure_personal_organisation');
       if (error) throw authError(error, 'Unable to finish setting up your account.');

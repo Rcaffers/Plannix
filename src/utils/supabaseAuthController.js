@@ -151,5 +151,18 @@ export function createSupabaseAuthController({
       authGeneration += 1;
       try { await auth.logout(); } finally { ready = null; }
     },
+
+    getCurrentSession() {
+      return auth.getCurrentSession();
+    },
+
+    async clearAfterAccountDeletion() {
+      authGeneration += 1;
+      ready = null;
+      try {
+        if (typeof auth.logoutLocal === 'function') await auth.logoutLocal();
+        else await auth.logout();
+      } catch { /* Local application access is already cleared. */ }
+    },
   };
 }

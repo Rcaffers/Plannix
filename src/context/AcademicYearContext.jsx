@@ -47,9 +47,13 @@ export function AcademicYearProvider({ children, user }) {
     });
   }, [user]);
 
+  const clearUserAcademicYear = useCallback(() => {
+    setAcademicYearState(normalizeAcademicYear(DEFAULT_ACADEMIC_YEAR));
+  }, []);
+
   const value = useMemo(
-    () => ({ academicYear, setAcademicYear }),
-    [academicYear, setAcademicYear],
+    () => ({ academicYear, setAcademicYear, clearUserAcademicYear }),
+    [academicYear, setAcademicYear, clearUserAcademicYear],
   );
 
   return <AcademicYearContext.Provider value={value}>{children}</AcademicYearContext.Provider>;

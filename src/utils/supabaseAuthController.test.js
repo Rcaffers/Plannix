@@ -23,6 +23,7 @@ function mockAuth(overrides = {}) {
     async ensurePersonalOrganisation() { calls.push('onboard'); return {}; },
     subscribeToAuthChanges(next) { calls.push('subscribe'); callback = next; return () => calls.push('unsubscribe'); },
     async logout() { calls.push('logout'); },
+    async logoutLocal() { calls.push('logout-local'); },
     ...overrides,
   };
   return { auth, calls, emit: (event, nextSession = session) => callback({ event, session: nextSession }) };
@@ -103,6 +104,14 @@ test('subscription cleanup prevents scheduled state changes and logout uses Supa
   await controller.logout();
   assert.equal(changed, false);
   assert.equal(mock.calls.includes('logout'), true);
+});
+
+test('account deletion exposes the current session and clears only the local Auth session', async () => {
+  const mock = mockAuth();
+  const controller = createSupabaseAuthController({ auth: mock.auth });
+  assert.equal(await controller.getCurrentSession(), session);
+  await controller.clearAfterAccountDeletion();
+  assert.deepEqual(mock.calls, ['session', 'logout-local']);
 });
 
 test('a recovery session is never published as an authenticated application user', async () => {
