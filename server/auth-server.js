@@ -21,6 +21,7 @@ import { env } from './config/env.js';
 import { errorHandler, logRouteError, notFoundHandler, sendError } from './errors.js';
 import { requestId } from './middleware/requestId.js';
 import { registerAccountRoutes } from './routes/account-routes.js';
+import { registerAcademicYearRoutes } from './routes/academic-year-routes.js';
 import { registerContactRoutes } from './routes/contact-routes.js';
 import { registerHolidayRoutes } from './routes/holiday-routes.js';
 import { registerPlannerRoutes } from './routes/planner-routes.js';
@@ -494,6 +495,7 @@ app.post('/auth/logout', async (req, res) => {
 });
 
 registerAccountRoutes({ app });
+registerAcademicYearRoutes({ app });
 
 registerHolidayRoutes({
   app,

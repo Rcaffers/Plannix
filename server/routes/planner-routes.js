@@ -117,48 +117,6 @@ export function registerPlannerRoutes({
     }
   });
 
-  app.get('/api/academic-year', async (req, res) => {
-    if (!requireDb(res)) {
-      return;
-    }
-    const user = await requireSessionUser(req, res);
-    if (!user) return;
-    try {
-      const result = await withUserDbSession(user.id, (client) =>
-        client.query('SELECT plan FROM plannix_academic_years WHERE user_id = $1', [user.id]),
-      );
-      return res.json({ plan: result.rows[0]?.plan || null });
-    } catch (error) {
-      return sendError(res, error, 'Failed to load academic year.');
-    }
-  });
-
-  app.put('/api/academic-year', async (req, res) => {
-    if (!requireDb(res)) {
-      return;
-    }
-    const user = await requireSessionUser(req, res);
-    if (!user) return;
-    const plan = req.body?.plan;
-    if (!plan || typeof plan !== 'object') {
-      return res.status(400).json({ message: 'plan object is required.' });
-    }
-    try {
-      await withUserDbSession(user.id, (client) =>
-        client.query(
-          `INSERT INTO plannix_academic_years (user_id, plan, updated_at)
-           VALUES ($1, $2::jsonb, NOW())
-           ON CONFLICT (user_id)
-           DO UPDATE SET plan = EXCLUDED.plan, updated_at = NOW()`,
-          [user.id, JSON.stringify(plan)],
-        ),
-      );
-      return res.json({ ok: true });
-    } catch (error) {
-      return sendError(res, error, 'Failed to save academic year.');
-    }
-  });
-
   app.get('/api/timetable/sessions', async (req, res) => {
     if (!requireDb(res)) {
       return;
