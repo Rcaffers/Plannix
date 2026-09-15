@@ -1,3 +1,5 @@
+import { getSupabaseClient } from '../lib/supabase.js';
+
 /**
  * Resolves the API origin for fetch(). Vite bakes VITE_API_BASE_URL at build time—local .env values
  * like http://localhost:4000 break production (browser cannot reach your laptop). We also avoid
@@ -276,28 +278,91 @@ export async function clearTimetableSessionsForLayout({ layoutKey }) {
   return payload;
 }
 
-export async function fetchAcademicYearPlan() {
-  const response = await fetch(`${API_BASE_URL}/api/academic-year`, {
-    method: 'GET',
-    credentials: 'include',
-  });
-  const payload = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(payload?.message || 'Could not load academic year.');
-  }
-  return payload?.plan ?? null;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function canonicalUuid(value, label) {
+  if (!UUID.test(String(value || ''))) throw new ApiError(`${label} is invalid.`);
+  return value;
 }
 
-export async function saveAcademicYearPlan(plan) {
-  const response = await fetch(`${API_BASE_URL}/api/academic-year`, {
-    method: 'PUT',
-    headers: JSON_POST_HEADERS,
-    credentials: 'include',
-    body: JSON.stringify({ plan }),
-  });
-  const payload = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(payload?.message || 'Could not save academic year.');
+function publicYear(value, withHolidays = false) {
+  const year = {
+    id: canonicalUuid(value?.id, 'Academic year'),
+    label: String(value?.label || ''),
+    startDate: DATE.test(String(value?.startDate || '')) ? value.startDate : '',
+    endDate: DATE.test(String(value?.endDate || '')) ? value.endDate : '',
+  };
+  if (withHolidays) {
+    year.holidays = (Array.isArray(value?.holidays) ? value.holidays : []).map((holiday) => ({
+      id: canonicalUuid(holiday?.id, 'Holiday'),
+      label: String(holiday?.label || ''),
+      startDate: DATE.test(String(holiday?.startDate || '')) ? holiday.startDate : '',
+      endDate: DATE.test(String(holiday?.endDate || '')) ? holiday.endDate : '',
+    }));
   }
-  return payload;
+  return year;
 }
+
+export function createAcademicYearApi({
+  fetchImpl = fetch,
+  getSession = async () => {
+    const client = getSupabaseClient();
+    const { data, error } = await client.auth.getSession();
+    if (error) throw new ApiError('Authentication is required.', { status: 401 });
+    const session = data?.session;
+    if (!session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
+    const validation = await client.auth.getUser(session.access_token);
+    if (validation.error || !validation.data?.user) throw new ApiError('Authentication is required.', { status: 401 });
+    return session;
+  },
+} = {}) {
+  async function request(path, options, fallback) {
+    let response;
+    try {
+      const session = await getSession();
+      if (!session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
+      response = await fetchImpl(`${API_BASE_URL}${path}`, {
+        ...options,
+        credentials: 'omit',
+        headers: { ...options?.headers, Authorization: `Bearer ${session.access_token}` },
+      });
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(fallback);
+    }
+    const payload = await parseJsonSafe(response);
+    const requestId = response.headers?.get?.('x-request-id');
+    if (!response.ok) throw new ApiError(payload?.message || fallback, { status: response.status, requestId });
+    return { payload, requestId: UUID.test(String(requestId || '')) ? requestId : null };
+  }
+
+  return {
+    async list(organisationId) {
+      canonicalUuid(organisationId, 'Organisation');
+      const query = new URLSearchParams({ organisationId });
+      const { payload, requestId } = await request(`/api/academic-years?${query}`, { method: 'GET' }, 'Could not load academic years.');
+      return { academicYears: (Array.isArray(payload?.academicYears) ? payload.academicYears : []).map((year) => publicYear(year)), requestId };
+    },
+    async load(organisationId, academicYearId) {
+      canonicalUuid(organisationId, 'Organisation');
+      canonicalUuid(academicYearId, 'Academic year');
+      const query = new URLSearchParams({ organisationId, academicYearId });
+      const { payload, requestId } = await request(`/api/academic-year?${query}`, { method: 'GET' }, 'Could not load the academic year.');
+      return { plan: publicYear(payload?.plan, true), requestId };
+    },
+    async save(organisationId, plan) {
+      canonicalUuid(organisationId, 'Organisation');
+      if (plan?.id) canonicalUuid(plan.id, 'Academic year');
+      const { payload, requestId } = await request('/api/academic-year', {
+        method: 'PUT', headers: JSON_POST_HEADERS, body: JSON.stringify({ organisationId, plan }),
+      }, 'Could not save the academic year.');
+      return { academicYearId: canonicalUuid(payload?.academicYearId, 'Academic year'), requestId };
+    },
+  };
+}
+
+const academicYearApi = createAcademicYearApi();
+export const fetchAcademicYears = (organisationId) => academicYearApi.list(organisationId);
+export const fetchAcademicYearPlan = (organisationId, academicYearId) => academicYearApi.load(organisationId, academicYearId);
+export const saveAcademicYearPlan = (organisationId, plan) => academicYearApi.save(organisationId, plan);

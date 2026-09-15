@@ -95,7 +95,7 @@ export default function App() {
 
   return (
     <TimetableLayoutProvider user={user}>
-      <AcademicYearProvider user={user}>
+      <AcademicYearProvider key={`${user?.id || 'signed-out'}:${user?.organisationId || 'none'}`} user={user}>
         <div className="page-shell">
           <ScrollToTop />
           <Header

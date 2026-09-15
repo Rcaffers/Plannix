@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../lib/supabase.js';
 
 const PROFILE_COLUMNS = 'id, first_name, last_name, initials';
+const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export class SupabaseAuthError extends Error {
   constructor(message, { code = '', status = null } = {}) {
@@ -70,6 +71,11 @@ export function mapSupabaseUser(authUser, profile = null) {
     lastName,
     initials,
   };
+}
+
+export function validatedOrganisationId(value) {
+  const candidate = String(value || '');
+  return CANONICAL_UUID.test(candidate) ? candidate : null;
 }
 
 export function createSupabaseAuthAdapter({
@@ -175,7 +181,13 @@ export function createSupabaseAuthAdapter({
     async ensurePersonalOrganisation() {
       const { data, error } = await client.rpc('plannix_ensure_personal_organisation');
       if (error) throw authError(error, 'Unable to finish setting up your account.');
-      return Array.isArray(data) ? data[0] || null : data || null;
+      const result = Array.isArray(data) ? data[0] || null : data || null;
+      const organisationId = validatedOrganisationId(result?.organisation_id);
+      if (!organisationId) throw new SupabaseAuthError('Personal organisation is unavailable.');
+      return {
+        organisationId,
+        organisationUserId: validatedOrganisationId(result?.organisation_user_id),
+      };
     },
 
     async sendPasswordRecovery(email) {

@@ -60,11 +60,12 @@ export function createSupabaseAuthController({
         if (generation !== authGeneration || recoveryTokens.has(token)) {
           throw new SupabaseAuthError('Recovery sessions cannot access the application.');
         }
-        await auth.ensurePersonalOrganisation();
+        const organisation = await auth.ensurePersonalOrganisation();
+        if (!organisation?.organisationId) throw new SupabaseAuthError('Personal organisation unavailable.');
         const profile = await auth.loadProfile(validatedUser);
         if (!profile) throw new SupabaseAuthError('Profile unavailable.');
         if (generation !== authGeneration) throw new SupabaseAuthError('Session changed.');
-        const user = mapSupabaseUser(validatedUser, profile);
+        const user = { ...mapSupabaseUser(validatedUser, profile), organisationId: organisation.organisationId };
         ready = { token, user };
         return user;
       } catch {

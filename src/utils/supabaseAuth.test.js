@@ -209,10 +209,25 @@ test('account deletion cleanup removes only the local Supabase session', async (
 
 test('personal organisation onboarding uses the no-argument RPC', async () => {
   const mock = createMockClient();
-  mock.calls.rpcResult = { data: [{ organisation_id: 'org', organisation_user_id: 'membership' }], error: null };
+  mock.calls.rpcResult = { data: [{
+    organisation_id: '20000000-0000-4000-8000-000000000001',
+    organisation_user_id: '30000000-0000-4000-8000-000000000001',
+  }], error: null };
   const result = await createSupabaseAuthAdapter({ client: mock.client, location }).ensurePersonalOrganisation();
   assert.equal(mock.calls.rpc, 'plannix_ensure_personal_organisation');
-  assert.deepEqual(result, { organisation_id: 'org', organisation_user_id: 'membership' });
+  assert.deepEqual(result, {
+    organisationId: '20000000-0000-4000-8000-000000000001',
+    organisationUserId: '30000000-0000-4000-8000-000000000001',
+  });
+});
+
+test('personal organisation onboarding rejects noncanonical organisation identifiers', async () => {
+  const mock = createMockClient();
+  mock.calls.rpcResult = { data: [{ organisation_id: 'attacker-input' }], error: null };
+  await assert.rejects(
+    () => createSupabaseAuthAdapter({ client: mock.client, location }).ensurePersonalOrganisation(),
+    /Personal organisation is unavailable/,
+  );
 });
 
 test('password update requires a recovery session and Supabase errors retain safe metadata', async () => {

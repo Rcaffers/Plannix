@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import SettingsSubnav from '../components/SettingsSubnav';
 import { useAcademicYear } from '../context/AcademicYearContext';
-import { newHolidayId, normalizeAcademicYear } from '../utils/academicYear';
+import { newHolidayId, normalizeAcademicYear, validateAcademicYearDraft } from '../utils/academicYear';
 import {
   fetchHolidayCountries,
   fetchPublicHolidays,
@@ -11,7 +11,10 @@ import {
 import './Settings.css';
 
 export default function AcademicYear() {
-  const { academicYear, setAcademicYear } = useAcademicYear();
+  const {
+    academicYears, selectedAcademicYearId, academicYear, isLoading, isSaving, error, requestReference,
+    selectAcademicYear, createAcademicYear, saveAcademicYear,
+  } = useAcademicYear();
   const [draft, setDraft] = useState(academicYear);
   const [savedFlash, setSavedFlash] = useState(false);
   const [holidayCountries, setHolidayCountries] = useState([]);
@@ -21,6 +24,7 @@ export default function AcademicYear() {
   const [manualCountryMode, setManualCountryMode] = useState(false);
   const [manualCountryInput, setManualCountryInput] = useState('');
   const [isImportingHolidays, setIsImportingHolidays] = useState(false);
+  const [formError, setFormError] = useState('');
 
   useEffect(() => {
     setDraft(academicYear);
@@ -44,13 +48,41 @@ export default function AcademicYear() {
     };
   }, []);
 
-  function handleSubmit(event) {
+  const hasUnsavedChanges = JSON.stringify(normalizeAcademicYear(draft)) !== JSON.stringify(academicYear);
+
+  async function handleSubmit(event) {
     event.preventDefault();
+    if (isSaving) return;
     const normalized = normalizeAcademicYear(draft);
+    const validationError = validateAcademicYearDraft(normalized);
+    if (validationError) { setFormError(validationError); return; }
+    setFormError('');
     setDraft(normalized);
-    setAcademicYear(normalized);
-    setSavedFlash(true);
-    window.setTimeout(() => setSavedFlash(false), 2400);
+    const saved = await saveAcademicYear(normalized);
+    if (saved) {
+      setDraft(saved);
+      setSavedFlash(true);
+      window.setTimeout(() => setSavedFlash(false), 2400);
+    }
+  }
+
+  function approveDiscard() {
+    return !hasUnsavedChanges || window.confirm('Discard unsaved academic-year changes?');
+  }
+
+  async function handleYearChange(event) {
+    const nextId = event.target.value;
+    if (!approveDiscard()) { event.target.value = selectedAcademicYearId || ''; return; }
+    setSavedFlash(false);
+    setFormError('');
+    await selectAcademicYear(nextId || null);
+  }
+
+  function handleCreate() {
+    if (!approveDiscard()) return;
+    setSavedFlash(false);
+    setFormError('');
+    createAcademicYear();
   }
 
   function addHoliday() {
@@ -84,25 +116,11 @@ export default function AcademicYear() {
 
   function selectedHolidayDateRange() {
     const startDate = String(draft.startDate || '').trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+    const endDate = String(draft.endDate || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
       return null;
     }
-    const start = new Date(`${startDate}T00:00:00`);
-    if (Number.isNaN(start.getTime())) {
-      return null;
-    }
-    const end = new Date(start);
-    end.setFullYear(end.getFullYear() + 1);
-    const toYmd = (value) => {
-      const y = value.getFullYear();
-      const m = String(value.getMonth() + 1).padStart(2, '0');
-      const d = String(value.getDate()).padStart(2, '0');
-      return `${y}-${m}-${d}`;
-    };
-    return {
-      startDate,
-      endDate: toYmd(end),
-    };
+    return { startDate, endDate };
   }
 
   function resolveCountryCodeFromManualInput() {
@@ -241,6 +259,20 @@ export default function AcademicYear() {
           dates.
         </p>
 
+        <div className="settings-year-picker">
+          <div className="settings-field">
+            <label htmlFor="academic-year-selector">Selected academic year</label>
+            <select id="academic-year-selector" value={selectedAcademicYearId || ''} onChange={handleYearChange} disabled={isLoading || isSaving}>
+              <option value="">{academicYears.length ? 'Choose an academic year' : 'No academic year selected'}</option>
+              {academicYears.map((year) => <option key={year.id} value={year.id}>{year.label}</option>)}
+            </select>
+          </div>
+          <button type="button" className="add-row-button" onClick={handleCreate} disabled={isLoading || isSaving}>Create academic year</button>
+        </div>
+        {isLoading ? <p role="status">Loading academic years…</p> : null}
+        {error ? <p className="settings-hint settings-hint--error" role="alert">{error}</p> : null}
+        {requestReference ? <p className="settings-hint">Support reference: <code>{requestReference}</code></p> : null}
+
         <form className="settings-timetable-form" onSubmit={handleSubmit}>
           <h2 className="settings-section-title">Details</h2>
           <div className="settings-field">
@@ -265,6 +297,12 @@ export default function AcademicYear() {
               onChange={(e) => setDraft((d) => ({ ...d, startDate: e.target.value }))}
             />
             <p className="settings-hint">Optional. For your records; holiday blanking uses the holiday date ranges below.</p>
+          </div>
+
+          <div className="settings-field">
+            <label htmlFor="academic-year-end">End date of academic year</label>
+            <input id="academic-year-end" type="date" value={draft.endDate} onChange={(e) => setDraft((d) => ({ ...d, endDate: e.target.value }))} />
+            <p className="settings-hint">The end date is inclusive.</p>
           </div>
 
           <h2 className="settings-section-title settings-section-title--sub">Holidays</h2>
@@ -370,10 +408,11 @@ export default function AcademicYear() {
           </div>
 
           <div className="settings-actions">
-            <button type="submit" className="settings-save">
-              Save academic year
+            <button type="submit" className="settings-save" disabled={isSaving || isLoading}>
+              {isSaving ? 'Saving…' : 'Save academic year'}
             </button>
           </div>
+          {formError ? <p className="settings-hint settings-hint--error" role="alert">{formError}</p> : null}
           {savedFlash ? <p className="settings-saved" role="status">Academic year saved.</p> : null}
         </form>
       </div>

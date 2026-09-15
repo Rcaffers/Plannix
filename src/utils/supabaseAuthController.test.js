@@ -10,6 +10,7 @@ import {
 
 const session = { access_token: 'access-token', user: { id: 'user-1' } };
 const profile = { id: 'user-1', first_name: 'Ada', last_name: 'Lovelace', initials: 'AL' };
+const organisationId = '20000000-0000-4000-8000-000000000001';
 
 function mockAuth(overrides = {}) {
   const calls = [];
@@ -20,7 +21,7 @@ function mockAuth(overrides = {}) {
     async getCurrentSession() { calls.push('session'); return session; },
     async getValidatedCurrentUser() { calls.push('validate'); return { id: 'user-1', email: 'ada@example.test' }; },
     async loadProfile() { calls.push('profile'); return profile; },
-    async ensurePersonalOrganisation() { calls.push('onboard'); return {}; },
+    async ensurePersonalOrganisation() { calls.push('onboard'); return { organisationId }; },
     subscribeToAuthChanges(next) { calls.push('subscribe'); callback = next; return () => calls.push('unsubscribe'); },
     async logout() { calls.push('logout'); },
     async logoutLocal() { calls.push('logout-local'); },
@@ -49,7 +50,7 @@ test('authenticated signup and login validate, load profile, onboard, reload, th
     });
     const controller = createSupabaseAuthController({ auth: mock.auth });
     const result = operation === 'signup' ? (await controller.signup({})).user : await controller.login({});
-    assert.deepEqual(result, { id: 'user-1', name: 'Ada Lovelace', email: 'ada@example.test', firstName: 'Ada', lastName: 'Lovelace', initials: 'AL' });
+    assert.deepEqual(result, { id: 'user-1', name: 'Ada Lovelace', email: 'ada@example.test', firstName: 'Ada', lastName: 'Lovelace', initials: 'AL', organisationId });
     assert.deepEqual(mock.calls, [operation, 'validate', 'profile', 'onboard', 'profile']);
   }
 });
@@ -74,7 +75,11 @@ test('confirmation events are delegated outside the auth callback and duplicate 
   const queued = [];
   let release;
   const mock = mockAuth({
-    async ensurePersonalOrganisation() { mock.calls.push('onboard'); await new Promise((resolve) => { release = resolve; }); },
+    async ensurePersonalOrganisation() {
+      mock.calls.push('onboard');
+      await new Promise((resolve) => { release = resolve; });
+      return { organisationId };
+    },
   });
   const users = [];
   const controller = createSupabaseAuthController({ auth: mock.auth, schedule: (task) => queued.push(task) });
@@ -112,6 +117,17 @@ test('account deletion exposes the current session and clears only the local Aut
   assert.equal(await controller.getCurrentSession(), session);
   await controller.clearAfterAccountDeletion();
   assert.deepEqual(mock.calls, ['session', 'logout-local']);
+});
+
+test('logout and account deletion discard the cached user and organisation selector', async () => {
+  const mock = mockAuth();
+  const controller = createSupabaseAuthController({ auth: mock.auth });
+  assert.equal((await controller.login({})).organisationId, organisationId);
+  await controller.logout();
+  assert.equal((await controller.login({})).organisationId, organisationId);
+  await controller.clearAfterAccountDeletion();
+  await controller.login({});
+  assert.equal(mock.calls.filter((call) => call === 'onboard').length, 3);
 });
 
 test('a recovery session is never published as an authenticated application user', async () => {

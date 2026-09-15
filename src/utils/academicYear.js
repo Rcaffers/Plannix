@@ -1,6 +1,8 @@
 export const DEFAULT_ACADEMIC_YEAR = {
+  id: null,
   label: '',
   startDate: '',
+  endDate: '',
   holidays: [],
 };
 
@@ -43,13 +45,40 @@ export function normalizeHoliday(raw) {
 
 export function normalizeAcademicYear(partial) {
   const base = { ...DEFAULT_ACADEMIC_YEAR, ...partial };
+  const id = String(base.id || '').trim() || null;
   const label = String(base.label || '').trim();
   let startDate = String(base.startDate || '').trim();
+  let endDate = String(base.endDate || '').trim();
   if (!isValidYmd(startDate)) startDate = '';
+  if (!isValidYmd(endDate)) endDate = '';
   const holidays = Array.isArray(base.holidays)
     ? base.holidays.map((h) => normalizeHoliday(h))
     : [];
-  return { label, startDate, holidays };
+  return { id, label, startDate, endDate, holidays };
+}
+
+export function selectCurrentAcademicYear(academicYears, today = toLocalYmd(new Date())) {
+  return [...(Array.isArray(academicYears) ? academicYears : [])]
+    .filter((year) => isValidYmd(year?.startDate) && isValidYmd(year?.endDate)
+      && year.startDate <= today && today <= year.endDate)
+    .sort((a, b) => b.startDate.localeCompare(a.startDate) || a.id.localeCompare(b.id))[0]?.id || null;
+}
+
+export function validateAcademicYearDraft(plan) {
+  const normalized = normalizeAcademicYear(plan);
+  if (!normalized.label || normalized.label.length > 200) return 'Enter an academic-year name of no more than 200 characters.';
+  if (!isValidYmd(normalized.startDate) || !isValidYmd(normalized.endDate)
+    || normalized.startDate > normalized.endDate) return 'Enter a valid start and end date.';
+  if (normalized.holidays.length > 100) return 'An academic year can contain no more than 100 holidays.';
+  for (const holiday of normalized.holidays) {
+    if (!holiday.label || holiday.label.length > 200) return 'Each holiday needs a name of no more than 200 characters.';
+    if (!isValidYmd(holiday.startDate) || !isValidYmd(holiday.endDate)
+      || holiday.startDate > holiday.endDate
+      || holiday.startDate < normalized.startDate || holiday.endDate > normalized.endDate) {
+      return 'Holiday dates must fall within the academic year.';
+    }
+  }
+  return '';
 }
 
 /**
@@ -102,7 +131,7 @@ function startOfWeekMondayLocal(date) {
 /**
  * First/last Monday of the timetable window when an academic start date is set:
  * from the Monday of the week containing that date through the Monday of the week
- * containing (start + 365 days). Used to clamp calendar navigation on the main timetable.
+ * containing the configured inclusive end date. Used to clamp calendar navigation on the main timetable.
  */
 export function getAcademicTimetableMondayBounds(academicYear) {
   const ymd = String(academicYear?.startDate || '').trim();
@@ -115,8 +144,14 @@ export function getAcademicTimetableMondayBounds(academicYear) {
     return { minMonday: null, maxMonday: null };
   }
   const minMonday = startOfWeekMondayLocal(start);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 365);
+  const endYmd = String(academicYear?.endDate || '').trim();
+  let end = new Date(start);
+  if (isValidYmd(endYmd)) {
+    const [endYear, endMonth, endDay] = endYmd.split('-').map((x) => parseInt(x, 10));
+    end = new Date(endYear, endMonth - 1, endDay, 12, 0, 0, 0);
+  } else {
+    end.setDate(end.getDate() + 365);
+  }
   const maxMonday = startOfWeekMondayLocal(end);
   return { minMonday, maxMonday };
 }
