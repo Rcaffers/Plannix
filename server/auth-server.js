@@ -7,7 +7,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
 import { Resend } from 'resend';
-import { createDbPool, mapClassRow } from './db.js';
+import { createDbPool } from './db.js';
 import {
   COOKIE_OPTIONS,
   DIST_DIR,
@@ -22,6 +22,7 @@ import { errorHandler, logRouteError, notFoundHandler, sendError } from './error
 import { requestId } from './middleware/requestId.js';
 import { registerAccountRoutes } from './routes/account-routes.js';
 import { registerAcademicYearRoutes } from './routes/academic-year-routes.js';
+import { registerClassRoutes } from './routes/class-routes.js';
 import { registerContactRoutes } from './routes/contact-routes.js';
 import { registerHolidayRoutes } from './routes/holiday-routes.js';
 import { registerPlannerRoutes } from './routes/planner-routes.js';
@@ -496,6 +497,7 @@ app.post('/auth/logout', async (req, res) => {
 
 registerAccountRoutes({ app });
 registerAcademicYearRoutes({ app });
+registerClassRoutes({ app });
 
 registerHolidayRoutes({
   app,
@@ -508,7 +510,6 @@ registerHolidayRoutes({
 
 registerPlannerRoutes({
   app,
-  mapClassRow,
   requireDb,
   requireSessionUser,
   sendError,

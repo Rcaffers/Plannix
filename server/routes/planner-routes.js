@@ -1,80 +1,10 @@
 export function registerPlannerRoutes({
   app,
-  mapClassRow,
   requireDb,
   requireSessionUser,
   sendError,
   withUserDbSession,
 }) {
-  app.get('/api/classes', async (req, res) => {
-    if (!requireDb(res)) {
-      return;
-    }
-    const user = await requireSessionUser(req, res);
-    if (!user) return;
-    try {
-      const result = await withUserDbSession(user.id, (client) =>
-        client.query(
-          `SELECT id, name, frequency, cadence
-           FROM plannix_classes
-           WHERE user_id = $1
-           ORDER BY sort_order ASC, created_at ASC`,
-          [user.id],
-        ),
-      );
-      return res.json({
-        entries: result.rows.map(mapClassRow),
-      });
-    } catch (error) {
-      return sendError(res, error, 'Failed to load classes.');
-    }
-  });
-
-  app.put('/api/classes', async (req, res) => {
-    if (!requireDb(res)) {
-      return;
-    }
-    const user = await requireSessionUser(req, res);
-    if (!user) return;
-
-    const entries = Array.isArray(req.body?.entries) ? req.body.entries : [];
-    const cadence = req.body?.cadence === 'two-weeks' ? 'two-weeks' : 'week';
-    const normalizedEntries = entries
-      .map((entry, index) => ({
-        id: entry?.id ? String(entry.id) : null,
-        name: String(entry?.name || '').trim(),
-        frequency: Math.max(0, Number.parseInt(entry?.frequency, 10) || 0),
-        cadence: entry?.cadence === 'two-weeks' ? 'two-weeks' : cadence,
-        sortOrder: index,
-      }))
-      .filter((entry) => entry.name);
-
-    try {
-      await withUserDbSession(user.id, async (client) => {
-        await client.query('DELETE FROM plannix_classes WHERE user_id = $1', [user.id]);
-
-        for (const entry of normalizedEntries) {
-          await client.query(
-            `INSERT INTO plannix_classes (id, user_id, name, frequency, cadence, sort_order, updated_at)
-             VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, NOW())`,
-            [entry.id, user.id, entry.name, entry.frequency, entry.cadence, entry.sortOrder],
-          );
-        }
-      });
-      return res.json({
-        cadence,
-        entries: normalizedEntries.map((entry) => ({
-          id: entry.id,
-          name: entry.name,
-          frequency: entry.frequency,
-          cadence: entry.cadence,
-        })),
-      });
-    } catch (error) {
-      return sendError(res, error, 'Failed to save classes.');
-    }
-  });
-
   app.get('/api/timetable/layout', async (req, res) => {
     if (!requireDb(res)) {
       return;

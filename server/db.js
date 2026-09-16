@@ -21,12 +21,3 @@ export function createDbPool() {
     ssl: process.env.DB_SSL === 'false' ? false : { rejectUnauthorized: false },
   });
 }
-
-export function mapClassRow(row) {
-  return {
-    id: row.id,
-    name: row.name,
-    frequency: row.frequency,
-    cadence: row.cadence,
-  };
-}
