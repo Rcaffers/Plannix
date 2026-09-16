@@ -116,6 +116,10 @@
   margin: -6px 0 4px;
 }
 
+.classes-hint--error {
+  color: #8f3f38;
+}
+
 .classes-field {
   display: grid;
   gap: 8px;
@@ -239,6 +243,12 @@
 
 .classes-save:hover {
   background: #346b66;
+}
+
+.classes-save:disabled,
+.classes-entry-remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .classes-saved {

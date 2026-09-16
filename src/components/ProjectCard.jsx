@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAcademicYear } from '../context/AcademicYearContext';
+import { useClasses } from '../context/ClassContext';
 import { useTimetableLayout } from '../context/TimetableLayoutContext';
 import { lessonAriaLabel } from '../utils/lessonModal';
-import { normalizeClassesPlan } from '../utils/classesPlanner';
 import { findSessionAt } from '../utils/timetable';
 import {
   pullLessonDetailsBackwardAlongSameClassAhead,
@@ -19,7 +19,7 @@ import {
   TIMETABLE_CYCLE,
 } from '../utils/timetableLayout';
 import { loadTimetableEditModeFromStorage, saveTimetableEditModeToStorage } from '../utils/timetableEditModeStorage';
-import { clearTimetableSessionsForLayout, fetchClassesPlan, fetchTimetableSessions, saveTimetableSessions } from '../utils/api';
+import { clearTimetableSessionsForLayout, fetchTimetableSessions, saveTimetableSessions } from '../utils/api';
 import {
   computeAvailableClassOptions,
   getPlannedClassEntries,
@@ -167,6 +167,11 @@ export default function ProjectCard({
 }) {
   const { layout, dayLabels, rowSegments } = useTimetableLayout();
   const { academicYear } = useAcademicYear();
+  const {
+    authoritativeEntries: classEntries,
+    isLoading: classesLoading,
+    error: classesError,
+  } = useClasses();
   const timetableMondayBounds = useMemo(
     () => getAcademicTimetableMondayBounds(academicYear),
     [academicYear],
@@ -441,32 +446,10 @@ export default function ProjectCard({
     setLessonPushForwardSuccess('');
   }, [modalSlot]);
 
-  const [classesPlan, setClassesPlan] = useState(() => normalizeClassesPlan({ cadence: 'week', entries: [] }));
-  useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      try {
-        const data = await fetchClassesPlan();
-        if (!cancelled) {
-          setClassesPlan(
-            normalizeClassesPlan({
-              cadence: layout.cycle === TIMETABLE_CYCLE.TWO_WEEK ? 'two-weeks' : 'week',
-              entries: Array.isArray(data?.entries) ? data.entries : [],
-            }),
-          );
-        }
-      } catch {
-        if (!cancelled) {
-          setClassesPlan(normalizeClassesPlan({ cadence: 'week', entries: [] }));
-        }
-      }
-    };
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [layout.cycle]);
-  const plannedClasses = useMemo(() => getPlannedClassEntries(classesPlan), [classesPlan]);
+  const plannedClasses = useMemo(
+    () => getPlannedClassEntries({ entries: classEntries || [] }),
+    [classEntries],
+  );
   const { byId: plannedClassById, byName: plannedClassByName } = useMemo(
     () => mapsFromPlannedClasses(plannedClasses),
     [plannedClasses],
@@ -1018,6 +1001,8 @@ export default function ProjectCard({
       }`}
     >
       <div className="schedule-card">
+        {classesLoading ? <p className="classes-hint" role="status">Loading classes…</p> : null}
+        {classesError ? <p className="classes-hint classes-hint--error" role="alert">{classesError}</p> : null}
         <div className={`schedule-titlebar${isSingleDayTimetable ? ' schedule-titlebar--stack' : ''}`}>
           <div className="schedule-titlebar-main">
             <strong>{project.title}</strong>

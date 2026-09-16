@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../lib/supabase.js';
+import { toClassRequestEntries } from './classPersistence.js';
 
 /**
  * Resolves the API origin for fetch(). Vite bakes VITE_API_BASE_URL at build time—local .env values
@@ -184,33 +185,98 @@ export async function deleteAccount({ password, accessToken, fetchImpl = fetch }
   }
 }
 
-export async function fetchClassesPlan() {
-  const response = await fetch(`${API_BASE_URL}/api/classes`, {
-    method: 'GET',
-    credentials: 'include',
-  });
-  const payload = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(payload?.message || 'Could not load classes.');
+function publicClassEntry(value) {
+  const id = canonicalUuid(value?.id, 'Class');
+  const name = String(value?.name || '');
+  const frequency = Number(value?.frequency);
+  if (!name || !Number.isInteger(frequency) || frequency < 1 || frequency > 50) {
+    throw new ApiError('The server returned invalid class data.');
   }
+  return { id, name, frequency };
+}
+
+export function createClassApi({
+  fetchImpl = fetch,
+  getSession = async () => {
+    const client = getSupabaseClient();
+    const { data, error } = await client.auth.getSession();
+    if (error || !data?.session?.access_token) {
+      throw new ApiError('Authentication is required.', { status: 401 });
+    }
+    const validation = await client.auth.getUser(data.session.access_token);
+    if (validation.error || !validation.data?.user) {
+      throw new ApiError('Authentication is required.', { status: 401 });
+    }
+    return data.session;
+  },
+} = {}) {
+  async function request(path, options, fallback) {
+    let response;
+    try {
+      const session = await getSession();
+      if (!session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
+      response = await fetchImpl(`${API_BASE_URL}${path}`, {
+        ...options,
+        credentials: 'omit',
+        headers: { ...options?.headers, Authorization: `Bearer ${session.access_token}` },
+      });
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(fallback);
+    }
+    const payload = await parseJsonSafe(response);
+    const requestId = response.headers?.get?.('x-request-id');
+    if (!response.ok) {
+      throw new ApiError(payload?.message || fallback, {
+        status: response.status,
+        requestId,
+      });
+    }
+    const revision = Number(payload?.revision);
+    if (!Number.isSafeInteger(revision) || revision < 0 || !Array.isArray(payload?.entries)) {
+      throw new ApiError(fallback, { requestId });
+    }
+    return {
+      revision,
+      entries: payload.entries.map(publicClassEntry),
+      requestId: CANONICAL_REQUEST_ID.test(String(requestId || '')) ? requestId : null,
+    };
+  }
+
   return {
-    entries: Array.isArray(payload?.entries) ? payload.entries : [],
+    load(organisationId, academicYearId) {
+      canonicalUuid(organisationId, 'Organisation');
+      canonicalUuid(academicYearId, 'Academic year');
+      const query = new URLSearchParams({ organisationId, academicYearId });
+      return request(`/api/classes?${query}`, { method: 'GET' }, 'Could not load classes.');
+    },
+    save(organisationId, academicYearId, expectedRevision, entries) {
+      canonicalUuid(organisationId, 'Organisation');
+      canonicalUuid(academicYearId, 'Academic year');
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+        throw new ApiError('Class revision is invalid.');
+      }
+      let normalizedEntries;
+      try {
+        normalizedEntries = toClassRequestEntries(entries);
+      } catch (error) {
+        throw new ApiError(error.message || 'Class data is invalid.');
+      }
+      const body = { organisationId, academicYearId, expectedRevision, entries: normalizedEntries };
+      return request('/api/classes', {
+        method: 'PUT',
+        headers: JSON_POST_HEADERS,
+        body: JSON.stringify(body),
+      }, 'Could not save classes.');
+    },
   };
 }
 
-export async function saveClassesPlan(plan) {
-  const response = await fetch(`${API_BASE_URL}/api/classes`, {
-    method: 'PUT',
-    headers: JSON_POST_HEADERS,
-    credentials: 'include',
-    body: JSON.stringify(plan),
-  });
-  const payload = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(payload?.message || 'Could not save classes.');
-  }
-  return payload;
-}
+const classApi = createClassApi();
+export const fetchClassCollection = (organisationId, academicYearId) =>
+  classApi.load(organisationId, academicYearId);
+export const saveClassCollection = (organisationId, academicYearId, expectedRevision, entries) =>
+  classApi.save(organisationId, academicYearId, expectedRevision, entries);
 
 export async function fetchTimetableLayout() {
   const response = await fetch(`${API_BASE_URL}/api/timetable/layout`, {

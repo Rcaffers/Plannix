@@ -4,105 +4,72 @@ import SettingsSubnav from '../components/SettingsSubnav';
 import ProjectCard from '../components/ProjectCard';
 import { timetableProject } from '../utils/projectsData';
 import { useTimetableLayout } from '../context/TimetableLayoutContext';
-import {
-  addClassEntry,
-  cadenceFromTimetableCycle,
-  normalizeClassesPlan,
-  removeClassEntry,
-  DEFAULT_CLASSES_PLAN,
-} from '../utils/classesPlanner';
-import { clearTimetableSessionsForLayout, fetchClassesPlan, saveClassesPlan } from '../utils/api';
-import { makeLayoutKey, TIMETABLE_CYCLE } from '../utils/timetableLayout';
+import { useClasses } from '../context/ClassContext';
+import { TIMETABLE_CYCLE } from '../utils/timetableLayout';
 import './Classes.css';
 
 export default function Classes() {
   const location = useLocation();
   const isInputPage = location.pathname === '/classes/input';
   const { layout } = useTimetableLayout();
-  const [draft, setDraft] = useState(() => normalizeClassesPlan(DEFAULT_CLASSES_PLAN));
-  const [savedFlash, setSavedFlash] = useState(false);
-  const [loadError, setLoadError] = useState('');
+  const {
+    entries,
+    isLoaded,
+    isLoading,
+    isSaving,
+    dirty,
+    error,
+    requestReference,
+    saved,
+    updateEntries,
+    addClass,
+    removeClass,
+    save,
+    reload,
+  } = useClasses();
   const [inputWeek, setInputWeek] = useState(1);
 
   useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      try {
-        const data = await fetchClassesPlan();
-        if (!cancelled) {
-          setDraft((current) =>
-            normalizeClassesPlan({
-              ...current,
-              entries: Array.isArray(data?.entries) ? data.entries : [],
-            }),
-          );
-          setLoadError('');
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setLoadError(error.message || 'Could not load classes from database.');
-        }
+    if (!dirty) return undefined;
+    const warn = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    const protectNavigation = (event) => {
+      const link = event.target.closest?.('a[href]');
+      if (link && !window.confirm('Discard unsaved class changes and leave this page?')) {
+        event.preventDefault();
       }
     };
-    run();
+    document.addEventListener('click', protectNavigation);
     return () => {
-      cancelled = true;
+      window.removeEventListener('beforeunload', warn);
+      document.removeEventListener('click', protectNavigation);
     };
-  }, []);
+  }, [dirty]);
 
   function updateEntry(index, patch) {
-    setDraft((current) => {
-      const entries = [...current.entries];
-      entries[index] = { ...entries[index], ...patch };
-      return { ...current, entries };
+    updateEntries((current) => {
+      const next = [...current];
+      next[index] = { ...next[index], ...patch };
+      return next;
     });
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
-    const normalized = normalizeClassesPlan({
-      ...draft,
-      cadence: cadenceFromTimetableCycle(layout.cycle),
-    });
-    setDraft(normalized);
-    saveClassesPlan(normalized)
-      .then(() => {
-        setSavedFlash(true);
-        window.setTimeout(() => setSavedFlash(false), 2400);
-      })
-      .catch((error) => {
-        setLoadError(error.message || 'Could not save classes to database.');
-      });
+    await save();
   }
 
-  async function handleClearClasses() {
-    if (!draft.entries.length) {
+  function handleClearClasses() {
+    if (!entries.length) {
       return;
     }
     const confirmed = window.confirm(
-      'Clear all classes and remove class placements from the timetable for this layout?',
+      'Remove all classes from this draft? Timetable placements are not deleted. The change is applied only when you save.',
     );
-    if (!confirmed) {
-      return;
-    }
-    const emptyPlan = normalizeClassesPlan({
-      ...draft,
-      cadence: cadenceFromTimetableCycle(layout.cycle),
-      entries: [],
-    });
-    const layoutKey = makeLayoutKey(layout);
-    try {
-      await Promise.all([
-        saveClassesPlan(emptyPlan),
-        clearTimetableSessionsForLayout({ layoutKey }),
-      ]);
-      setDraft(emptyPlan);
-      setSavedFlash(true);
-      setLoadError('');
-      window.setTimeout(() => setSavedFlash(false), 2400);
-    } catch (error) {
-      setLoadError(error.message || 'Could not clear classes and timetable.');
-    }
+    if (confirmed) updateEntries([]);
   }
 
   return (
@@ -123,7 +90,9 @@ export default function Classes() {
             <p className="classes-lead">
               Place classes into timetable slots here. Use Edit classes to change class positions, then save them.
             </p>
-            {loadError ? <p className="classes-hint">{loadError}</p> : null}
+            {isLoading ? <p className="classes-hint" role="status">Loading classes…</p> : null}
+            {error ? <p className="classes-hint classes-hint--error" role="alert">{error}</p> : null}
+            {!isLoading && !isLoaded && !error ? <p className="classes-hint">Select an academic year to load classes.</p> : null}
             {layout.cycle === TIMETABLE_CYCLE.TWO_WEEK ? (
               <div className="classes-week-switch" role="group" aria-label="Input week A or week B selector">
                 <button
@@ -171,18 +140,25 @@ export default function Classes() {
                 You can add up to 60 classes. Change weekly vs two-week cycle under Timetable settings.
               </p>
 
-              {draft.entries.length === 0 ? (
+              {isLoading ? <p role="status">Loading classes…</p> : null}
+              {error ? <p className="classes-hint classes-hint--error" role="alert">{error}</p> : null}
+              {requestReference ? <p className="classes-hint">Support reference: <code>{requestReference}</code></p> : null}
+              {error ? <button type="button" className="add-row-button" onClick={reload}>Reload classes</button> : null}
+              {!isLoading && !isLoaded && !error ? <p className="classes-hint">Select an academic year before editing classes.</p> : null}
+
+              {isLoaded && entries.length === 0 ? (
                 <p className="classes-hint classes-hint--standalone">No classes yet. Use &quot;Add class&quot; below.</p>
               ) : null}
 
-              {draft.entries.map((entry, index) => (
-                <section key={entry.id || index} className="classes-entry-card">
+              {entries.map((entry, index) => (
+                <section key={entry.clientKey} className="classes-entry-card">
                   <div className="classes-entry-card-head">
                     <h2 className="classes-entry-title">Class {index + 1}</h2>
                     <button
                       type="button"
                       className="classes-entry-remove"
-                      onClick={() => setDraft((current) => removeClassEntry(current, index))}
+                      onClick={() => removeClass(index)}
+                      disabled={isSaving}
                     >
                       Remove
                     </button>
@@ -196,6 +172,7 @@ export default function Classes() {
                         value={entry.name}
                         placeholder="e.g. 9A Maths"
                         onChange={(event) => updateEntry(index, { name: event.target.value })}
+                        disabled={isSaving}
                       />
                     </div>
                     <div className="classes-field classes-field--inline">
@@ -211,6 +188,7 @@ export default function Classes() {
                         max={50}
                         value={entry.frequency}
                         onChange={(event) => updateEntry(index, { frequency: event.target.value })}
+                        disabled={isSaving}
                       />
                     </div>
                   </div>
@@ -221,8 +199,8 @@ export default function Classes() {
                 <button
                   type="button"
                   className="add-row-button"
-                  onClick={() => setDraft((current) => addClassEntry(current))}
-                  disabled={draft.entries.length >= 60}
+                  onClick={addClass}
+                  disabled={!isLoaded || isSaving || entries.length >= 60}
                 >
                   + Add class
                 </button>
@@ -230,18 +208,18 @@ export default function Classes() {
                   type="button"
                   className="add-row-button add-row-button--danger"
                   onClick={handleClearClasses}
-                  disabled={draft.entries.length === 0}
+                  disabled={!isLoaded || isSaving || entries.length === 0}
                 >
                   Clear classes
                 </button>
               </div>
 
               <div className="classes-actions">
-                <button type="submit" className="classes-save">
-                  Save classes
+                <button type="submit" className="classes-save" disabled={!isLoaded || isLoading || isSaving || !dirty}>
+                  {isSaving ? 'Saving…' : 'Save classes'}
                 </button>
               </div>
-              {savedFlash ? <p className="classes-saved">Classes saved.</p> : null}
+              {saved ? <p className="classes-saved" role="status">Classes saved.</p> : null}
             </form>
           </>
         )}

@@ -16,6 +16,15 @@ export function AcademicYearProvider({ children, user }) {
   const [requestReference, setRequestReference] = useState('');
   const generation = useRef(0);
   const saving = useRef(false);
+  const changeGuards = useRef(new Set());
+
+  const registerAcademicYearChangeGuard = useCallback((guard) => {
+    changeGuards.current.add(guard);
+    return () => changeGuards.current.delete(guard);
+  }, []);
+
+  const approveAcademicYearChange = useCallback(() =>
+    [...changeGuards.current].every((guard) => guard()), []);
 
   const clearUserAcademicYear = useCallback(() => {
     generation.current += 1;
@@ -75,6 +84,7 @@ export function AcademicYearProvider({ children, user }) {
   }, [user?.id, organisationId, clearUserAcademicYear, loadYear]);
 
   const selectAcademicYear = useCallback(async (yearId) => {
+    if (!approveAcademicYearChange()) return null;
     const previousId = selectedAcademicYearId;
     generation.current += 1;
     const expectedGeneration = generation.current;
@@ -83,15 +93,17 @@ export function AcademicYearProvider({ children, user }) {
     const loaded = await loadYear(yearId, expectedGeneration);
     if (!loaded && expectedGeneration === generation.current) setSelectedAcademicYearId(previousId);
     return loaded;
-  }, [loadYear, selectedAcademicYearId]);
+  }, [approveAcademicYearChange, loadYear, selectedAcademicYearId]);
 
   const createAcademicYear = useCallback(() => {
+    if (!approveAcademicYearChange()) return false;
     generation.current += 1;
     setSelectedAcademicYearId(null);
     setAcademicYear(emptyPlan());
     setError('');
     setRequestReference('');
-  }, []);
+    return true;
+  }, [approveAcademicYearChange]);
 
   const saveAcademicYear = useCallback(async (plan) => {
     if (saving.current || !organisationId) return null;
@@ -128,8 +140,10 @@ export function AcademicYearProvider({ children, user }) {
   const value = useMemo(() => ({
     academicYears, selectedAcademicYearId, academicYear, isLoading, isSaving, error, requestReference,
     selectAcademicYear, createAcademicYear, saveAcademicYear, clearUserAcademicYear,
+    registerAcademicYearChangeGuard,
   }), [academicYears, selectedAcademicYearId, academicYear, isLoading, isSaving, error, requestReference,
-    selectAcademicYear, createAcademicYear, saveAcademicYear, clearUserAcademicYear]);
+    selectAcademicYear, createAcademicYear, saveAcademicYear, clearUserAcademicYear,
+    registerAcademicYearChangeGuard]);
   return <AcademicYearContext.Provider value={value}>{children}</AcademicYearContext.Provider>;
 }
 

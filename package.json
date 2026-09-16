@@ -15,6 +15,7 @@
     "test:account-deletion": "node --test server/middleware/accountDeletionRateLimit.test.js server/routes/account-routes.test.js",
     "test:frontend-account-deletion": "node --test src/utils/accountDeletion.test.js",
     "test:academic-year": "node --test src/utils/academicYear.test.js src/utils/academicYearApi.test.js",
+    "test:classes": "node --test src/utils/classPersistence.test.js",
     "secrets:check": "gitleaks detect --source . --config .gitleaks.toml --baseline-path .gitleaks-baseline.json --redact --verbose",
     "prepare": "simple-git-hooks",
     "build": "vite build",

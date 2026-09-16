@@ -23,6 +23,7 @@ import ScrollToTop from './components/ScrollToTop';
 import { createSupabaseAuthController, privateRouteState } from './utils/supabaseAuthController';
 import { TimetableLayoutProvider } from './context/TimetableLayoutContext';
 import { AcademicYearProvider } from './context/AcademicYearContext';
+import { ClassProvider } from './context/ClassContext';
 
 const authController = createSupabaseAuthController();
 
@@ -57,6 +58,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    if (window.__plannixConfirmClassDiscard?.() === false) return;
     try {
       await authController.logout();
     } catch {
@@ -96,7 +98,8 @@ export default function App() {
   return (
     <TimetableLayoutProvider user={user}>
       <AcademicYearProvider key={`${user?.id || 'signed-out'}:${user?.organisationId || 'none'}`} user={user}>
-        <div className="page-shell">
+        <ClassProvider user={user}>
+          <div className="page-shell">
           <ScrollToTop />
           <Header
             user={user}
@@ -149,7 +152,8 @@ export default function App() {
           <TermsModal />
           <PrivacyModal />
           <CookieConsent />
-        </div>
+          </div>
+        </ClassProvider>
       </AcademicYearProvider>
     </TimetableLayoutProvider>
   );
