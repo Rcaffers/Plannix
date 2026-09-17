@@ -440,15 +440,14 @@ test('logs omit tokens, identity, class data, request bodies, and raw service er
 });
 
 test('production registers class routes exactly once and removes only legacy class dependencies', () => {
-  const authServer = fs.readFileSync(new URL('../auth-server.js', import.meta.url), 'utf8');
+  const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   const routes = fs.readFileSync(new URL('./class-routes.js', import.meta.url), 'utf8');
-  const db = fs.readFileSync(new URL('../db.js', import.meta.url), 'utf8');
-  assert.equal((authServer.match(/registerClassRoutes\(\{ app \}\)/g) || []).length, 1);
+  assert.equal((appSource.match(/registerClassRoutes\(\{ app \}\)/g) || []).length, 1);
   assert.equal((routes.match(/app\.get\('\/api\/classes'/g) || []).length, 1);
   assert.equal((routes.match(/app\.put\('\/api\/classes'/g) || []).length, 1);
-  assert.equal(authServer.includes('planner-routes.js'), false);
-  assert.equal(authServer.includes('mapClassRow'), false);
-  assert.equal(db.includes('mapClassRow'), false);
+  assert.equal(appSource.includes('planner-routes.js'), false);
+  assert.equal(appSource.includes('mapClassRow'), false);
+  assert.equal(fs.existsSync(new URL('../db.js', import.meta.url)), false);
   assert.equal(routes.includes('createDbPool'), false);
   assert.equal(routes.includes('adminClient'), false);
   assert.equal(routes.includes('SUPABASE_SECRET_KEY'), false);

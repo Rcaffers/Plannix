@@ -1,23 +1,15 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 const checkMigrationRemovalScript = `
   process.env.AUTO_RUN_MIGRATIONS = 'true';
-  process.env.ENABLE_DEMO_USER = 'false';
-  process.env.SUPABASE_DB_URL = '';
-  process.env.SUPABASE_POOLER_URL = '';
-  process.env.DATABASE_URL = '';
-  const database = await import('./server/db.js');
-  if ('runMigrations' in database) process.exit(1);
   const { default: app } = await import('./server/app.js');
-  const { initializeApplication } = await import('./server/auth-server.js');
-  if (!app || typeof initializeApplication !== 'function') process.exit(2);
-  if (String(initializeApplication).toLowerCase().includes('migration')) process.exit(3);
-  await initializeApplication();
+  if (!app || typeof app.listen !== 'function') process.exit(1);
 `;
 
-test('application import and startup have no automatic legacy migration path', () => {
+test('application import creates no listener, database connection, or migration path', () => {
   const result = spawnSync(
     process.execPath,
     ['--input-type=module', '--eval', checkMigrationRemovalScript],
@@ -112,7 +104,7 @@ test('removed routes return 404 through Express with MIGRATION_TOKEN', () => {
 
 test('production route assembly contains no removed authentication handlers and registers remaining groups once', async () => {
   const source = await import('node:fs/promises').then((fs) => fs.readFile(
-    new URL('../auth-server.js', import.meta.url),
+    new URL('../app.js', import.meta.url),
     'utf8',
   ));
   for (const route of [
@@ -132,11 +124,7 @@ test('production route assembly contains no removed authentication handlers and 
 
 const checkObservabilityScript = `
   process.env.FRONTEND_ORIGIN = 'https://frontend.example.test';
-  process.env.ENABLE_DEMO_USER = 'true';
   process.env.NODE_ENV = 'development';
-  process.env.SUPABASE_DB_URL = '';
-  process.env.SUPABASE_POOLER_URL = '';
-  process.env.DATABASE_URL = '';
 
   const capturedErrors = [];
   const capturedLogs = [];
@@ -144,9 +132,6 @@ const checkObservabilityScript = `
   console.log = (entry) => capturedLogs.push(String(entry));
 
   const { default: app } = await import('./server/app.js');
-  const { logStartupStatus } = await import('./server/auth-server.js');
-  logStartupStatus();
-  if (capturedLogs.some((entry) => /Password123|Demo login:/i.test(entry))) process.exit(1);
 
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve, reject) => {
@@ -215,6 +200,12 @@ const checkObservabilityScript = `
       process.exit(16);
     }
 
+    for (const path of ['/', '/settings']) {
+      const response = await fetch(baseUrl + path);
+      if (response.status !== 200) process.exit(22);
+      if (!(response.headers.get('content-type') || '').includes('text/html')) process.exit(23);
+    }
+
     const malformedSecret = 'payload-secret-must-not-be-logged';
     const malformed = await fetch(baseUrl + '/auth/login?token=query-secret', {
       method: 'POST',
@@ -260,4 +251,18 @@ test('configured application applies request IDs, CORS exposure, and safe JSON l
     { cwd: process.cwd(), env: { ...process.env }, encoding: 'utf8' },
   );
   assert.equal(result.status, 0, result.stderr);
+});
+
+test('app is authoritative, legacy infrastructure is absent, and server is the sole listener', () => {
+  const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  const serverSource = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  assert.equal(fs.existsSync(new URL('../auth-server.js', import.meta.url)), false);
+  assert.equal(fs.existsSync(new URL('../db.js', import.meta.url)), false);
+  assert.equal(appSource.includes('.listen('), false);
+  assert.equal((serverSource.match(/\.listen\(/g) || []).length, 1);
+  for (const dependency of ['pg', 'bcryptjs', 'cookie-parser']) {
+    assert.equal(appSource.includes(dependency), false);
+    assert.equal(serverSource.includes(dependency), false);
+  }
+  assert.equal(appSource.includes('cookieParser'), false);
 });

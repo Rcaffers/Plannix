@@ -8,13 +8,6 @@ import {
   validateProductionEnv,
 } from './env.js';
 
-test('production validation rejects demo-user creation', () => {
-  assert.throws(
-    () => validateProductionEnv({ nodeEnv: 'production', enableDemoUser: true }),
-    /ENABLE_DEMO_USER/,
-  );
-});
-
 test('Supabase public configuration remains optional until requested', () => {
   assert.throws(
     () => requireSupabasePublicConfig({ supabaseUrl: '', supabasePublishableKey: '' }),
@@ -28,12 +21,18 @@ test('Supabase public configuration remains optional until requested', () => {
   assert.equal(typeof env.supabasePublishableKey, 'string');
 });
 
-test('production validation allows demo-user creation to remain disabled', () => {
+test('production validation requires public and Admin Supabase configuration', () => {
+  assert.throws(() => validateProductionEnv({
+    nodeEnv: 'production',
+    supabaseUrl: 'https://project.example.test',
+    supabasePublishableKey: '',
+    supabaseSecretKey: 'test-secret-placeholder',
+  }), /SUPABASE_PUBLISHABLE_KEY/);
   assert.doesNotThrow(() =>
     validateProductionEnv({
       nodeEnv: 'production',
-      enableDemoUser: false,
       supabaseUrl: 'https://project.example.test',
+      supabasePublishableKey: 'public-key',
       supabaseSecretKey: 'test-secret-placeholder',
     }),
   );
@@ -43,8 +42,8 @@ test('production startup requires separate server-only Supabase Admin configurat
   assert.throws(
     () => validateProductionEnv({
       nodeEnv: 'production',
-      enableDemoUser: false,
       supabaseUrl: 'https://project.example.test',
+      supabasePublishableKey: 'public-key',
       supabaseSecretKey: '',
     }),
     /SUPABASE_SECRET_KEY/,
@@ -69,8 +68,8 @@ test('Admin configuration does not accept legacy privileged variable names or lo
   try {
     assert.throws(() => validateProductionEnv({
       nodeEnv: 'production',
-      enableDemoUser: false,
       supabaseUrl: 'https://project.example.test',
+      supabasePublishableKey: 'public-key',
       supabaseSecretKey: '',
     }));
   } finally {
@@ -81,4 +80,17 @@ test('Admin configuration does not accept legacy privileged variable names or lo
 
 test('legacy automatic migration configuration is absent', () => {
   assert.equal(Object.hasOwn(env, 'autoRunMigrations'), false);
+});
+
+test('removed legacy environment variables have no application configuration effect', () => {
+  const source = fs.readFileSync(new URL('./env.js', import.meta.url), 'utf8');
+  for (const removedName of [
+    'SUPABASE_DB_URL', 'SUPABASE_POOLER_URL', 'DATABASE_URL', 'DB_SSL',
+    'SESSION_COOKIE', 'COOKIE_SECURE', 'ENABLE_DEMO_USER',
+    'PASSWORD_RESET_PUBLIC_URL', 'PASSWORD_RESET_TTL_HOURS',
+  ]) {
+    assert.equal(source.includes(removedName), false, removedName);
+  }
+  assert.equal(Object.hasOwn(env, 'cookieSecure'), false);
+  assert.equal(Object.hasOwn(env, 'enableDemoUser'), false);
 });

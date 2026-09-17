@@ -278,8 +278,8 @@ test('malformed and oversized JSON return safe errors with request IDs', async (
 });
 
 test('production registers layout routes once after legacy planner removal', () => {
-  const authSource = fs.readFileSync(new URL('../auth-server.js', import.meta.url), 'utf8');
-  assert.equal((authSource.match(/registerTimetableLayoutRoutes\(\{ app \}\)/g) || []).length, 1);
-  assert.equal(authSource.includes('planner-routes.js'), false);
-  assert.equal(authSource.includes('withUserDbSession'), false);
+  const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  assert.equal((appSource.match(/registerTimetableLayoutRoutes\(\{ app \}\)/g) || []).length, 1);
+  assert.equal(appSource.includes('planner-routes.js'), false);
+  assert.equal(appSource.includes('withUserDbSession'), false);
 });

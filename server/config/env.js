@@ -23,9 +23,7 @@ export const env = Object.freeze({
   port: parsePort(process.env.PORT || process.env.AUTH_PORT, 4000),
   trustProxyHops: Number(process.env.TRUST_PROXY_HOPS ?? 1) || 1,
   frontendOrigins: parseOrigins(process.env.FRONTEND_ORIGIN),
-  cookieSecure: process.env.COOKIE_SECURE === 'true',
   corsDebug: process.env.CORS_DEBUG === 'true',
-  enableDemoUser: process.env.ENABLE_DEMO_USER === 'true',
   supabaseUrl: String(process.env.SUPABASE_URL || '').trim(),
   supabasePublishableKey: String(process.env.SUPABASE_PUBLISHABLE_KEY || '').trim(),
   supabaseSecretKey: String(process.env.SUPABASE_SECRET_KEY || '').trim(),
@@ -59,10 +57,8 @@ export function requireSupabaseAdminConfig(config = env) {
 }
 
 export function validateProductionEnv(config = env) {
-  if (config.nodeEnv === 'production' && config.enableDemoUser) {
-    throw new Error('ENABLE_DEMO_USER must not be enabled in production.');
-  }
   if (config.nodeEnv === 'production') {
+    requireSupabasePublicConfig(config);
     requireSupabaseAdminConfig(config);
   }
 }

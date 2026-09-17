@@ -326,12 +326,12 @@ test('structured logs omit bearer, identity and timetable-session contents', asy
 });
 
 test('new routes register once and legacy endpoint contracts and planner module are gone', async () => {
-  const authSource = fs.readFileSync(new URL('../auth-server.js', import.meta.url), 'utf8');
+  const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   const routeSource = fs.readFileSync(new URL('./timetable-session-routes.js', import.meta.url), 'utf8');
-  assert.equal((authSource.match(/registerTimetableSessionRoutes\(\{ app \}\)/g) || []).length, 1);
+  assert.equal((appSource.match(/registerTimetableSessionRoutes\(\{ app \}\)/g) || []).length, 1);
   for (const path of ['recurring', 'date', 'batch']) assert.ok(routeSource.includes(`/api/timetable/sessions/${path}`));
-  assert.equal(authSource.includes('planner-routes.js'), false);
-  assert.equal(authSource.includes('withUserDbSession'), false);
+  assert.equal(appSource.includes('planner-routes.js'), false);
+  assert.equal(appSource.includes('withUserDbSession'), false);
   assert.equal(fs.existsSync(new URL('./planner-routes.js', import.meta.url)), false);
   const instance = await harness();
   try {

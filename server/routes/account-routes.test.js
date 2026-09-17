@@ -266,7 +266,7 @@ test('Admin wrapper uses the secret client only for hard Auth deletion', async (
 });
 
 test('production has exactly one account route and privileged code is server-only', () => {
-  const serverSource = fs.readFileSync(new URL('../auth-server.js', import.meta.url), 'utf8');
+  const serverSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   assert.equal((serverSource.match(/registerAccountRoutes\(\{ app \}\)/g) || []).length, 1);
   assert.equal((serverSource.match(/app\.delete\(['"]\/account/g) || []).length, 0);
   for (const directory of ['src', 'dist']) {
