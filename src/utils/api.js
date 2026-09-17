@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../lib/supabase.js';
 import { toClassRequestEntries } from './classPersistence.js';
+import { CANONICAL_UUID, editableLayout, publicLayout } from './timetableLayoutPersistence.js';
 
 /**
  * Resolves the API origin for fetch(). Vite bakes VITE_API_BASE_URL at build time—local .env values
@@ -278,31 +279,53 @@ export const fetchClassCollection = (organisationId, academicYearId) =>
 export const saveClassCollection = (organisationId, academicYearId, expectedRevision, entries) =>
   classApi.save(organisationId, academicYearId, expectedRevision, entries);
 
-export async function fetchTimetableLayout() {
-  const response = await fetch(`${API_BASE_URL}/api/timetable/layout`, {
-    method: 'GET',
-    credentials: 'include',
-  });
-  const payload = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(payload?.message || 'Could not load timetable layout.');
+export function createTimetableLayoutApi({ fetchImpl = fetch, getSession = async () => {
+  const client = getSupabaseClient();
+  const { data, error } = await client.auth.getSession();
+  if (error || !data?.session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
+  const validation = await client.auth.getUser(data.session.access_token);
+  if (validation.error || !validation.data?.user) throw new ApiError('Authentication is required.', { status: 401 });
+  return data.session;
+} } = {}) {
+  async function request(path, options, fallback) {
+    try {
+      const session = await getSession();
+      const response = await fetchImpl(`${API_BASE_URL}${path}`, {
+        ...options, credentials: 'omit',
+        headers: { ...options?.headers, Authorization: `Bearer ${session.access_token}` },
+      });
+      const payload = await parseJsonSafe(response);
+      const requestId = response.headers?.get?.('x-request-id');
+      if (!response.ok) throw new ApiError(payload?.message || fallback, { status: response.status, requestId });
+      return { layout: payload?.layout === null ? null : publicLayout(payload?.layout), requestId: CANONICAL_UUID.test(String(requestId || '')) ? requestId : null };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(fallback);
+    }
   }
-  return payload?.layout ?? null;
+  function ids(organisationId, academicYearId, timetableId) {
+    canonicalUuid(organisationId, 'Organisation'); canonicalUuid(academicYearId, 'Academic year');
+    if (timetableId) canonicalUuid(timetableId, 'Timetable');
+  }
+  return {
+    load(organisationId, academicYearId, timetableId = null) {
+      ids(organisationId, academicYearId, timetableId);
+      const query = new URLSearchParams({ organisationId, academicYearId });
+      if (timetableId) query.set('timetableId', timetableId);
+      return request(`/api/timetable/layout?${query}`, { method: 'GET' }, 'Could not load timetable layout.');
+    },
+    save(organisationId, academicYearId, timetableId, expectedRevision, layout) {
+      ids(organisationId, academicYearId, timetableId);
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new ApiError('Timetable revision is invalid.');
+      const body = { organisationId, academicYearId, ...(timetableId ? { timetableId } : {}), expectedRevision, layout: editableLayout(layout) };
+      return request('/api/timetable/layout', { method: 'PUT', headers: JSON_POST_HEADERS, body: JSON.stringify(body) }, 'Could not save timetable layout.');
+    },
+  };
 }
 
-export async function saveTimetableLayout(layout) {
-  const response = await fetch(`${API_BASE_URL}/api/timetable/layout`, {
-    method: 'PUT',
-    headers: JSON_POST_HEADERS,
-    credentials: 'include',
-    body: JSON.stringify({ layout }),
-  });
-  const payload = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(payload?.message || 'Could not save timetable layout.');
-  }
-  return payload;
-}
+const timetableLayoutApi = createTimetableLayoutApi();
+export const fetchTimetableLayout = (...args) => timetableLayoutApi.load(...args);
+export const saveTimetableLayout = (...args) => timetableLayoutApi.save(...args);
 
 export async function fetchTimetableSessions({ layoutKey, weekKey = '' }) {
   const params = new URLSearchParams({ layoutKey, weekKey });

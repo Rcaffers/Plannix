@@ -158,16 +158,14 @@ function collectMergedFixedIntervals(normalized) {
     raw.push({ startM, endM: startM + regLen });
   }
 
-  if (showBreaksInTimetable) {
-    breaks.forEach((b) => {
-      const startM = parseTimeToMinutes(b.startTime);
-      const len = clampInt(b.lengthMinutes, LIMITS.breakLengthMin, LIMITS.breakLengthMax);
-      raw.push({ startM, endM: startM + len });
-    });
-  }
+  breaks.forEach((b) => {
+    const startM = parseTimeToMinutes(b.startTime);
+    const len = clampInt(b.lengthMinutes, LIMITS.breakLengthMin, LIMITS.breakLengthMax);
+    raw.push({ startM, endM: startM + len });
+  });
 
   const lunchLen = clampInt(lunch.lengthMinutes, 0, LIMITS.lunchLengthMax);
-  if (lunchLen > 0 && showLunchInTimetable) {
+  if (lunchLen > 0) {
     const startM = parseTimeToMinutes(lunch.startTime);
     raw.push({ startM, endM: startM + lunchLen });
   }

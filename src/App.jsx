@@ -59,6 +59,7 @@ export default function App() {
 
   const handleLogout = async () => {
     if (window.__plannixConfirmClassDiscard?.() === false) return;
+    if (window.__plannixConfirmLayoutDiscard?.() === false) return;
     try {
       await authController.logout();
     } catch {
@@ -96,8 +97,8 @@ export default function App() {
   };
 
   return (
-    <TimetableLayoutProvider user={user}>
-      <AcademicYearProvider key={`${user?.id || 'signed-out'}:${user?.organisationId || 'none'}`} user={user}>
+    <AcademicYearProvider key={`${user?.id || 'signed-out'}:${user?.organisationId || 'none'}`} user={user}>
+      <TimetableLayoutProvider user={user}>
         <ClassProvider user={user}>
           <div className="page-shell">
           <ScrollToTop />
@@ -154,7 +155,7 @@ export default function App() {
           <CookieConsent />
           </div>
         </ClassProvider>
-      </AcademicYearProvider>
-    </TimetableLayoutProvider>
+      </TimetableLayoutProvider>
+    </AcademicYearProvider>
   );
 }

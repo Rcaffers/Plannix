@@ -26,10 +26,12 @@ export default function Settings({
   getAccountDeletionSession,
   signOutAfterAccountDeletion,
 }) {
-  const { layout, setLayout, resetLayout, clearUserLayout } = useTimetableLayout();
-  const { clearUserAcademicYear } = useAcademicYear();
-  const [draft, setDraft] = useState(layout);
-  const [savedFlash, setSavedFlash] = useState(false);
+  const {
+    draft, setDraft, resetLayout, clearUserLayout, save: saveLayout, reload: reloadLayout,
+    dirty: layoutDirty, isPersisted, isLoading: isLayoutLoading, isSaving: isLayoutSaving,
+    error: layoutError, success: layoutSuccess, requestReference: layoutRequestReference,
+  } = useTimetableLayout();
+  const { clearUserAcademicYear, selectedAcademicYearId } = useAcademicYear();
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [accountError, setAccountError] = useState('');
   const [accountErrorReference, setAccountErrorReference] = useState('');
@@ -58,19 +60,13 @@ export default function Settings({
     signOutAfterAccountDeletion,
   ]);
 
-  useEffect(() => {
-    setDraft(layout);
-  }, [layout]);
-
   useEffect(() => () => {
     deletePasswordRef.current = '';
   }, []);
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
-    setLayout(draft);
-    setSavedFlash(true);
-    window.setTimeout(() => setSavedFlash(false), 2400);
+    await saveLayout();
   }
 
   function handleResetTimetable() {
@@ -163,6 +159,19 @@ export default function Settings({
 
         <form className="settings-timetable-form" onSubmit={handleSubmit}>
           <h2 className="settings-section-title">Timetable layout</h2>
+          {!isPersisted && !isLayoutLoading ? <p className="settings-hint" role="status">This academic year has no saved layout yet. Review the defaults and save when ready.</p> : null}
+          {isLayoutLoading ? <p className="settings-hint" role="status">Loading timetable layout…</p> : null}
+
+          <div className="settings-field">
+            <label htmlFor="timetable-name">Timetable name</label>
+            <input
+              id="timetable-name"
+              type="text"
+              maxLength={200}
+              value={draft.name}
+              onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+            />
+          </div>
 
           <div className="settings-field">
             <label htmlFor="timetable-periods">Periods per day</label>
@@ -384,14 +393,19 @@ export default function Settings({
           </p>
 
           <div className="settings-actions">
-            <button type="submit" className="settings-save">
-              Save timetable layout
+            <button type="submit" className="settings-save" disabled={isLayoutSaving || isLayoutLoading || !layoutDirty || !selectedAcademicYearId}>
+              {isLayoutSaving ? 'Saving…' : 'Save timetable layout'}
             </button>
-            <button type="button" className="settings-reset" onClick={handleResetTimetable}>
+            <button type="button" className="settings-reset" onClick={handleResetTimetable} disabled={isLayoutSaving}>
               Reset timetable to defaults
             </button>
+            <button type="button" className="settings-reset" onClick={reloadLayout} disabled={isLayoutSaving || isLayoutLoading}>
+              Reload saved layout
+            </button>
           </div>
-          {savedFlash ? <p className="settings-saved" role="status">Timetable layout saved.</p> : null}
+          {layoutSuccess ? <p className="settings-saved" role="status">{layoutSuccess}</p> : null}
+          {layoutError ? <p className="settings-error" role="alert">{layoutError}</p> : null}
+          {layoutRequestReference ? <p className="settings-hint">Support reference: <code>{layoutRequestReference}</code></p> : null}
         </form>
 
         <section className="settings-timetable-form settings-danger-zone">
@@ -404,6 +418,7 @@ export default function Settings({
               type="button"
               className="settings-reset settings-reset--danger"
               onClick={() => {
+                if (window.__plannixConfirmLayoutDiscard?.() === false) return;
                 setAccountError('');
                 setAccountErrorReference('');
                 setIsDeleteDialogOpen(true);

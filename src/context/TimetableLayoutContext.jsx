@@ -1,82 +1,114 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import {
-  buildDayColumnLabels,
-  buildRowSegments,
-  DEFAULT_TIMETABLE_LAYOUT,
-  normalizeLayout,
-} from '../utils/timetableLayout';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { buildDayColumnLabels, buildRowSegments, normalizeLayout } from '../utils/timetableLayout';
+import { createDefaultLayoutDraft, editableLayout, layoutDraftEqual, safeLayoutError } from '../utils/timetableLayoutPersistence';
 import { fetchTimetableLayout, saveTimetableLayout } from '../utils/api';
+import { useAcademicYear } from './AcademicYearContext';
 
 const TimetableLayoutContext = createContext(null);
 
 export function TimetableLayoutProvider({ children, user }) {
-  const [layout, setLayoutState] = useState(() => normalizeLayout(DEFAULT_TIMETABLE_LAYOUT));
+  const organisationId = user?.organisationId || null;
+  const { selectedAcademicYearId, registerAcademicYearChangeGuard } = useAcademicYear();
+  const [authoritativeLayout, setAuthoritativeLayout] = useState(null);
+  const [draft, setDraftState] = useState(createDefaultLayoutDraft);
+  const [isPersisted, setIsPersisted] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [requestReference, setRequestReference] = useState('');
+  const generation = useRef(0);
+  const saving = useRef(false);
+  const dirty = isPersisted ? !layoutDraftEqual(draft, authoritativeLayout) : !layoutDraftEqual(draft, createDefaultLayoutDraft());
 
+  const confirmDiscard = useCallback((message) => !dirty || window.confirm(message), [dirty]);
+  useEffect(() => registerAcademicYearChangeGuard(() => confirmDiscard('Discard unsaved timetable layout changes and switch academic years?')), [confirmDiscard, registerAcademicYearChangeGuard]);
   useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      if (!user) {
-        if (!cancelled) {
-          setLayoutState(normalizeLayout(DEFAULT_TIMETABLE_LAYOUT));
-        }
-        return;
-      }
-      try {
-        const serverLayout = await fetchTimetableLayout();
-        if (!cancelled && serverLayout) {
-          setLayoutState(normalizeLayout(serverLayout));
-        }
-      } catch {
-        if (!cancelled) {
-          setLayoutState(normalizeLayout(DEFAULT_TIMETABLE_LAYOUT));
-        }
-      }
-    };
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
-
-  const setLayoutAndPersist = useCallback((next) => {
-    setLayoutState((prev) => {
-      const merged = typeof next === 'function' ? next(prev) : { ...prev, ...next };
-      const normalized = normalizeLayout(merged);
-      if (user) {
-        saveTimetableLayout(normalized).catch(() => {});
-      }
-      return normalized;
-    });
-  }, [user]);
-
-  const resetLayout = useCallback(() => {
-    setLayoutAndPersist({ ...DEFAULT_TIMETABLE_LAYOUT });
-  }, [setLayoutAndPersist]);
+    window.__plannixConfirmLayoutDiscard = () => confirmDiscard('Discard unsaved timetable layout changes and continue?');
+    return () => { delete window.__plannixConfirmLayoutDiscard; };
+  }, [confirmDiscard]);
+  useEffect(() => {
+    const warn = (event) => { if (dirty) { event.preventDefault(); event.returnValue = ''; } };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
   const clearUserLayout = useCallback(() => {
-    setLayoutState(normalizeLayout(DEFAULT_TIMETABLE_LAYOUT));
+    generation.current += 1; saving.current = false;
+    setAuthoritativeLayout(null); setDraftState(createDefaultLayoutDraft()); setIsPersisted(false);
+    setIsLoading(false); setIsSaving(false); setError(''); setSuccess(''); setRequestReference('');
   }, []);
 
-  const value = useMemo(() => {
-    const normalized = normalizeLayout(layout);
-    const rowSegments = buildRowSegments(normalized);
-    return {
-      layout: normalized,
-      setLayout: setLayoutAndPersist,
-      resetLayout,
-      clearUserLayout,
-      dayLabels: buildDayColumnLabels(normalized),
-      rowSegments,
-    };
-  }, [layout, setLayoutAndPersist, resetLayout, clearUserLayout]);
+  const load = useCallback(async ({ confirmDirty = false } = {}) => {
+    if (!user?.id || !organisationId || !selectedAcademicYearId) return false;
+    if (confirmDirty && !confirmDiscard('Discard unsaved timetable layout changes and reload?')) return false;
+    const expectedGeneration = ++generation.current;
+    setIsLoading(true); setError(''); setSuccess('');
+    try {
+      const result = await fetchTimetableLayout(organisationId, selectedAcademicYearId);
+      if (expectedGeneration !== generation.current) return false;
+      if (result.layout === null) {
+        setAuthoritativeLayout(null); setDraftState(createDefaultLayoutDraft()); setIsPersisted(false);
+      } else {
+        setAuthoritativeLayout(result.layout); setDraftState(editableLayout(result.layout)); setIsPersisted(true);
+      }
+      setRequestReference(result.requestId || '');
+      return true;
+    } catch (loadError) {
+      if (expectedGeneration === generation.current) {
+        setError(safeLayoutError(loadError, 'Could not load timetable layout.'));
+        setRequestReference(loadError.requestId || '');
+      }
+      return false;
+    } finally { if (expectedGeneration === generation.current) setIsLoading(false); }
+  }, [confirmDiscard, organisationId, selectedAcademicYearId, user?.id]);
 
+  useEffect(() => {
+    clearUserLayout();
+    if (!user?.id || !organisationId || !selectedAcademicYearId) return undefined;
+    load();
+    return () => { generation.current += 1; };
+  }, [user?.id, organisationId, selectedAcademicYearId, clearUserLayout]);
+
+  const setDraft = useCallback((next) => {
+    setSuccess(''); setError('');
+    setDraftState((current) => editableLayout(typeof next === 'function' ? next(current) : { ...current, ...next }));
+  }, []);
+  const resetLayout = useCallback(() => setDraft(createDefaultLayoutDraft()), [setDraft]);
+
+  const save = useCallback(async () => {
+    if (saving.current || isLoading || !user?.id || !organisationId || !selectedAcademicYearId) return null;
+    saving.current = true; setIsSaving(true); setError(''); setSuccess('');
+    const expectedGeneration = generation.current;
+    try {
+      const result = await saveTimetableLayout(organisationId, selectedAcademicYearId,
+        authoritativeLayout?.timetableId || null, authoritativeLayout?.revision || 0, draft);
+      if (expectedGeneration !== generation.current) return null;
+      setAuthoritativeLayout(result.layout); setDraftState(editableLayout(result.layout)); setIsPersisted(true);
+      setRequestReference(result.requestId || ''); setSuccess('Timetable layout saved.');
+      return result.layout;
+    } catch (saveError) {
+      if (expectedGeneration === generation.current) {
+        setError(safeLayoutError(saveError)); setRequestReference(saveError.requestId || '');
+      }
+      return null;
+    } finally { saving.current = false; if (expectedGeneration === generation.current) setIsSaving(false); }
+  }, [authoritativeLayout, draft, isLoading, organisationId, selectedAcademicYearId, user?.id]);
+
+  const layout = normalizeLayout(authoritativeLayout || createDefaultLayoutDraft());
+  const value = useMemo(() => ({
+    layout, authoritativeLayout, draft, setDraft, setLayout: setDraft, resetLayout, clearUserLayout,
+    save, reload: () => load({ confirmDirty: true }), dirty, isPersisted, isLoading, isSaving,
+    error, success, requestReference, timetableId: authoritativeLayout?.timetableId || null,
+    revision: authoritativeLayout?.revision ?? 0, weeks: authoritativeLayout?.weeks || [],
+    periods: authoritativeLayout?.periods || [], dayLabels: buildDayColumnLabels(layout), rowSegments: buildRowSegments(layout),
+  }), [layout, authoritativeLayout, draft, setDraft, resetLayout, clearUserLayout, save, load,
+    dirty, isPersisted, isLoading, isSaving, error, success, requestReference]);
   return <TimetableLayoutContext.Provider value={value}>{children}</TimetableLayoutContext.Provider>;
 }
 
 export function useTimetableLayout() {
   const ctx = useContext(TimetableLayoutContext);
-  if (!ctx) {
-    throw new Error('useTimetableLayout must be used within TimetableLayoutProvider');
-  }
+  if (!ctx) throw new Error('useTimetableLayout must be used within TimetableLayoutProvider');
   return ctx;
 }
