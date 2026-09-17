@@ -327,46 +327,6 @@ const timetableLayoutApi = createTimetableLayoutApi();
 export const fetchTimetableLayout = (...args) => timetableLayoutApi.load(...args);
 export const saveTimetableLayout = (...args) => timetableLayoutApi.save(...args);
 
-export async function fetchTimetableSessions({ layoutKey, weekKey = '' }) {
-  const params = new URLSearchParams({ layoutKey, weekKey });
-  const response = await fetch(`${API_BASE_URL}/api/timetable/sessions?${params.toString()}`, {
-    method: 'GET',
-    credentials: 'include',
-  });
-  const payload = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(payload?.message || 'Could not load timetable sessions.');
-  }
-  return Array.isArray(payload?.sessions) ? payload.sessions : [];
-}
-
-export async function saveTimetableSessions({ layoutKey, weekKey = '', sessions }) {
-  const response = await fetch(`${API_BASE_URL}/api/timetable/sessions`, {
-    method: 'PUT',
-    headers: JSON_POST_HEADERS,
-    credentials: 'include',
-    body: JSON.stringify({ layoutKey, weekKey, sessions }),
-  });
-  const payload = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(payload?.message || 'Could not save timetable sessions.');
-  }
-  return payload;
-}
-
-export async function clearTimetableSessionsForLayout({ layoutKey }) {
-  const params = new URLSearchParams({ layoutKey });
-  const response = await fetch(`${API_BASE_URL}/api/timetable/sessions?${params.toString()}`, {
-    method: 'DELETE',
-    credentials: 'include',
-  });
-  const payload = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(payload?.message || 'Could not clear timetable sessions.');
-  }
-  return payload;
-}
-
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 

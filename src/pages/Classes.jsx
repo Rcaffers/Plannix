@@ -72,6 +72,10 @@ export default function Classes() {
     if (confirmed) updateEntries([]);
   }
 
+  function selectInputWeek(week) {
+    if (week === inputWeek || window.__plannixConfirmSessionDiscard?.() !== false) setInputWeek(week);
+  }
+
   return (
     <main className="classes-page">
       <div className="container classes-inner">
@@ -98,14 +102,14 @@ export default function Classes() {
                 <button
                   type="button"
                   className={`classes-week-switch-btn${inputWeek === 1 ? ' is-active' : ''}`}
-                  onClick={() => setInputWeek(1)}
+                  onClick={() => selectInputWeek(1)}
                 >
                   Week A
                 </button>
                 <button
                   type="button"
                   className={`classes-week-switch-btn${inputWeek === 2 ? ' is-active' : ''}`}
-                  onClick={() => setInputWeek(2)}
+                  onClick={() => selectInputWeek(2)}
                 >
                   Week B
                 </button>

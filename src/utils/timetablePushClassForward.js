@@ -1,22 +1,15 @@
 import { findSessionAt } from './timetable';
 
-/** Same timetable class/group (linked classId or identical class label). */
+/** Same timetable class/group, using only the authoritative class UUID. */
 export function sessionsTeachingGroupEqual(a, b) {
   if (!a || !b) return false;
   const ida = String(a.classId || '').trim();
   const idb = String(b.classId || '').trim();
-  if (ida && idb && ida === idb) return true;
-  const na = String(a.class || '').trim();
-  const nb = String(b.class || '').trim();
-  return Boolean(na) && na === nb;
+  return Boolean(ida) && ida === idb;
 }
 
 export function lessonRowsFromSegments(rowSegments) {
   return rowSegments.filter((s) => s.kind === 'lesson').map((s) => s.rowIndex);
-}
-
-function rangeMetaForTime(rowSegments, time) {
-  return rowSegments.find((s) => s.rowIndex === time)?.rangeLabel ?? '';
 }
 
 function readLessonPayload(session) {
@@ -112,7 +105,6 @@ export function pushLessonDetailsForwardAlongSameClassAhead({
       ...next[ixDest],
       title: incoming.title,
       notes: incoming.notes,
-      meta: rangeMetaForTime(rowSegments, time),
     };
   }
 
@@ -121,7 +113,6 @@ export function pushLessonDetailsForwardAlongSameClassAhead({
     ...next[ixPivot],
     title: '',
     notes: '',
-    meta: rangeMetaForTime(rowSegments, pivotT),
   };
 
   return { ok: true, sessions: next, movedCount: Math.max(0, chainUsed.length - 1) };
@@ -217,7 +208,6 @@ export function pushLessonDetailsForwardAcrossWeeks({
       ...nextSessions[ixDest],
       title: incoming.title,
       notes: incoming.notes,
-      meta: rangeMetaForTime(rowSegments, time),
     };
   }
 
@@ -227,7 +217,6 @@ export function pushLessonDetailsForwardAcrossWeeks({
     ...pivotSessions[ixPivot],
     title: '',
     notes: '',
-    meta: rangeMetaForTime(rowSegments, pivotT),
   };
 
   return { ok: true, byWeekKey: nextByWeekKey, movedCount: Math.max(0, chainUsed.length - 1) };
@@ -296,7 +285,6 @@ export function pullLessonDetailsBackwardAlongSameClassAhead({
       ...next[ixDest],
       title: incoming.title,
       notes: incoming.notes,
-      meta: rangeMetaForTime(rowSegments, time),
     };
   }
 
@@ -305,7 +293,6 @@ export function pullLessonDetailsBackwardAlongSameClassAhead({
     ...next[ixTail],
     title: '',
     notes: '',
-    meta: rangeMetaForTime(rowSegments, tailT),
   };
 
   return { ok: true, sessions: next, movedCount: Math.max(0, chainUsed.length - 1) };
@@ -392,7 +379,6 @@ export function pullLessonDetailsBackwardAcrossWeeks({
       ...nextSessions[ixDest],
       title: incoming.title,
       notes: incoming.notes,
-      meta: rangeMetaForTime(rowSegments, time),
     };
   }
 
@@ -402,7 +388,6 @@ export function pullLessonDetailsBackwardAcrossWeeks({
     ...tailSessions[ixTail],
     title: '',
     notes: '',
-    meta: rangeMetaForTime(rowSegments, tailT),
   };
 
   return { ok: true, byWeekKey: nextByWeekKey, movedCount: Math.max(0, chainUsed.length - 1) };

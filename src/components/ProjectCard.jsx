@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useAcademicYear } from '../context/AcademicYearContext';
 import { useClasses } from '../context/ClassContext';
 import { useTimetableLayout } from '../context/TimetableLayoutContext';
+import { useTimetableSessions } from '../context/TimetableSessionContext';
 import { lessonAriaLabel } from '../utils/lessonModal';
 import { findSessionAt } from '../utils/timetable';
 import {
@@ -12,14 +13,9 @@ import {
   pushLessonDetailsForwardAcrossWeeks,
 } from '../utils/timetablePushClassForward';
 import { countFullHolidayWeeksBeforeMonday, getAcademicTimetableMondayBounds, holidayLabelForLocalDate } from '../utils/academicYear';
-import {
-  buildDefaultSessions,
-  makeLayoutKey,
-  pruneSessionsToGrid,
-  TIMETABLE_CYCLE,
-} from '../utils/timetableLayout';
+import { TIMETABLE_CYCLE } from '../utils/timetableLayout';
 import { loadTimetableEditModeFromStorage, saveTimetableEditModeToStorage } from '../utils/timetableEditModeStorage';
-import { clearTimetableSessionsForLayout, fetchTimetableSessions, saveTimetableSessions } from '../utils/api';
+import { displayToSession, sameSessions, sessionToDisplay } from '../utils/timetableSessionState';
 import {
   computeAvailableClassOptions,
   getPlannedClassEntries,
@@ -65,24 +61,6 @@ function clampWeekStartForDateMode(weekMonday, bounds) {
     }
   }
   return w;
-}
-
-function makeDateModeWeekKey(layout, weekStartDate, repeatingWeekKey) {
-  const monday = startOfWeek(weekStartDate);
-  const base = formatDateKeyPart(monday);
-  if (layout.cycle === TIMETABLE_CYCLE.TWO_WEEK) {
-    return `date-${base}-${repeatingWeekKey}`;
-  }
-  return `date-${base}`;
-}
-
-function asClassPlacementTemplate(sessions) {
-  return sessions.map((session) => ({
-    ...session,
-    teacher: '',
-    title: '',
-    notes: '',
-  }));
 }
 
 function formatWeekCommencing(date) {
@@ -172,6 +150,7 @@ export default function ProjectCard({
     isLoading: classesLoading,
     error: classesError,
   } = useClasses();
+  const sessionState = useTimetableSessions();
   const timetableMondayBounds = useMemo(
     () => getAcademicTimetableMondayBounds(academicYear),
     [academicYear],
@@ -182,7 +161,6 @@ export default function ProjectCard({
     return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
   }, [dayLabels, isTwoWeekCycle]);
   const dayCount = displayDayLabels.length;
-  const layoutKey = useMemo(() => makeLayoutKey(layout), [layout]);
   const [weekStartDate, setWeekStartDate] = useState(() => startOfWeek(new Date()));
 
   useEffect(() => {
@@ -199,37 +177,6 @@ export default function ProjectCard({
     const adjustedIso = isoWeekNumber + fullHolidayWeeksBefore;
     return adjustedIso % 2 === 0 ? 'cycle-2' : 'cycle-1';
   }, [layout.cycle, isoWeekNumber, weekMode, academicYear, weekStartDate]);
-  const dateModeWeekKey = useMemo(
-    () => (weekMode === 'date' ? makeDateModeWeekKey(layout, weekStartDate, repeatingWeekKey) : ''),
-    [weekMode, layout, weekStartDate, repeatingWeekKey],
-  );
-  const activeWeekKey = weekMode === 'date' ? dateModeWeekKey : fixedWeekKey;
-  function repeatingWeekKeyForDate(date) {
-    if (layout.cycle !== TIMETABLE_CYCLE.TWO_WEEK) return 'cycle-1';
-    const fullHolidayWeeksBefore = countFullHolidayWeeksBeforeMonday(academicYear, date);
-    const adjustedIso = getIsoWeekNumber(date) + fullHolidayWeeksBefore;
-    return adjustedIso % 2 === 0 ? 'cycle-2' : 'cycle-1';
-  }
-
-  async function fetchInheritanceTemplateSessionsForWeekDate(weekDate) {
-    const primaryCycle = repeatingWeekKeyForDate(weekDate);
-    const keys =
-      layout.cycle === TIMETABLE_CYCLE.TWO_WEEK
-        ? [primaryCycle, primaryCycle === 'cycle-1' ? 'cycle-2' : 'cycle-1']
-        : [primaryCycle];
-    for (const wk of keys) {
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        const inherited = await fetchTimetableSessions({ layoutKey, weekKey: wk });
-        if (inherited && inherited.length) {
-          return asClassPlacementTemplate(pruneSessionsToGrid(inherited, layout));
-        }
-      } catch {
-        /* try next cycle key */
-      }
-    }
-    return [];
-  }
   const weekCommencingLabel = useMemo(() => {
     if (weekMode !== 'date') return fixedWeekLabel;
     if (layout.cycle === TIMETABLE_CYCLE.TWO_WEEK) {
@@ -377,40 +324,41 @@ export default function ProjectCard({
     [mobileFixedTimetableStyle],
   );
 
-  const [sessions, setSessions] = useState(() => {
-    return buildDefaultSessions(layout);
-  });
+  const teachingPeriods = useMemo(() => sessionState.periods
+    .filter((period) => period.type === 'teaching')
+    .sort((left, right) => (left.number ?? left.order) - (right.number ?? right.order)), [sessionState.periods]);
+  const lessonRows = useMemo(() => rowSegments.filter((row) => row.kind === 'lesson'), [rowSegments]);
+  const periodIndexById = useMemo(() => new Map(teachingPeriods.map((period, index) =>
+    [period.id, lessonRows[index]?.rowIndex])), [teachingPeriods, lessonRows]);
+  const periodIdByIndex = useMemo(() => new Map(teachingPeriods.map((period, index) =>
+    [lessonRows[index]?.rowIndex, period.id])), [teachingPeriods, lessonRows]);
+  const classNameById = useMemo(() => new Map((classEntries || []).map((entry) => [entry.id, entry.name])), [classEntries]);
+  const fixedCode = fixedWeekKey === 'cycle-2' ? 'B' : 'A';
+  const activeCollection = weekMode === 'date'
+    ? sessionState.dated
+    : sessionState.recurring.find((week) => week.code === fixedCode) || null;
+  const target = weekMode === 'date'
+    ? { type: 'date', weekStartDate: formatDateKeyPart(weekStartDate) }
+    : activeCollection ? { type: 'recurring', weekId: activeCollection.weekId } : null;
+  const sessions = useMemo(() => (activeCollection?.sessions || []).map((session, index) =>
+    sessionToDisplay(session, periodIndexById, classNameById, `temporary-${index}`)).filter(Boolean),
+  [activeCollection?.sessions, periodIndexById, classNameById]);
 
   useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      try {
-        const loaded = await fetchTimetableSessions({ layoutKey, weekKey: activeWeekKey });
-        if (cancelled) return;
-        if (loaded && loaded.length) {
-          setSessions(pruneSessionsToGrid(loaded, layout));
-          return;
-        }
-        if (weekMode === 'date') {
-          const inherited = await fetchInheritanceTemplateSessionsForWeekDate(weekStartDate);
-          if (cancelled) return;
-          if (inherited && inherited.length) {
-            setSessions(inherited);
-            return;
-          }
-        }
-        setSessions(buildDefaultSessions(layout));
-      } catch {
-        if (!cancelled) {
-          setSessions(buildDefaultSessions(layout));
-        }
-      }
-    };
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [layoutKey, layout, activeWeekKey, weekMode, weekStartDate, repeatingWeekKey]);
+    if (weekMode === 'date' && sessionState.scope) void sessionState.loadDate(formatDateKeyPart(weekStartDate));
+  }, [weekMode, weekStartDate, sessionState.scope]);
+
+  function persistDisplaySessions(next) {
+    if (!target) return false;
+    try { return sessionState.edit(target, next.map((entry) => displayToSession(entry, periodIdByIndex))); }
+    catch { return false; }
+  }
+
+  function updateSessions(update) {
+    const next = typeof update === 'function' ? update(sessions) : update;
+    persistDisplaySessions(next);
+    return next;
+  }
 
   const [modalSlot, setModalSlot] = useState(null);
   const [classDraft, setClassDraft] = useState('');
@@ -450,7 +398,7 @@ export default function ProjectCard({
     () => getPlannedClassEntries({ entries: classEntries || [] }),
     [classEntries],
   );
-  const { byId: plannedClassById, byName: plannedClassByName } = useMemo(
+  const { byId: plannedClassById } = useMemo(
     () => mapsFromPlannedClasses(plannedClasses),
     [plannedClasses],
   );
@@ -466,43 +414,21 @@ export default function ProjectCard({
   }
 
   function handleClearTimetable() {
-    if (!enableEditing) {
+    if (!enableEditing && weekMode !== 'date') {
       return;
     }
-    const clearsAllStoredWeeks = weekMode === 'fixed';
-    if (!clearsAllStoredWeeks && sessions.length === 0) {
+    if (sessions.length === 0 && !(weekMode === 'date' && sessionState.dated?.overrideExists)) {
       return;
     }
-
-    if (clearsAllStoredWeeks) {
-      if (
-        !window.confirm(
-          'This removes every stored class placement for this timetable layout: Week A/B (input) and all calendar weeks on the main timetable. Continue?',
-        )
-      ) {
-        return;
-      }
-      clearTimetableSessionsForLayout({ layoutKey })
-        .then(() => {
-          setSessions(buildDefaultSessions(layout));
-        })
-        .catch(() => {
-          window.alert('Could not clear all timetable data. Check your connection and try again.');
-        });
-      closeLessonModal();
-      return;
-    }
-
     if (!window.confirm('Clear all classes from this timetable?')) {
       return;
     }
-    const emptySessions = [];
-    setSessions(emptySessions);
-    saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: emptySessions }).catch(() => {});
+    updateSessions([]);
     closeLessonModal();
   }
 
   function moveWeek(offset) {
+    if (window.__plannixConfirmSessionDiscard?.() === false) return;
     setWeekStartDate((current) => {
       const next = new Date(current);
       next.setDate(next.getDate() + offset * 7);
@@ -514,6 +440,7 @@ export default function ProjectCard({
   }
 
   function jumpToCurrentWeek() {
+    if (window.__plannixConfirmSessionDiscard?.() === false) return;
     const mon = startOfWeek(new Date());
     setWeekStartDate(weekMode === 'date' ? clampWeekStartForDateMode(mon, timetableMondayBounds) : mon);
   }
@@ -536,6 +463,7 @@ export default function ProjectCard({
   }
 
   function jumpToToday() {
+    if (window.__plannixConfirmSessionDiscard?.() === false) return;
     let monday = startOfWeek(new Date());
     if (weekMode === 'date') {
       monday = clampWeekStartForDateMode(monday, timetableMondayBounds);
@@ -550,6 +478,7 @@ export default function ProjectCard({
   }
 
   function handleScheduleDateChange(event) {
+    if (window.__plannixConfirmSessionDiscard?.() === false) return;
     const raw = event.target.value;
     if (!raw || !isSingleDayTimetable) return;
     const parts = raw.split('-').map((n) => parseInt(n, 10));
@@ -572,11 +501,16 @@ export default function ProjectCard({
   }
 
   function resolveSessionClass(session) {
-    return resolveSessionClassDisplay(session, plannedClassById, plannedClassByName);
+    return resolveSessionClassDisplay(session, plannedClassById);
   }
 
   function sessionsForCadenceLimit() {
-    return sessions;
+    if (weekMode === 'date') return sessionState.recurring.flatMap((week) => week.sessions)
+      .map((entry, index) => sessionToDisplay(entry, periodIndexById, classNameById, `frequency-${index}`))
+      .filter(Boolean);
+    return sessionState.recurring.flatMap((week) => week.sessions)
+      .map((entry, index) => sessionToDisplay(entry, periodIndexById, classNameById, `frequency-${index}`))
+      .filter(Boolean);
   }
 
   function buildClassOptions(dayIndex, rowIndex, currentSession = null) {
@@ -586,7 +520,6 @@ export default function ProjectCard({
       dayIndex,
       rowIndex,
       plannedClassById,
-      plannedClassByName,
       currentSession,
     });
   }
@@ -615,9 +548,7 @@ export default function ProjectCard({
     setClassLimitError('');
     setModalSlot({ day: dayIndex, time: rowIndex });
     setClassDraft(
-      (session?.classId && plannedClassById.get(session.classId)?.id) ||
-        plannedClassByName.get(String(session?.class || '').trim())?.id ||
-        '',
+      (session?.classId && plannedClassById.get(session.classId)?.id) || '',
     );
     setTitleDraft(session?.title ?? '');
     setNotesDraft(session?.notes ?? '');
@@ -646,13 +577,12 @@ export default function ProjectCard({
         closeLessonModal();
         return;
       }
-      setSessions((prev) => {
+      updateSessions((prev) => {
         const next = prev.map((session) =>
           session.day === modalSlot.day && session.time === modalSlot.time
             ? { ...session, title: selectedTitle, notes: selectedNotes }
             : session,
         );
-        saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: next }).catch(() => {});
         return next;
       });
       closeLessonModal();
@@ -671,12 +601,11 @@ export default function ProjectCard({
       }
     }
 
-    setSessions((prev) => {
+    updateSessions((prev) => {
       const existing = findSessionAt(prev, modalSlot.day, modalSlot.time);
       const base = prev.filter((s) => !(s.day === modalSlot.day && s.time === modalSlot.time));
 
       if (!selectedClass) {
-        saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: base }).catch(() => {});
         return base;
       }
 
@@ -685,15 +614,12 @@ export default function ProjectCard({
         day: modalSlot.day,
         time: modalSlot.time,
         classId: selectedClass,
-        class: selectedClassEntry?.name ?? selectedClass,
-        teacher: existing?.teacher ?? '',
+        class: selectedClassEntry?.name ?? '',
         title: selectedTitle,
         notes: selectedNotes,
-        meta: modalRowSegment?.rangeLabel ?? '',
       };
 
       const next = [...base, nextSession];
-      saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: next }).catch(() => {});
       return next;
     });
     closeLessonModal();
@@ -702,6 +628,35 @@ export default function ProjectCard({
   const stopLessonModalCloseFromInnerClick = (event) => {
     event.stopPropagation();
   };
+
+  async function shiftLessonDetailsAcrossDatedWeeks(direction) {
+    const dates = Array.from({ length: 8 }, (_, offset) => {
+      const date = new Date(weekStartDate); date.setDate(date.getDate() + offset * 7);
+      return formatDateKeyPart(date);
+    });
+    let snapshots;
+    try { snapshots = await sessionState.loadDateSnapshots(dates); }
+    catch { setLessonPushForwardError('Could not load the upcoming weeks.'); return null; }
+    const byWeekKey = {};
+    snapshots.forEach((snapshot, index) => {
+      byWeekKey[dates[index]] = snapshot.sessions.map((session, sessionIndex) =>
+        sessionToDisplay(session, periodIndexById, classNameById, `batch-${index}-${sessionIndex}`)).filter(Boolean);
+    });
+    byWeekKey[dates[0]] = sessions;
+    const args = { byWeekKey, orderedWeekKeys: dates, pivotWeekKey: dates[0], pivotDayIndex: modalSlot.day,
+      pivotTime: modalSlot.time, pivotSessionRef: modalSession, rowSegments, dayCount };
+    const result = direction === 'forward'
+      ? pushLessonDetailsForwardAcrossWeeks(args)
+      : pullLessonDetailsBackwardAcrossWeeks(args);
+    if (!result.ok) return result;
+    const mutations = Object.entries(result.byWeekKey)
+      .filter(([date, items]) => !sameSessions(items, byWeekKey[date]))
+      .map(([weekStartDate, items]) => ({ type: 'date_override', weekStartDate,
+        sessions: items.map((entry) => displayToSession(entry, periodIdByIndex)) }));
+    if (!mutations.length) return result;
+    const savedResult = await sessionState.saveBatch(mutations);
+    return savedResult ? result : { ok: false, reason: 'SAVE_FAILED' };
+  }
 
   async function handlePushLessonsForwardForClass() {
     if (modalSlot == null || !modalSession) {
@@ -738,10 +693,7 @@ export default function ProjectCard({
         setLessonPushForwardSuccess('');
         return;
       }
-      setSessions(result.sessions);
-      saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: result.sessions }).catch(
-        () => {},
-      );
+      updateSessions(result.sessions);
       setTitleDraft('');
       setNotesDraft('');
       setLessonPushForwardSuccess(
@@ -750,69 +702,7 @@ export default function ProjectCard({
       return;
     }
 
-    const weeksAheadToScan = 8;
-    const orderedWeekKeys = [];
-    const byWeekKey = {};
-
-    for (let offset = 0; offset < weeksAheadToScan; offset += 1) {
-      const d = new Date(weekStartDate);
-      d.setDate(d.getDate() + offset * 7);
-      const wkRepeat = repeatingWeekKeyForDate(d);
-      const wkKey =
-        offset === 0
-          ? activeWeekKey
-          : makeDateModeWeekKey(layout, d, wkRepeat);
-      if (!orderedWeekKeys.includes(wkKey)) {
-        orderedWeekKeys.push(wkKey);
-      }
-    }
-
-    byWeekKey[activeWeekKey] = sessions;
-
-    const inheritedCache = new Map();
-    const fetchInheritedTemplate = async (weekDate) => {
-      const primary = repeatingWeekKeyForDate(weekDate);
-      if (!inheritedCache.has(primary)) {
-        inheritedCache.set(primary, fetchInheritanceTemplateSessionsForWeekDate(weekDate));
-      }
-      return inheritedCache.get(primary);
-    };
-
-    const fetchTargets = orderedWeekKeys
-      .map((wkKey, i) => ({ wkKey, i }))
-      .filter(({ wkKey }) => wkKey !== activeWeekKey);
-
-    const fetchedWeeks = await Promise.all(
-      fetchTargets.map(async ({ wkKey, i }) => {
-        try {
-          const loaded = await fetchTimetableSessions({ layoutKey, weekKey: wkKey });
-          if (loaded && loaded.length) {
-            return { wkKey, sessions: pruneSessionsToGrid(loaded, layout) };
-          }
-          const weekDate = new Date(weekStartDate);
-          weekDate.setDate(weekDate.getDate() + i * 7);
-          const inheritedSessions = await fetchInheritedTemplate(weekDate);
-          return { wkKey, sessions: inheritedSessions };
-        } catch {
-          return { wkKey, sessions: [] };
-        }
-      }),
-    );
-
-    fetchedWeeks.forEach(({ wkKey, sessions: wkSessions }) => {
-      byWeekKey[wkKey] = wkSessions;
-    });
-
-    const result = pushLessonDetailsForwardAcrossWeeks({
-      byWeekKey,
-      orderedWeekKeys,
-      pivotWeekKey: activeWeekKey,
-      pivotDayIndex: modalSlot.day,
-      pivotTime: modalSlot.time,
-      pivotSessionRef: modalSession,
-      rowSegments,
-      dayCount,
-    });
+    const result = await shiftLessonDetailsAcrossDatedWeeks('forward');
     if (!result.ok) {
       const copy =
         result.reason === 'PIVOT_NOTHING_TO_SHIFT'
@@ -825,17 +715,13 @@ export default function ProjectCard({
                   ? 'This row is not a teaching period.'
                   : result.reason === 'NO_CLASS'
                     ? 'This slot has no class to match against.'
-                    : 'Could not shift lesson details forward.';
+                    : 'Could not save shifted lesson details.';
       setLessonPushForwardError(copy);
       setLessonPushForwardSuccess('');
       return;
     }
 
-    Object.entries(result.byWeekKey).forEach(([wkKey, wkSessions]) => {
-      saveTimetableSessions({ layoutKey, weekKey: wkKey, sessions: wkSessions }).catch(() => {});
-    });
-    const currentWeekSessions = result.byWeekKey[activeWeekKey] || [];
-    setSessions(currentWeekSessions);
+    const currentWeekSessions = result.byWeekKey[formatDateKeyPart(weekStartDate)] || [];
     setTitleDraft('');
     setNotesDraft('');
     setLessonPushForwardSuccess(
@@ -876,10 +762,7 @@ export default function ProjectCard({
         setLessonPushForwardSuccess('');
         return;
       }
-      setSessions(result.sessions);
-      saveTimetableSessions({ layoutKey, weekKey: activeWeekKey, sessions: result.sessions }).catch(
-        () => {},
-      );
+      updateSessions(result.sessions);
       const updatedPivot = findSessionAt(result.sessions, modalSlot.day, modalSlot.time);
       setTitleDraft(updatedPivot?.title ?? '');
       setNotesDraft(updatedPivot?.notes ?? '');
@@ -889,69 +772,7 @@ export default function ProjectCard({
       return;
     }
 
-    const weeksAheadToScan = 8;
-    const orderedWeekKeys = [];
-    const byWeekKey = {};
-
-    for (let offset = 0; offset < weeksAheadToScan; offset += 1) {
-      const d = new Date(weekStartDate);
-      d.setDate(d.getDate() + offset * 7);
-      const wkRepeat = repeatingWeekKeyForDate(d);
-      const wkKey =
-        offset === 0
-          ? activeWeekKey
-          : makeDateModeWeekKey(layout, d, wkRepeat);
-      if (!orderedWeekKeys.includes(wkKey)) {
-        orderedWeekKeys.push(wkKey);
-      }
-    }
-
-    byWeekKey[activeWeekKey] = sessions;
-
-    const inheritedCache = new Map();
-    const fetchInheritedTemplate = async (weekDate) => {
-      const primary = repeatingWeekKeyForDate(weekDate);
-      if (!inheritedCache.has(primary)) {
-        inheritedCache.set(primary, fetchInheritanceTemplateSessionsForWeekDate(weekDate));
-      }
-      return inheritedCache.get(primary);
-    };
-
-    const fetchTargets = orderedWeekKeys
-      .map((wkKey, i) => ({ wkKey, i }))
-      .filter(({ wkKey }) => wkKey !== activeWeekKey);
-
-    const fetchedWeeks = await Promise.all(
-      fetchTargets.map(async ({ wkKey, i }) => {
-        try {
-          const loaded = await fetchTimetableSessions({ layoutKey, weekKey: wkKey });
-          if (loaded && loaded.length) {
-            return { wkKey, sessions: pruneSessionsToGrid(loaded, layout) };
-          }
-          const weekDate = new Date(weekStartDate);
-          weekDate.setDate(weekDate.getDate() + i * 7);
-          const inheritedSessions = await fetchInheritedTemplate(weekDate);
-          return { wkKey, sessions: inheritedSessions };
-        } catch {
-          return { wkKey, sessions: [] };
-        }
-      }),
-    );
-
-    fetchedWeeks.forEach(({ wkKey, sessions: wkSessions }) => {
-      byWeekKey[wkKey] = wkSessions;
-    });
-
-    const result = pullLessonDetailsBackwardAcrossWeeks({
-      byWeekKey,
-      orderedWeekKeys,
-      pivotWeekKey: activeWeekKey,
-      pivotDayIndex: modalSlot.day,
-      pivotTime: modalSlot.time,
-      pivotSessionRef: modalSession,
-      rowSegments,
-      dayCount,
-    });
+    const result = await shiftLessonDetailsAcrossDatedWeeks('backward');
     if (!result.ok) {
       const copy =
         result.reason === 'NO_LATER_DETAIL_TO_PULL'
@@ -962,17 +783,13 @@ export default function ProjectCard({
               ? 'This row is not a teaching period.'
               : result.reason === 'NO_CLASS'
                 ? 'This slot has no class to match against.'
-                : 'Could not pull lesson details back.';
+                : 'Could not save pulled lesson details.';
       setLessonPushForwardError(copy);
       setLessonPushForwardSuccess('');
       return;
     }
 
-    Object.entries(result.byWeekKey).forEach(([wkKey, wkSessions]) => {
-      saveTimetableSessions({ layoutKey, weekKey: wkKey, sessions: wkSessions }).catch(() => {});
-    });
-    const currentWeekSessions = result.byWeekKey[activeWeekKey] || [];
-    setSessions(currentWeekSessions);
+    const currentWeekSessions = result.byWeekKey[formatDateKeyPart(weekStartDate)] || [];
     const updatedPivot = findSessionAt(currentWeekSessions, modalSlot.day, modalSlot.time);
     setTitleDraft(updatedPivot?.title ?? '');
     setNotesDraft(updatedPivot?.notes ?? '');
@@ -1003,6 +820,17 @@ export default function ProjectCard({
       <div className="schedule-card">
         {classesLoading ? <p className="classes-hint" role="status">Loading classes…</p> : null}
         {classesError ? <p className="classes-hint classes-hint--error" role="alert">{classesError}</p> : null}
+        {sessionState.isLoading ? <p className="classes-hint" role="status">Loading timetable…</p> : null}
+        {sessionState.isSaving ? <p className="classes-hint" role="status">Saving…</p> : null}
+        {sessionState.saved && !sessionState.isSaving ? <p className="classes-hint" role="status">Saved</p> : null}
+        {sessionState.error ? <p className="classes-hint classes-hint--error" role="alert">{sessionState.error}</p> : null}
+        {sessionState.conflict ? <p className="classes-hint classes-hint--error">The timetable changed elsewhere. Reload before retrying.</p> : null}
+        {sessionState.requestReference ? <p className="classes-hint">Support reference: {sessionState.requestReference}</p> : null}
+        {weekMode === 'date' && sessionState.dated ? (
+          <p className="classes-hint">{sessionState.dated.overrideExists
+            ? sessionState.dated.sessions.length ? 'Explicit date override' : 'Intentionally empty date override'
+            : 'Inherited from the repeating timetable'}</p>
+        ) : null}
         <div className={`schedule-titlebar${isSingleDayTimetable ? ' schedule-titlebar--stack' : ''}`}>
           <div className="schedule-titlebar-main">
             <strong>{project.title}</strong>
@@ -1084,9 +912,35 @@ export default function ProjectCard({
               <span className="schedule-week-label">{weekCommencingLabel}</span>
             </div>
           )}
-          {enableEditing ? (
+          {target ? (
             <div className="schedule-titlebar-actions">
-              <button type="button" className="schedule-edit-toggle" onClick={toggleEditMode}>
+              <button type="button" className="schedule-edit-toggle"
+                disabled={sessionState.isLoading || sessionState.isSaving || sessionState.unsaved || sessionState.conflict || !target}
+                onClick={() => sessionState.setCurrentRestorePoint(target,
+                  (activeCollection?.sessions || []), Boolean(sessionState.dated?.overrideExists))}>
+                Set restore point
+              </button>
+              <button type="button" className="schedule-edit-toggle"
+                disabled={!target || !sessionState.restorePoint
+                  || sameSessions(sessionState.restorePoint.sessions, activeCollection?.sessions || [])}
+                onClick={() => sessionState.undoRestorePoint(target, activeCollection?.sessions || [])}>
+                Undo to restore point
+              </button>
+              {weekMode === 'date' && sessionState.dated?.overrideExists ? (
+                <button type="button" className="schedule-edit-toggle" disabled={sessionState.isSaving}
+                  onClick={() => sessionState.removeOverride()}>Restore repeating timetable</button>
+              ) : null}
+              {weekMode === 'date' ? (
+                <button type="button" className="schedule-edit-toggle schedule-edit-toggle--danger"
+                  disabled={sessionState.isSaving || sessions.length === 0} onClick={handleClearTimetable}>
+                  Clear this week
+                </button>
+              ) : null}
+              {sessionState.error ? (
+                <><button type="button" className="schedule-edit-toggle" onClick={sessionState.retry}>Retry save</button>
+                <button type="button" className="schedule-edit-toggle" onClick={sessionState.reload}>Reload</button></>
+              ) : null}
+              {enableEditing ? <><button type="button" className="schedule-edit-toggle" onClick={toggleEditMode}>
                 {isEditingClasses ? 'Save class positions' : 'Edit classes'}
               </button>
               <button
@@ -1097,6 +951,7 @@ export default function ProjectCard({
               >
                 Clear timetable
               </button>
+              </> : null}
             </div>
           ) : null}
         </div>
@@ -1174,7 +1029,6 @@ export default function ProjectCard({
                       const sessionClassName = resolveSessionClass(session);
                       const trimmedTitle = session ? String(session.title ?? '').trim() : '';
                       const trimmedNotes = session ? String(session.notes ?? '').trim() : '';
-                      const teacher = session ? session.teacher?.trim() : '';
                       const ariaLabel =
                         lessonAriaLabel(session ? { ...session, class: sessionClassName } : session) ??
                         `Assign class for ${day} at ${seg.rangeLabel}`;
@@ -1191,8 +1045,7 @@ export default function ProjectCard({
                               {session ? (
                                 <>
                                   <span className="session-class">{sessionClassName}</span>
-                                  <span>{session.meta}</span>
-                                  {teacher ? <span>{teacher}</span> : null}
+                                  <span>{seg.rangeLabel}</span>
                                   {trimmedTitle ? (
                                     <span className="session-lesson-title">{trimmedTitle}</span>
                                   ) : null}

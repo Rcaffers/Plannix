@@ -18,18 +18,15 @@ export function mapsFromPlannedClasses(plannedClasses) {
   };
 }
 
-export function resolveSessionClassDisplay(session, plannedClassById, plannedClassByName) {
+export function resolveSessionClassDisplay(session, plannedClassById) {
   if (!session) return '';
   const fromId = session.classId ? plannedClassById.get(session.classId) : null;
-  if (fromId) return fromId.name;
-  return String(session.class || '').trim();
+  return fromId?.name || '';
 }
 
-export function computeClassUsageCounts(sessions, plannedClassById, plannedClassByName) {
+export function computeClassUsageCounts(sessions, plannedClassById) {
   return sessions.reduce((acc, session) => {
-    const fallbackName = String(session.class || '').trim();
-    const entry =
-      (session.classId && plannedClassById.get(session.classId)) || plannedClassByName.get(fallbackName);
+    const entry = session.classId && plannedClassById.get(session.classId);
     if (!entry) return acc;
     acc.set(entry.id, (acc.get(entry.id) ?? 0) + 1);
     return acc;
@@ -45,16 +42,13 @@ export function computeAvailableClassOptions({
   dayIndex,
   rowIndex,
   plannedClassById,
-  plannedClassByName,
   currentSession = null,
 }) {
   const selectedSession = currentSession ?? findSessionAt(sessions, dayIndex, rowIndex);
   const filteredSessions = selectedSession ? sessions.filter((s) => s !== selectedSession) : sessions;
-  const usedCounts = computeClassUsageCounts(filteredSessions, plannedClassById, plannedClassByName);
+  const usedCounts = computeClassUsageCounts(filteredSessions, plannedClassById);
   const currentClassId =
-    (selectedSession?.classId && plannedClassById.get(selectedSession.classId)?.id) ||
-    plannedClassByName.get(String(selectedSession?.class || '').trim())?.id ||
-    '';
+    (selectedSession?.classId && plannedClassById.get(selectedSession.classId)?.id) || '';
 
   return plannedClasses
     .filter((entry) => {

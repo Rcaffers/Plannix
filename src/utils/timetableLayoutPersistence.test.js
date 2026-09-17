@@ -94,12 +94,12 @@ test('context scopes requests, separates draft from authority, blocks duplicates
   assert.ok(app.indexOf('<AcademicYearProvider') < app.indexOf('<TimetableLayoutProvider'));
 });
 
-test('legacy session helpers remain while production layout calls use only the new scoped API', () => {
+test('legacy session helpers and layout identities are removed after scoped session migration', () => {
   const api = fs.readFileSync(new URL('./api.js', import.meta.url), 'utf8');
   const card = fs.readFileSync(new URL('../components/ProjectCard.jsx', import.meta.url), 'utf8');
-  assert.match(api, /fetchTimetableSessions/);
-  assert.match(api, /saveTimetableSessions/);
-  assert.match(api, /clearTimetableSessionsForLayout/);
-  assert.match(card, /makeLayoutKey/);
+  assert.equal(api.includes('fetchTimetableSessions'), false);
+  assert.equal(api.includes('saveTimetableSessions'), false);
+  assert.equal(api.includes('clearTimetableSessionsForLayout'), false);
+  assert.equal(card.includes('makeLayoutKey'), false);
   assert.equal(api.includes("credentials: 'include',\n  });\n  const payload = await parseJsonSafe(response);\n  if (!response.ok) {\n    throw new Error(payload?.message || 'Could not load timetable layout.'"), false);
 });

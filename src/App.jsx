@@ -24,6 +24,7 @@ import { createSupabaseAuthController, privateRouteState } from './utils/supabas
 import { TimetableLayoutProvider } from './context/TimetableLayoutContext';
 import { AcademicYearProvider } from './context/AcademicYearContext';
 import { ClassProvider } from './context/ClassContext';
+import { TimetableSessionProvider } from './context/TimetableSessionContext';
 
 const authController = createSupabaseAuthController();
 
@@ -58,6 +59,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    if (window.__plannixConfirmSessionDiscard?.() === false) return;
     if (window.__plannixConfirmClassDiscard?.() === false) return;
     if (window.__plannixConfirmLayoutDiscard?.() === false) return;
     try {
@@ -100,6 +102,7 @@ export default function App() {
     <AcademicYearProvider key={`${user?.id || 'signed-out'}:${user?.organisationId || 'none'}`} user={user}>
       <TimetableLayoutProvider user={user}>
         <ClassProvider user={user}>
+          <TimetableSessionProvider user={user}>
           <div className="page-shell">
           <ScrollToTop />
           <Header
@@ -154,6 +157,7 @@ export default function App() {
           <PrivacyModal />
           <CookieConsent />
           </div>
+          </TimetableSessionProvider>
         </ClassProvider>
       </TimetableLayoutProvider>
     </AcademicYearProvider>
