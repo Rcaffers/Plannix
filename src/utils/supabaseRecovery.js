@@ -24,6 +24,7 @@ export function createSupabaseRecoveryController({
   location = globalThis.location,
 } = {}) {
   let recoveryToken = null;
+  let updatePromise = null;
 
   function clearSensitiveUrl() {
     if (typeof history?.replaceState !== 'function' || !location?.pathname) return;
@@ -55,6 +56,8 @@ export function createSupabaseRecoveryController({
           try {
             const current = await auth.getCurrentSession();
             if (!session?.access_token || current?.access_token !== session.access_token) throw new Error('invalid');
+            const validated = await auth.validateRecoverySession(session.access_token);
+            if (!validated?.userId) throw new Error('invalid');
             recoveryToken = session.access_token;
             settled = true;
             clearSensitiveUrl();
@@ -73,13 +76,24 @@ export function createSupabaseRecoveryController({
       const validation = validateRecoveryPasswords(password, confirmation);
       if (validation) throw new Error(validation);
       if (!recoveryToken) throw new Error(INVALID_RECOVERY_MESSAGE);
+      if (updatePromise) return updatePromise;
+      updatePromise = (async () => {
+        try {
+          await auth.updatePasswordDuringRecovery(password);
+        } catch {
+          throw new Error(RECOVERY_UPDATE_ERROR);
+        }
+        recoveryToken = null;
+        try {
+          if (typeof auth.logoutLocal === 'function') await auth.logoutLocal();
+          else await auth.logout();
+        } catch { /* local recovery access is still cleared */ }
+      })();
       try {
-        await auth.updatePasswordDuringRecovery(password);
-      } catch {
-        throw new Error(RECOVERY_UPDATE_ERROR);
+        return await updatePromise;
+      } finally {
+        updatePromise = null;
       }
-      recoveryToken = null;
-      try { await auth.logout(); } catch { /* local recovery access is still cleared */ }
     },
   };
 }

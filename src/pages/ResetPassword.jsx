@@ -32,7 +32,11 @@ export default function ResetPassword() {
     setStatus('submitting');
     try {
       await supabaseRecovery.update(password, confirm);
+      setPassword('');
+      setConfirm('');
       setStatus('done');
+      navigate('/', { replace: true });
+      dispatchOpenLoginModal();
     } catch (err) {
       setStatus('ready');
       setError(err.message || 'Your password could not be updated. Please request a new reset link and try again.');

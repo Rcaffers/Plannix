@@ -141,6 +141,22 @@ test('a recovery session is never published as an authenticated application user
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(published, false);
   assert.equal(mock.calls.includes('onboard'), false);
+  assert.equal(mock.calls.includes('logout'), false);
+});
+
+test('a recovery token remains isolated when a later initial-session event arrives', async () => {
+  const queued = [];
+  const mock = mockAuth();
+  let published = false;
+  const controller = createSupabaseAuthController({ auth: mock.auth, schedule: (task) => queued.push(task) });
+  controller.subscribe({ onUser: () => { published = true; } });
+  mock.emit('PASSWORD_RECOVERY');
+  mock.emit('INITIAL_SESSION');
+  while (queued.length) await queued.shift()();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(published, false);
+  assert.equal(mock.calls.includes('onboard'), false);
+  assert.equal(mock.calls.includes('logout'), false);
 });
 
 test('a recovery event interrupting restoration prevents onboarding', async () => {

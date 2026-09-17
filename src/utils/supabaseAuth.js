@@ -2,6 +2,7 @@ import { getSupabaseClient } from '../lib/supabase.js';
 
 const PROFILE_COLUMNS = 'id, first_name, last_name, initials';
 const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const recoveryTokensByClient = new WeakMap();
 
 export class SupabaseAuthError extends Error {
   constructor(message, { code = '', status = null } = {}) {
@@ -82,7 +83,11 @@ export function createSupabaseAuthAdapter({
   client = getSupabaseClient(),
   location = globalThis.location,
 } = {}) {
-  const recoveryAccessTokens = new Set();
+  let recoveryAccessTokens = recoveryTokensByClient.get(client);
+  if (!recoveryAccessTokens) {
+    recoveryAccessTokens = new Set();
+    recoveryTokensByClient.set(client, recoveryAccessTokens);
+  }
 
   async function loadProfile(authUser) {
     if (!authUser?.id) return null;
@@ -154,6 +159,21 @@ export function createSupabaseAuthAdapter({
       return mappedUser(result.data?.user);
     },
 
+    async validateRecoverySession(accessToken) {
+      if (!accessToken || !recoveryAccessTokens.has(accessToken)) {
+        throw new SupabaseAuthError('A password recovery session is required.');
+      }
+      const { data, error } = await client.auth.getUser(accessToken);
+      if (error || !data?.user?.id) {
+        throw authError(error, 'Unable to validate the recovery session.');
+      }
+      return { userId: String(data.user.id) };
+    },
+
+    isRecoverySession(session) {
+      return Boolean(session?.access_token && recoveryAccessTokens.has(session.access_token));
+    },
+
     subscribeToAuthChanges(callback) {
       const { data } = client.auth.onAuthStateChange((event, session) => {
         if (event === 'PASSWORD_RECOVERY' && session?.access_token) {
@@ -171,11 +191,13 @@ export function createSupabaseAuthAdapter({
     async logout() {
       const { error } = await client.auth.signOut();
       if (error) throw authError(error, 'Unable to log out.');
+      recoveryAccessTokens.clear();
     },
 
     async logoutLocal() {
       const { error } = await client.auth.signOut({ scope: 'local' });
       if (error) throw authError(error, 'Unable to clear the local session.');
+      recoveryAccessTokens.clear();
     },
 
     async ensurePersonalOrganisation() {
@@ -210,7 +232,6 @@ export function createSupabaseAuthAdapter({
       }
       const result = await client.auth.updateUser({ password: preservedPassword });
       if (result.error) throw authError(result.error, 'Unable to update your password.');
-      recoveryAccessTokens.delete(session.access_token);
       return mapSupabaseUser(result.data?.user);
     },
 

@@ -182,10 +182,24 @@ test('auth-state subscription maps users, records recovery sessions, and cleans 
     access_token: 'recovery-token', user: { id: 'r1', email: 'r@example.test', user_metadata: {} },
   });
   assert.equal(eventPayload.event, 'PASSWORD_RECOVERY');
+  assert.equal(auth.isRecoverySession({ access_token: 'recovery-token' }), true);
+  mock.calls.userResult = { data: { user: { id: 'r1' } }, error: null };
+  assert.deepEqual(await auth.validateRecoverySession('recovery-token'), { userId: 'r1' });
+  assert.equal(mock.calls.getUser, 'recovery-token');
   await auth.updatePasswordDuringRecovery(' new password ');
   assert.deepEqual(mock.calls.updateUser, { password: ' new password ' });
   cleanup();
   assert.equal(mock.calls.unsubscribed, true);
+});
+
+test('recovery identity is shared between adapters for the same browser client', async () => {
+  const mock = createMockClient();
+  const applicationAuth = createSupabaseAuthAdapter({ client: mock.client, location });
+  const recoveryAuth = createSupabaseAuthAdapter({ client: mock.client, location });
+  applicationAuth.subscribeToAuthChanges(() => {});
+  await mock.emitAuthChange('PASSWORD_RECOVERY', { access_token: 'shared-recovery-token' });
+  assert.equal(recoveryAuth.isRecoverySession({ access_token: 'shared-recovery-token' }), true);
+  assert.equal(recoveryAuth.isRecoverySession({ access_token: 'ordinary-token' }), false);
 });
 
 test('logout and recovery email use Supabase Auth with the expected redirect', async () => {

@@ -16,7 +16,9 @@ function mockAuth(overrides = {}) {
     async sendPasswordRecovery(email) { calls.push(['request', email]); },
     subscribeToAuthChanges(next) { callback = next; calls.push(['subscribe']); return () => calls.push(['unsubscribe']); },
     async getCurrentSession() { return { access_token: 'recovery-token' }; },
+    async validateRecoverySession(token) { calls.push(['validate-recovery', token]); return { userId: 'user-1' }; },
     async updatePasswordDuringRecovery(password) { calls.push(['update', password]); },
+    async logoutLocal() { calls.push(['logout-local']); },
     async logout() { calls.push(['logout']); },
     ...overrides,
   };
@@ -101,7 +103,7 @@ test('password validation enforces length and confirmation', () => {
   assert.equal(validateRecoveryPasswords('valid-password', 'valid-password'), null);
 });
 
-test('successful recovery update is followed by sign-out', async () => {
+test('successful recovery update is followed by local sign-out', async () => {
   const mock = mockAuth();
   const queued = [];
   const controller = createSupabaseRecoveryController({ auth: mock.auth, schedule: (task) => queued.push(task) });
@@ -109,7 +111,72 @@ test('successful recovery update is followed by sign-out', async () => {
   mock.emit('PASSWORD_RECOVERY', { access_token: 'recovery-token' });
   await queued.shift()();
   await controller.update('valid-password', 'valid-password');
-  assert.deepEqual(mock.calls.slice(-2), [['update', 'valid-password'], ['logout']]);
+  assert.deepEqual(mock.calls.slice(-2), [['update', 'valid-password'], ['logout-local']]);
+});
+
+test('production recovery ordering preserves the session until one successful update', async () => {
+  const listeners = new Set();
+  const calls = [];
+  const recoverySession = { access_token: 'recovery-token', user: { id: 'user-1' } };
+  let recovery = false;
+  const logged = [];
+  const originalError = console.error;
+  const originalLog = console.log;
+  console.error = (...values) => logged.push(values.join(' '));
+  console.log = (...values) => logged.push(values.join(' '));
+  const auth = {
+    subscribeToAuthChanges(listener) {
+      listeners.add(listener);
+      calls.push('subscribe');
+      return () => { listeners.delete(listener); calls.push('unsubscribe'); };
+    },
+    async getCurrentSession() { return recoverySession; },
+    async validateRecoverySession(token) {
+      calls.push('validate-recovery');
+      return token === recoverySession.access_token ? { userId: 'user-1' } : null;
+    },
+    isRecoverySession(session) { return recovery && session?.access_token === recoverySession.access_token; },
+    async getValidatedCurrentUser() { calls.push('validate-application'); return { id: 'user-1' }; },
+    async loadProfile() { calls.push('profile'); return { id: 'user-1' }; },
+    async ensurePersonalOrganisation() { calls.push('onboard'); return { organisationId: '20000000-0000-4000-8000-000000000001' }; },
+    async updatePasswordDuringRecovery() { calls.push('update'); },
+    async logoutLocal() { calls.push('logout-local'); },
+    async logout() { calls.push('logout'); },
+  };
+  const queued = [];
+  let ready = false;
+  let privateUser = null;
+  const recoveryController = createSupabaseRecoveryController({ auth, schedule: (task) => queued.push(task) });
+  const { createSupabaseAuthController } = await import('./supabaseAuthController.js');
+  const applicationController = createSupabaseAuthController({ auth, schedule: (task) => queued.push(task) });
+  const cleanRecovery = recoveryController.subscribe({ onReady: () => { ready = true; } });
+  const cleanApplication = applicationController.subscribe({ onUser: (user) => { privateUser = user; } });
+
+  try {
+    recovery = true;
+    for (const listener of listeners) listener({ event: 'PASSWORD_RECOVERY', session: recoverySession });
+    while (queued.length) await queued.shift()();
+    assert.equal(ready, true);
+    assert.equal(privateUser, null);
+    assert.equal(calls.includes('onboard'), false);
+    assert.equal(calls.includes('logout-local'), false);
+
+    await Promise.all([
+      recoveryController.update('valid-password', 'valid-password'),
+      recoveryController.update('valid-password', 'valid-password'),
+    ]);
+    assert.equal(calls.filter((call) => call === 'update').length, 1);
+    assert.equal(calls.filter((call) => call === 'logout-local').length, 1);
+    assert.ok(calls.indexOf('logout-local') > calls.indexOf('update'));
+
+    cleanRecovery();
+    cleanApplication();
+    assert.equal(listeners.size, 0);
+    assert.deepEqual(logged, []);
+  } finally {
+    console.error = originalError;
+    console.log = originalLog;
+  }
 });
 
 test('update failures remain safe and do not sign out or destroy recovery state', async () => {
@@ -120,7 +187,8 @@ test('update failures remain safe and do not sign out or destroy recovery state'
   mock.emit('PASSWORD_RECOVERY', { access_token: 'recovery-token' });
   await queued.shift()();
   await assert.rejects(() => controller.update('valid-password', 'valid-password'), (error) => error.message === RECOVERY_UPDATE_ERROR);
-  assert.equal(mock.calls.some(([name]) => name === 'logout'), false);
+  assert.equal(mock.calls.some(([name]) => name === 'logout' || name === 'logout-local'), false);
+  await assert.rejects(() => controller.update('valid-password', 'valid-password'), (error) => error.message === RECOVERY_UPDATE_ERROR);
 });
 
 test('subscription cleanup prevents state updates', async () => {
@@ -145,4 +213,5 @@ test('production React has no legacy reset-token parsing or Express recovery cal
   assert.equal(/requestPasswordReset|resetPasswordWithToken|useSearchParams/.test(header + reset + api), false);
   assert.equal(/auth\/(forgot-password|reset-password)/.test(header + reset + api), false);
   assert.equal(/[?&]token=|searchParams\.get\(['"]token/.test(reset), false);
+  assert.match(reset, /navigate\('\/', \{ replace: true \}\)/);
 });

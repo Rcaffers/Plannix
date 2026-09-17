@@ -6,6 +6,8 @@ import {
 
 const SETUP_ERROR = 'We could not finish setting up your account. Please try again or contact support.';
 
+class RecoverySessionIsolation extends Error {}
+
 export class PublicAuthError extends Error {
   constructor(message) {
     super(message);
@@ -46,7 +48,9 @@ export function createSupabaseAuthController({
     const token = session?.access_token;
     const setupKey = session?.user?.id || token;
     if (!token) throw new PublicAuthError(SETUP_ERROR);
-    if (recoveryTokens.has(token)) throw new PublicAuthError(SETUP_ERROR);
+    if (recoveryTokens.has(token) || auth.isRecoverySession?.(session)) {
+      throw new PublicAuthError(SETUP_ERROR);
+    }
     if (ready?.token === token) return ready.user;
     if (activeSetup?.key === setupKey) return activeSetup.promise;
     const generation = authGeneration;
@@ -57,8 +61,8 @@ export function createSupabaseAuthController({
         if (!validatedUser?.id) throw new SupabaseAuthError('Invalid session.');
         const initialProfile = await auth.loadProfile(validatedUser);
         if (!initialProfile) throw new SupabaseAuthError('Profile unavailable.');
-        if (generation !== authGeneration || recoveryTokens.has(token)) {
-          throw new SupabaseAuthError('Recovery sessions cannot access the application.');
+        if (generation !== authGeneration || recoveryTokens.has(token) || auth.isRecoverySession?.(session)) {
+          throw new RecoverySessionIsolation();
         }
         const organisation = await auth.ensurePersonalOrganisation();
         if (!organisation?.organisationId) throw new SupabaseAuthError('Personal organisation unavailable.');
@@ -68,7 +72,11 @@ export function createSupabaseAuthController({
         const user = { ...mapSupabaseUser(validatedUser, profile), organisationId: organisation.organisationId };
         ready = { token, user };
         return user;
-      } catch {
+      } catch (error) {
+        if (error instanceof RecoverySessionIsolation || recoveryTokens.has(token) || auth.isRecoverySession?.(session)) {
+          ready = null;
+          throw new PublicAuthError(SETUP_ERROR);
+        }
         await signOutAfterFailure();
         throw new PublicAuthError(SETUP_ERROR);
       } finally {
