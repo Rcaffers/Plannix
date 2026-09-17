@@ -35,7 +35,7 @@ const checkRemovedRoutesScript = `
   });
   try {
     const { port } = server.address();
-    const routes = [
+    const removedRoutes = [
       ['POST', '/admin/migrate'],
       ['POST', '/stripe/webhook'],
       ['GET', '/billing/subscription-summary'],
@@ -43,12 +43,44 @@ const checkRemovedRoutesScript = `
       ['POST', '/auth/signup/config'],
       ['POST', '/auth/signup/promotion'],
       ['POST', '/auth/signup/complete'],
+      ['GET', '/auth/me'],
+      ['POST', '/auth/login'],
+      ['POST', '/auth/signup'],
+      ['POST', '/auth/logout'],
+      ['POST', '/auth/forgot-password'],
+      ['POST', '/auth/reset-password'],
     ];
-    for (const [method, path] of routes) {
-      const response = await fetch('http://127.0.0.1:' + port + path, { method });
-      if (response.status !== 404) process.exit(1);
-      const payload = await response.json();
-      if (!String(payload?.message || '').includes('No API route found')) process.exit(2);
+    for (const cookie of [undefined, 'plannix_session=legacy-session']) {
+      for (const [method, path] of removedRoutes) {
+        const response = await fetch('http://127.0.0.1:' + port + path, {
+          method,
+          headers: {
+            ...(cookie ? { Cookie: cookie } : {}),
+            'X-Request-ID': '8e6ddc18-d0d9-4fbc-a036-b02028e9f421',
+          },
+        });
+        if (response.status !== 404) process.exit(1);
+        if (response.headers.get('x-request-id') !== '8e6ddc18-d0d9-4fbc-a036-b02028e9f421') process.exit(2);
+        const payload = await response.json();
+        if (payload?.message !== 'The requested resource was not found.') process.exit(3);
+      }
+    }
+
+    const removedAuthPaths = [
+      '/auth/me', '/auth/login', '/auth/signup', '/auth/logout',
+      '/auth/forgot-password', '/auth/reset-password',
+    ];
+    for (const path of removedAuthPaths) {
+      for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+        const response = await fetch('http://127.0.0.1:' + port + path, { method });
+        if (response.status !== 404) process.exit(4);
+        const payload = await response.json();
+        if (payload?.message !== 'The requested resource was not found.') process.exit(5);
+      }
+    }
+    for (const alias of ['/auth/session', '/auth/register', '/auth/password-recovery']) {
+      const response = await fetch('http://127.0.0.1:' + port + alias, { method: 'POST' });
+      if (response.status !== 404) process.exit(6);
     }
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -76,6 +108,26 @@ test('removed routes return 404 through Express without MIGRATION_TOKEN', () => 
 
 test('removed routes return 404 through Express with MIGRATION_TOKEN', () => {
   assertRemovedRoutesReturnNotFound('test-placeholder-token');
+});
+
+test('production route assembly contains no removed authentication handlers and registers remaining groups once', async () => {
+  const source = await import('node:fs/promises').then((fs) => fs.readFile(
+    new URL('../auth-server.js', import.meta.url),
+    'utf8',
+  ));
+  for (const route of [
+    '/auth/me', '/auth/login', '/auth/signup', '/auth/logout',
+    '/auth/forgot-password', '/auth/reset-password',
+  ]) {
+    assert.equal(source.includes(route), false);
+  }
+  for (const registration of [
+    'registerAccountRoutes', 'registerAcademicYearRoutes', 'registerClassRoutes',
+    'registerContactRoutes', 'registerHolidayRoutes', 'registerTimetableLayoutRoutes',
+    'registerTimetableSessionRoutes',
+  ]) {
+    assert.equal((source.match(new RegExp(registration + '\\(\\{', 'g')) || []).length, 1);
+  }
 });
 
 const checkObservabilityScript = `

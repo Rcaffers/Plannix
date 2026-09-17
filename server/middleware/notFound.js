@@ -17,7 +17,7 @@ export function notFound(req, res, next) {
   }
   return sendPublicError(
     res,
-    `No API route found for ${req.method} ${req.originalUrl}.`,
+    'The requested resource was not found.',
     404,
   );
 }

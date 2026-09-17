@@ -87,7 +87,7 @@ test('notFound returns JSON for unknown API routes', () => {
     () => assert.fail('API requests must not fall through'),
   );
   assert.equal(response.statusCode, 404);
-  assert.match(response.body.message, /No API route found/);
+  assert.deepEqual(response.body, { message: 'The requested resource was not found.' });
 });
 
 test('errorHandler hides unexpected error details', () => {

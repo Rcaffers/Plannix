@@ -125,13 +125,3 @@ test('contact route source has no database, session, or cookie lookup dependency
   const source = await import('node:fs/promises').then((fs) => fs.readFile(new URL('./contact-routes.js', import.meta.url), 'utf8'));
   assert.doesNotMatch(source, /getSessionUser|sessionUser|req\.cookies|\bdb\b/);
 });
-
-test('legacy authentication route definitions remain for the next cleanup slice', async () => {
-  const source = await import('node:fs/promises').then((fs) => fs.readFile(new URL('../auth-server.js', import.meta.url), 'utf8'));
-  assert.match(source, /app\.get\('\/auth\/me'/);
-  assert.match(source, /app\.post\('\/auth\/login'/);
-  assert.match(source, /registerSignupRoute\(/);
-  assert.match(source, /app\.post\('\/auth\/logout'/);
-  assert.match(source, /app\.post\('\/auth\/forgot-password'/);
-  assert.match(source, /app\.post\('\/auth\/reset-password'/);
-});
