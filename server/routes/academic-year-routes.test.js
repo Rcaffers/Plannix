@@ -372,13 +372,12 @@ test('malformed and oversized JSON use central safe errors with request IDs', as
 
 test('production registers each new route once and removes only legacy academic-year handlers', () => {
   const authServer = fs.readFileSync(new URL('../auth-server.js', import.meta.url), 'utf8');
-  const planner = fs.readFileSync(new URL('./planner-routes.js', import.meta.url), 'utf8');
   const routes = fs.readFileSync(new URL('./academic-year-routes.js', import.meta.url), 'utf8');
   assert.equal((authServer.match(/registerAcademicYearRoutes\(\{ app \}\)/g) || []).length, 1);
   assert.equal((routes.match(/app\.get\('\/api\/academic-years'/g) || []).length, 1);
   assert.equal((routes.match(/app\.get\('\/api\/academic-year'/g) || []).length, 1);
   assert.equal((routes.match(/app\.put\('\/api\/academic-year'/g) || []).length, 1);
-  assert.equal(planner.includes("'/api/academic-year'"), false);
+  assert.equal(authServer.includes('planner-routes.js'), false);
   assert.equal(routes.includes('createDbPool'), false);
   assert.equal(routes.includes('adminClient'), false);
   assert.equal(routes.includes('SUPABASE_SECRET_KEY'), false);

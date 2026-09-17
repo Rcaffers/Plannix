@@ -25,9 +25,9 @@ import { registerAcademicYearRoutes } from './routes/academic-year-routes.js';
 import { registerClassRoutes } from './routes/class-routes.js';
 import { registerContactRoutes } from './routes/contact-routes.js';
 import { registerHolidayRoutes } from './routes/holiday-routes.js';
-import { registerPlannerRoutes } from './routes/planner-routes.js';
 import { createSessionCookieAttacher, registerSignupRoute } from './routes/signup-route.js';
 import { registerTimetableLayoutRoutes } from './routes/timetable-layout-routes.js';
+import { registerTimetableSessionRoutes } from './routes/timetable-session-routes.js';
 
 export const app = express();
 /** Trust reverse proxy (DigitalOcean, Render, etc.) so `X-Forwarded-Proto` / host are correct for CORS and cookies. */
@@ -271,22 +271,6 @@ function requireDb(res) {
   return true;
 }
 
-async function withUserDbSession(userId, work) {
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query(`SELECT set_config('app.user_id', $1, true)`, [userId]);
-    const result = await work(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
 function parseCoordinate(value) {
   const n = Number.parseFloat(String(value ?? ''));
   if (!Number.isFinite(n)) return null;
@@ -500,6 +484,7 @@ registerAccountRoutes({ app });
 registerAcademicYearRoutes({ app });
 registerClassRoutes({ app });
 registerTimetableLayoutRoutes({ app });
+registerTimetableSessionRoutes({ app });
 
 registerHolidayRoutes({
   app,
@@ -508,14 +493,6 @@ registerHolidayRoutes({
   normalizeCountryCode,
   parseCoordinate,
   sendError,
-});
-
-registerPlannerRoutes({
-  app,
-  requireDb,
-  requireSessionUser,
-  sendError,
-  withUserDbSession,
 });
 
 app.use(notFoundHandler);

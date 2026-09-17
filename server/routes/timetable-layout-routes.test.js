@@ -277,11 +277,9 @@ test('malformed and oversized JSON return safe errors with request IDs', async (
   } finally { await instance.close(); }
 });
 
-test('production registers layout routes once and leaves all legacy session routes unchanged', () => {
+test('production registers layout routes once after legacy planner removal', () => {
   const authSource = fs.readFileSync(new URL('../auth-server.js', import.meta.url), 'utf8');
-  const plannerSource = fs.readFileSync(new URL('./planner-routes.js', import.meta.url), 'utf8');
   assert.equal((authSource.match(/registerTimetableLayoutRoutes\(\{ app \}\)/g) || []).length, 1);
-  assert.equal((plannerSource.match(/['"]\/api\/timetable\/layout['"]/g) || []).length, 0);
-  assert.equal((plannerSource.match(/['"]\/api\/timetable\/sessions['"]/g) || []).length, 3);
-  assert.match(plannerSource, /withUserDbSession/);
+  assert.equal(authSource.includes('planner-routes.js'), false);
+  assert.equal(authSource.includes('withUserDbSession'), false);
 });
