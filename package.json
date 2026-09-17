@@ -12,6 +12,7 @@
     "test:recovery": "node --test src/utils/supabaseRecovery.test.js",
     "test:server": "node --test server/**/*.test.js",
     "test:server-auth": "node --test server/middleware/requireSupabaseAuth.test.js",
+    "test:public-api": "node --test server/routes/contact-routes.test.js src/utils/publicApi.test.js",
     "test:account-deletion": "node --test server/middleware/accountDeletionRateLimit.test.js server/routes/account-routes.test.js",
     "test:frontend-account-deletion": "node --test src/utils/accountDeletion.test.js",
     "test:academic-year": "node --test src/utils/academicYear.test.js src/utils/academicYearApi.test.js",

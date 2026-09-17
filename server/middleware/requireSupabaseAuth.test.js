@@ -157,7 +157,7 @@ test('server clients use only public configuration with all browser session feat
   assert.notEqual(calls[1][2].global.headers, calls[2][2].global.headers);
 });
 
-test('CORS preflight permits Authorization for an allowed origin without changing credentials policy', async () => {
+test('CORS preflight permits bearer headers without advertising credential support', async () => {
   const app = express();
   app.use(requestId);
   app.use(cors(corsDelegate));
@@ -171,12 +171,15 @@ test('CORS preflight permits Authorization for an allowed origin without changin
       headers: {
         Origin: origin,
         'Access-Control-Request-Method': 'GET',
-        'Access-Control-Request-Headers': 'Authorization',
+        'Access-Control-Request-Headers': 'Authorization, Content-Type, X-Request-ID',
       },
     });
     assert.equal(response.status, 204);
-    assert.match(response.headers.get('access-control-allow-headers') || '', /Authorization/i);
-    assert.equal(response.headers.get('access-control-allow-credentials'), 'true');
+    const allowedHeaders = response.headers.get('access-control-allow-headers') || '';
+    assert.match(allowedHeaders, /Authorization/i);
+    assert.match(allowedHeaders, /Content-Type/i);
+    assert.match(allowedHeaders, /X-Request-ID/i);
+    assert.equal(response.headers.get('access-control-allow-credentials'), null);
     assert.equal(response.headers.get('access-control-allow-origin'), origin);
   } finally {
     await new Promise((resolve) => server.close(resolve));

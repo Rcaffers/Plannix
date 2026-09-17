@@ -307,9 +307,7 @@ async function fetchUkBankHolidaysForYear(year) {
 
 registerContactRoutes({
   app,
-  db,
   escapeHtml,
-  getSessionUser,
   logRouteError,
   normalizeEmailInput,
 });

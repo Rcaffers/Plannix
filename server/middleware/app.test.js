@@ -117,10 +117,31 @@ const checkObservabilityScript = `
     });
     if (health.status !== 200) process.exit(2);
     if (health.headers.get('x-request-id') !== validRequestId) process.exit(3);
+    if (health.headers.get('access-control-allow-origin') !== 'https://frontend.example.test') {
+      process.exit(17);
+    }
+    if (health.headers.get('access-control-allow-credentials') !== null) process.exit(18);
     const exposed = health.headers.get('access-control-expose-headers') || '';
     if (!exposed.toLowerCase().split(',').map((value) => value.trim()).includes('x-request-id')) {
       process.exit(4);
     }
+
+    const preflight = await fetch(baseUrl + '/api/academic-years', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://frontend.example.test',
+        'Access-Control-Request-Method': 'GET',
+        'Access-Control-Request-Headers': 'Authorization, Content-Type, X-Request-ID',
+      },
+    });
+    if (preflight.status !== 204) process.exit(19);
+    const allowedHeaders = preflight.headers.get('access-control-allow-headers') || '';
+    for (const header of ['authorization', 'content-type', 'x-request-id']) {
+      if (!allowedHeaders.toLowerCase().split(',').map((value) => value.trim()).includes(header)) {
+        process.exit(20);
+      }
+    }
+    if (preflight.headers.get('access-control-allow-credentials') !== null) process.exit(21);
 
     const firstGenerated = await fetch(baseUrl + '/health');
     const secondGenerated = await fetch(baseUrl + '/health');

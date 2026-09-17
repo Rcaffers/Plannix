@@ -109,7 +109,7 @@ export async function submitContactForm({ name, email, message }) {
   const response = await fetch(`${API_BASE_URL}/api/contact`, {
     method: 'POST',
     headers: JSON_POST_HEADERS,
-    credentials: 'include',
+    credentials: 'omit',
     body: JSON.stringify({ name, email, message }),
   });
   const payload = await parseJsonSafe(response);
@@ -122,7 +122,7 @@ export async function submitContactForm({ name, email, message }) {
 export async function fetchHolidayCountries() {
   const response = await fetch(`${API_BASE_URL}/holidays/countries`, {
     method: 'GET',
-    credentials: 'include',
+    credentials: 'omit',
   });
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
@@ -138,7 +138,7 @@ export async function resolveCountryFromCoordinates({ lat, lng }) {
   });
   const response = await fetch(`${API_BASE_URL}/holidays/resolve-country?${params.toString()}`, {
     method: 'GET',
-    credentials: 'include',
+    credentials: 'omit',
   });
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
@@ -157,7 +157,7 @@ export async function fetchPublicHolidays({ countryCode, year }) {
   });
   const response = await fetch(`${API_BASE_URL}/holidays/public?${params.toString()}`, {
     method: 'GET',
-    credentials: 'include',
+    credentials: 'omit',
   });
   const payload = await parseJsonSafe(response);
   if (!response.ok) {

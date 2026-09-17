@@ -34,7 +34,6 @@ export function corsDelegate(req, callback) {
   }
   callback(null, {
     origin: allowed,
-    credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
     exposedHeaders: ['X-Request-ID'],
   });
