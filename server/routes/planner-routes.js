@@ -5,48 +5,6 @@ export function registerPlannerRoutes({
   sendError,
   withUserDbSession,
 }) {
-  app.get('/api/timetable/layout', async (req, res) => {
-    if (!requireDb(res)) {
-      return;
-    }
-    const user = await requireSessionUser(req, res);
-    if (!user) return;
-    try {
-      const result = await withUserDbSession(user.id, (client) =>
-        client.query('SELECT layout FROM plannix_timetable_layouts WHERE user_id = $1', [user.id]),
-      );
-      return res.json({ layout: result.rows[0]?.layout || null });
-    } catch (error) {
-      return sendError(res, error, 'Failed to load timetable layout.');
-    }
-  });
-
-  app.put('/api/timetable/layout', async (req, res) => {
-    if (!requireDb(res)) {
-      return;
-    }
-    const user = await requireSessionUser(req, res);
-    if (!user) return;
-    const layout = req.body?.layout;
-    if (!layout || typeof layout !== 'object') {
-      return res.status(400).json({ message: 'layout object is required.' });
-    }
-    try {
-      await withUserDbSession(user.id, (client) =>
-        client.query(
-          `INSERT INTO plannix_timetable_layouts (user_id, layout, updated_at)
-           VALUES ($1, $2::jsonb, NOW())
-           ON CONFLICT (user_id)
-           DO UPDATE SET layout = EXCLUDED.layout, updated_at = NOW()`,
-          [user.id, JSON.stringify(layout)],
-        ),
-      );
-      return res.json({ ok: true });
-    } catch (error) {
-      return sendError(res, error, 'Failed to save timetable layout.');
-    }
-  });
-
   app.get('/api/timetable/sessions', async (req, res) => {
     if (!requireDb(res)) {
       return;

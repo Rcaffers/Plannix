@@ -27,6 +27,7 @@ import { registerContactRoutes } from './routes/contact-routes.js';
 import { registerHolidayRoutes } from './routes/holiday-routes.js';
 import { registerPlannerRoutes } from './routes/planner-routes.js';
 import { createSessionCookieAttacher, registerSignupRoute } from './routes/signup-route.js';
+import { registerTimetableLayoutRoutes } from './routes/timetable-layout-routes.js';
 
 export const app = express();
 /** Trust reverse proxy (DigitalOcean, Render, etc.) so `X-Forwarded-Proto` / host are correct for CORS and cookies. */
@@ -498,6 +499,7 @@ app.post('/auth/logout', async (req, res) => {
 registerAccountRoutes({ app });
 registerAcademicYearRoutes({ app });
 registerClassRoutes({ app });
+registerTimetableLayoutRoutes({ app });
 
 registerHolidayRoutes({
   app,
