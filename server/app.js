@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import { env } from './config/env.js';
 import { corsDelegate } from './config/cors.js';
 import { errorHandler, logRouteError, sendError } from './middleware/errorHandler.js';
@@ -18,8 +19,13 @@ import { registerTimetableSessionRoutes } from './routes/timetable-session-route
 
 export const app = express();
 
+app.disable('x-powered-by');
 app.set('trust proxy', env.trustProxyHops);
 app.use(requestId);
+app.use(helmet({
+  contentSecurityPolicy: false,
+  strictTransportSecurity: false,
+}));
 app.use(cors(corsDelegate));
 
 app.get('/health', (_req, res) => {

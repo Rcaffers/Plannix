@@ -126,6 +126,18 @@ const checkObservabilityScript = `
   process.env.FRONTEND_ORIGIN = 'https://frontend.example.test';
   process.env.NODE_ENV = 'development';
 
+  const { readdirSync } = await import('node:fs');
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input) === 'https://date.nager.at/api/v3/AvailableCountries') {
+      return new Response(JSON.stringify([{ countryCode: 'GB', name: 'United Kingdom' }]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return nativeFetch(input, init);
+  };
+
   const capturedErrors = [];
   const capturedLogs = [];
   console.error = (entry) => capturedErrors.push(String(entry));
@@ -142,6 +154,39 @@ const checkObservabilityScript = `
   const validRequestId = '8e6ddc18-d0d9-4fbc-a036-b02028e9f421';
   const isUuid = (value) =>
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value || '');
+  const expectedSecurityHeaders = {
+    'cross-origin-opener-policy': 'same-origin',
+    'cross-origin-resource-policy': 'same-origin',
+    'origin-agent-cluster': '?1',
+    'referrer-policy': 'no-referrer',
+    'x-content-type-options': 'nosniff',
+    'x-dns-prefetch-control': 'off',
+    'x-download-options': 'noopen',
+    'x-frame-options': 'SAMEORIGIN',
+    'x-permitted-cross-domain-policies': 'none',
+  };
+  function assertHardenedHeaders(response, label) {
+    if (!isUuid(response.headers.get('x-request-id'))) {
+      throw new Error(label + ' response is missing a valid X-Request-ID');
+    }
+    if (response.headers.get('x-powered-by') !== null) {
+      throw new Error(label + ' response exposes X-Powered-By');
+    }
+    for (const [name, value] of Object.entries(expectedSecurityHeaders)) {
+      if (response.headers.get(name) !== value) {
+        throw new Error(label + ' response has an unexpected ' + name + ' header');
+      }
+    }
+    for (const deferred of [
+      'content-security-policy',
+      'content-security-policy-report-only',
+      'strict-transport-security',
+    ]) {
+      if (response.headers.get(deferred) !== null) {
+        throw new Error(label + ' response unexpectedly includes ' + deferred);
+      }
+    }
+  }
 
   try {
     const { port } = server.address();
@@ -153,6 +198,7 @@ const checkObservabilityScript = `
       },
     });
     if (health.status !== 200) process.exit(2);
+    assertHardenedHeaders(health, 'health');
     if (health.headers.get('x-request-id') !== validRequestId) process.exit(3);
     if (health.headers.get('access-control-allow-origin') !== 'https://frontend.example.test') {
       process.exit(17);
@@ -179,6 +225,26 @@ const checkObservabilityScript = `
       }
     }
     if (preflight.headers.get('access-control-allow-credentials') !== null) process.exit(21);
+    assertHardenedHeaders(preflight, 'CORS preflight');
+
+    const publicApi = await fetch(baseUrl + '/holidays/countries', {
+      headers: { 'X-Request-ID': validRequestId },
+    });
+    if (publicApi.status !== 200) process.exit(24);
+    assertHardenedHeaders(publicApi, 'public API');
+    const publicApiBody = await publicApi.json();
+    if (JSON.stringify(publicApiBody) !== JSON.stringify({
+      countries: [{ countryCode: 'GB', name: 'United Kingdom' }],
+    })) process.exit(25);
+
+    const protectedApi = await fetch(baseUrl +
+      '/api/academic-years?organisationId=10000000-0000-4000-8000-000000000001', {
+      headers: { 'X-Request-ID': validRequestId },
+    });
+    if (protectedApi.status !== 401) process.exit(26);
+    assertHardenedHeaders(protectedApi, 'bearer-protected API');
+    const protectedApiBody = await protectedApi.json();
+    if (protectedApiBody.message !== 'Authentication is required.') process.exit(27);
 
     const firstGenerated = await fetch(baseUrl + '/health');
     const secondGenerated = await fetch(baseUrl + '/health');
@@ -199,12 +265,23 @@ const checkObservabilityScript = `
     if (notFound.status !== 404 || notFound.headers.get('x-request-id') !== validRequestId) {
       process.exit(16);
     }
+    assertHardenedHeaders(notFound, 'not found');
+    const notFoundBody = await notFound.json();
+    if (notFoundBody.message !== 'The requested resource was not found.') process.exit(28);
 
     for (const path of ['/', '/settings']) {
       const response = await fetch(baseUrl + path);
       if (response.status !== 200) process.exit(22);
       if (!(response.headers.get('content-type') || '').includes('text/html')) process.exit(23);
+      assertHardenedHeaders(response, path === '/' ? 'SPA root' : 'SPA fallback');
     }
+
+    const assetName = readdirSync('./dist/assets').find((name) => name.endsWith('.js'));
+    if (!assetName) process.exit(29);
+    const assetPath = '/assets/' + assetName;
+    const staticAsset = await fetch(baseUrl + assetPath);
+    if (staticAsset.status !== 200) process.exit(30);
+    assertHardenedHeaders(staticAsset, 'static asset');
 
     const malformedSecret = 'payload-secret-must-not-be-logged';
     const malformed = await fetch(baseUrl + '/auth/login?token=query-secret', {
@@ -216,6 +293,7 @@ const checkObservabilityScript = `
       body: '{"password":"' + malformedSecret + '"',
     });
     if (malformed.status !== 400) process.exit(7);
+    assertHardenedHeaders(malformed, 'malformed JSON');
     if (malformed.headers.get('x-request-id') !== validRequestId) process.exit(8);
     const malformedBody = await malformed.json();
     if (malformedBody.message !== 'Request body contains invalid JSON.') process.exit(9);
@@ -227,6 +305,7 @@ const checkObservabilityScript = `
       body: JSON.stringify({ value: oversizedSecret.repeat(15000) }),
     });
     if (oversized.status !== 413) process.exit(10);
+    assertHardenedHeaders(oversized, 'oversized JSON');
     if (!isUuid(oversized.headers.get('x-request-id'))) process.exit(11);
     const oversizedBody = await oversized.json();
     if (oversizedBody.message !== 'Request body is too large.') process.exit(12);
