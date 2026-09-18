@@ -19,6 +19,7 @@
     "test:classes": "node --test src/utils/classPersistence.test.js",
     "test:timetable-layout": "node --test src/utils/timetableLayoutPersistence.test.js",
     "test:timetable-sessions": "node --test src/utils/timetableSessionApi.test.js src/utils/timetableSessionState.test.js",
+    "test:backup": "node --test scripts/backup-tooling.test.js",
     "secrets:check": "gitleaks detect --source . --config .gitleaks.toml --baseline-path .gitleaks-baseline.json --redact --verbose",
     "prepare": "simple-git-hooks",
     "build": "vite build",
