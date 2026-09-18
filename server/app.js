@@ -6,6 +6,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { env } from './config/env.js';
 import { corsDelegate } from './config/cors.js';
+import { createProductionCspConfig, reportingEndpoints } from './config/csp.js';
 import { errorHandler, logRouteError, sendError } from './middleware/errorHandler.js';
 import { notFound } from './middleware/notFound.js';
 import { requestId } from './middleware/requestId.js';
@@ -13,20 +14,28 @@ import { registerAccountRoutes } from './routes/account-routes.js';
 import { registerAcademicYearRoutes } from './routes/academic-year-routes.js';
 import { registerClassRoutes } from './routes/class-routes.js';
 import { registerContactRoutes } from './routes/contact-routes.js';
+import { registerCspReportRoutes } from './routes/csp-report-routes.js';
 import { registerHolidayRoutes } from './routes/holiday-routes.js';
 import { registerTimetableLayoutRoutes } from './routes/timetable-layout-routes.js';
 import { registerTimetableSessionRoutes } from './routes/timetable-session-routes.js';
 
 export const app = express();
+const productionCsp = env.nodeEnv === 'production' ? createProductionCspConfig(env) : null;
 
 app.disable('x-powered-by');
 app.set('trust proxy', env.trustProxyHops);
 app.use(requestId);
 app.use(helmet({
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: productionCsp?.contentSecurityPolicy || false,
   strictTransportSecurity: false,
 }));
+if (productionCsp) app.use(reportingEndpoints(productionCsp));
 app.use(cors(corsDelegate));
+
+registerCspReportRoutes({
+  app,
+  applicationOrigin: productionCsp?.applicationOrigin,
+});
 
 app.get('/health', (_req, res) => {
   res.status(200).end();

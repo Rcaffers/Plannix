@@ -124,7 +124,8 @@ test('production route assembly contains no removed authentication handlers and 
 
 const checkObservabilityScript = `
   process.env.FRONTEND_ORIGIN = 'https://frontend.example.test';
-  process.env.NODE_ENV = 'development';
+  process.env.SUPABASE_URL = 'https://project.supabase.test';
+  process.env.NODE_ENV = 'production';
 
   const { readdirSync } = await import('node:fs');
   const nativeFetch = globalThis.fetch;
@@ -165,6 +166,11 @@ const checkObservabilityScript = `
     'x-frame-options': 'SAMEORIGIN',
     'x-permitted-cross-domain-policies': 'none',
   };
+  const expectedCsp = "default-src 'none';script-src 'self';script-src-attr 'none';" +
+    "style-src 'self';style-src-elem 'self';style-src-attr 'unsafe-inline';img-src 'self';" +
+    "font-src 'none';connect-src 'self' https://project.supabase.test;frame-src 'none';" +
+    "object-src 'none';base-uri 'none';form-action 'self';frame-ancestors 'none';" +
+    "worker-src 'none';manifest-src 'none';report-uri /api/csp-report;report-to csp-endpoint";
   function assertHardenedHeaders(response, label) {
     if (!isUuid(response.headers.get('x-request-id'))) {
       throw new Error(label + ' response is missing a valid X-Request-ID');
@@ -179,12 +185,18 @@ const checkObservabilityScript = `
     }
     for (const deferred of [
       'content-security-policy',
-      'content-security-policy-report-only',
       'strict-transport-security',
     ]) {
       if (response.headers.get(deferred) !== null) {
         throw new Error(label + ' response unexpectedly includes ' + deferred);
       }
+    }
+    if (response.headers.get('content-security-policy-report-only') !== expectedCsp) {
+      throw new Error(label + ' response has an unexpected report-only CSP');
+    }
+    if (response.headers.get('reporting-endpoints') !==
+        'csp-endpoint="https://frontend.example.test/api/csp-report"') {
+      throw new Error(label + ' response has an unexpected Reporting-Endpoints header');
     }
   }
 
