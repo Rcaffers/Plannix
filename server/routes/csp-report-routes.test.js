@@ -161,6 +161,60 @@ test('legacy and modern reports are accepted and logged using only safe fields',
   }
 });
 
+test('standards-compliant browser reports accept element-specific directives', async () => {
+  const logs = [];
+  const harness = await createHarness({
+    applicationOrigin: 'https://app.example.test',
+    log: (entry) => logs.push(JSON.parse(entry)),
+  });
+  try {
+    const legacy = await send(harness.baseUrl, JSON.stringify({
+      'csp-report': {
+        'document-uri': 'https://app.example.test/',
+        referrer: '',
+        'violated-directive': 'script-src-elem',
+        'effective-directive': 'script-src-elem',
+        'original-policy': "default-src 'none'; report-uri /api/csp-report",
+        disposition: 'report',
+        'blocked-uri': 'inline',
+        'status-code': 200,
+      },
+    }));
+    assert.equal(legacy.status, 204);
+    assertRequestId(legacy);
+
+    const modern = await send(harness.baseUrl, JSON.stringify([{
+      age: 0,
+      type: 'csp-violation',
+      url: 'https://app.example.test/',
+      user_agent: 'browser fixture',
+      body: {
+        documentURL: 'https://app.example.test/',
+        referrer: '',
+        blockedURL: 'inline',
+        effectiveDirective: 'script-src-elem',
+        originalPolicy: "default-src 'none'; report-to csp-endpoint",
+        disposition: 'report',
+        statusCode: 200,
+      },
+    }]), 'application/reports+json');
+    assert.equal(modern.status, 204);
+    assertRequestId(modern);
+
+    assert.equal(logs.length, 2);
+    for (const entry of logs) {
+      assert.equal(entry.effectiveDirective, 'script-src-elem');
+      assert.equal(entry.disposition, 'report');
+      assert.equal(entry.statusCode, 200);
+      assert.equal(entry.blockedResourceCategory, 'inline');
+      assert.equal(Object.hasOwn(entry, 'documentURL'), false);
+      assert.equal(Object.hasOwn(entry, 'originalPolicy'), false);
+    }
+  } finally {
+    await harness.close();
+  }
+});
+
 test('blocked resources are reduced to the seven safe categories', () => {
   const origin = 'https://app.example.test';
   assert.deepEqual([

@@ -14,6 +14,7 @@ const EFFECTIVE_DIRECTIVES = new Set([
   'object-src',
   'script-src',
   'script-src-attr',
+  'script-src-elem',
   'style-src',
   'style-src-attr',
   'style-src-elem',
