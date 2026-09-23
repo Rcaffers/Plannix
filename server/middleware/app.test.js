@@ -183,16 +183,14 @@ const checkObservabilityScript = `
         throw new Error(label + ' response has an unexpected ' + name + ' header');
       }
     }
-    for (const deferred of [
-      'content-security-policy',
-      'strict-transport-security',
-    ]) {
-      if (response.headers.get(deferred) !== null) {
-        throw new Error(label + ' response unexpectedly includes ' + deferred);
-      }
+    if (response.headers.get('strict-transport-security') !== null) {
+      throw new Error(label + ' response unexpectedly includes strict-transport-security');
     }
-    if (response.headers.get('content-security-policy-report-only') !== expectedCsp) {
-      throw new Error(label + ' response has an unexpected report-only CSP');
+    if (response.headers.get('content-security-policy') !== expectedCsp) {
+      throw new Error(label + ' response has an unexpected enforced CSP');
+    }
+    if (response.headers.get('content-security-policy-report-only') !== null) {
+      throw new Error(label + ' response unexpectedly includes report-only CSP');
     }
     if (response.headers.get('reporting-endpoints') !==
         'csp-endpoint="https://frontend.example.test/api/csp-report"') {

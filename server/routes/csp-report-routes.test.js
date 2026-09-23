@@ -68,13 +68,13 @@ function assertRequestId(response) {
   assert.equal(response.headers.get('x-request-id'), requestIdValue);
 }
 
-test('production CSP configuration is exact, report-only, and uses exact HTTPS origins', () => {
+test('production CSP configuration is exact, enforced, and uses exact HTTPS origins', () => {
   const config = createProductionCspConfig({
     supabaseUrl: 'https://project.supabase.test/rest/v1',
     frontendOrigins: ['https://app.example.test'],
   });
   assert.deepEqual(config.contentSecurityPolicy, {
-    reportOnly: true,
+    reportOnly: false,
     useDefaults: false,
     directives: {
       defaultSrc: ["'none'"], scriptSrc: ["'self'"], scriptSrcAttr: ["'none'"],

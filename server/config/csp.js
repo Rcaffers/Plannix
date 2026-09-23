@@ -30,7 +30,7 @@ export function createProductionCspConfig(config) {
     applicationOrigin,
     reportingEndpoints: `csp-endpoint="${applicationOrigin}${REPORT_PATH}"`,
     contentSecurityPolicy: Object.freeze({
-      reportOnly: true,
+      reportOnly: false,
       useDefaults: false,
       directives: Object.freeze({
         defaultSrc: ["'none'"],
