@@ -183,8 +183,8 @@ const checkObservabilityScript = `
         throw new Error(label + ' response has an unexpected ' + name + ' header');
       }
     }
-    if (response.headers.get('strict-transport-security') !== null) {
-      throw new Error(label + ' response unexpectedly includes strict-transport-security');
+    if (response.headers.get('strict-transport-security') !== 'max-age=86400') {
+      throw new Error(label + ' response has an unexpected strict-transport-security header');
     }
     if (response.headers.get('content-security-policy') !== expectedCsp) {
       throw new Error(label + ' response has an unexpected enforced CSP');

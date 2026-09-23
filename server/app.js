@@ -27,7 +27,11 @@ app.set('trust proxy', env.trustProxyHops);
 app.use(requestId);
 app.use(helmet({
   contentSecurityPolicy: productionCsp?.contentSecurityPolicy || false,
-  strictTransportSecurity: false,
+  strictTransportSecurity: {
+    maxAge: 86_400,
+    includeSubDomains: false,
+    preload: false,
+  },
 }));
 if (productionCsp) app.use(reportingEndpoints(productionCsp));
 app.use(cors(corsDelegate));
