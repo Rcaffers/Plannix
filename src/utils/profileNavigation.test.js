@@ -19,6 +19,21 @@ test('account deletion moved to personal profile and is absent from planner sett
   assert.doesNotMatch(settings, /Delete account|DeleteAccountSection|createAccountDeletionController/);
 });
 
+test('personal profile provides editable name, confirmed email and password controls', async () => {
+  const [profile, app] = await Promise.all([
+    fs.readFile(new URL('../pages/Profile.jsx', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../App.jsx', import.meta.url), 'utf8'),
+  ]);
+  assert.match(profile, /handleNameSubmit/);
+  assert.match(profile, /handleEmailSubmit/);
+  assert.match(profile, /handlePasswordSubmit/);
+  assert.match(profile, /autoComplete="current-password"/);
+  assert.match(profile, /autoComplete="new-password"/);
+  assert.match(app, /updateProfileName=\{handleProfileNameUpdate\}/);
+  assert.match(app, /updateEmail=\{handleEmailUpdate\}/);
+  assert.match(app, /updatePassword=\{\(details\) => authController\.updatePassword\(details\)\}/);
+});
+
 test('navigation shows organisation controls conditionally while preserving planner settings', async () => {
   const header = await fs.readFile(new URL('../components/Header.jsx', import.meta.url), 'utf8');
   assert.match(header, /administeredOrganisations\(memberships\)/);

@@ -22,6 +22,9 @@ function mockAuth(overrides = {}) {
     async getValidatedCurrentUser() { calls.push('validate'); return { id: 'user-1', email: 'ada@example.test' }; },
     async loadProfile() { calls.push('profile'); return profile; },
     async ensurePersonalOrganisation() { calls.push('onboard'); return { organisationId }; },
+    async updateProfileName() { calls.push('update-name'); return { id: 'user-1', name: 'Grace Hopper', email: 'ada@example.test', firstName: 'Grace', lastName: 'Hopper', initials: 'GH' }; },
+    async updateEmail() { calls.push('update-email'); return { email: 'new@example.test', confirmationPending: false }; },
+    async updatePassword() { calls.push('update-password'); },
     subscribeToAuthChanges(next) { calls.push('subscribe'); callback = next; return () => calls.push('unsubscribe'); },
     async logout() { calls.push('logout'); },
     async logoutLocal() { calls.push('logout-local'); },
@@ -117,6 +120,36 @@ test('account deletion exposes the current session and clears only the local Aut
   assert.equal(await controller.getCurrentSession(), session);
   await controller.clearAfterAccountDeletion();
   assert.deepEqual(mock.calls, ['session', 'logout-local']);
+});
+
+test('profile changes update the cached user while password changes require an established session', async () => {
+  const mock = mockAuth();
+  const controller = createSupabaseAuthController({ auth: mock.auth });
+  await assert.rejects(() => controller.updateProfileName({}), /finish setting up/i);
+  await controller.login({});
+  const named = await controller.updateProfileName({ firstName: 'Grace', lastName: 'Hopper' });
+  assert.equal(named.name, 'Grace Hopper');
+  assert.equal(named.organisationId, organisationId);
+  const emailed = await controller.updateEmail('new@example.test');
+  assert.equal(emailed.user.email, 'new@example.test');
+  await controller.updatePassword({ currentPassword: 'old-password', newPassword: 'new-password' });
+  assert.equal(mock.calls.includes('update-name'), true);
+  assert.equal(mock.calls.includes('update-email'), true);
+  assert.equal(mock.calls.includes('update-password'), true);
+});
+
+test('profile change failures expose safe operation-specific messages', async () => {
+  const mock = mockAuth({
+    async updatePassword() {
+      throw Object.assign(new Error('internal auth detail'), { code: 'invalid_credentials' });
+    },
+  });
+  const controller = createSupabaseAuthController({ auth: mock.auth });
+  await controller.login({});
+  await assert.rejects(
+    () => controller.updatePassword({}),
+    (error) => error instanceof PublicAuthError && error.message === 'Your current password is incorrect.',
+  );
 });
 
 test('logout and account deletion discard the cached user and organisation selector', async () => {

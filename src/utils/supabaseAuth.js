@@ -105,6 +105,17 @@ export function createSupabaseAuthAdapter({
     return mapSupabaseUser(authUser, await loadProfile(authUser));
   }
 
+  async function updateProfileRow(userId, values) {
+    const { data, error } = await client
+      .from('plannix_users')
+      .update(values)
+      .eq('id', userId)
+      .select(PROFILE_COLUMNS)
+      .single();
+    if (error || !data) throw authError(error, 'Unable to update your Plannix profile.');
+    return data;
+  }
+
   return {
     async signup({ firstName, lastName, email, password }) {
       const normalizedFirstName = clean(firstName);
@@ -233,6 +244,52 @@ export function createSupabaseAuthAdapter({
       const result = await client.auth.updateUser({ password: preservedPassword });
       if (result.error) throw authError(result.error, 'Unable to update your password.');
       return mapSupabaseUser(result.data?.user);
+    },
+
+    async updateProfileName({ user, firstName, lastName }) {
+      const normalizedFirstName = clean(firstName);
+      const normalizedLastName = clean(lastName);
+      if (!user?.id || !normalizedFirstName || !normalizedLastName) {
+        throw new SupabaseAuthError('First name and last name are required.');
+      }
+      const initials = `${normalizedFirstName.charAt(0)}${normalizedLastName.charAt(0)}`.toUpperCase();
+      const profile = await updateProfileRow(user.id, {
+        first_name: normalizedFirstName,
+        last_name: normalizedLastName,
+        initials,
+      });
+      return mapSupabaseUser({ id: user.id, email: user.email, user_metadata: {} }, profile);
+    },
+
+    async updateEmail(email) {
+      const normalizedEmail = normalizeAuthEmail(email);
+      if (!normalizedEmail) throw new SupabaseAuthError('Email is required.');
+      const { data, error } = await client.auth.updateUser(
+        { email: normalizedEmail },
+        { emailRedirectTo: applicationUrl('/profile', location) },
+      );
+      if (error) throw authError(error, 'Unable to update your email.');
+      const currentEmail = normalizeAuthEmail(data?.user?.email);
+      return {
+        email: currentEmail || normalizedEmail,
+        confirmationPending: currentEmail !== normalizedEmail,
+      };
+    },
+
+    async updatePassword({ email, currentPassword, newPassword }) {
+      const normalizedEmail = normalizeAuthEmail(email);
+      const preservedCurrentPassword = String(currentPassword || '');
+      const preservedNewPassword = String(newPassword || '');
+      if (!normalizedEmail || !preservedCurrentPassword || !preservedNewPassword) {
+        throw new SupabaseAuthError('Current password and new password are required.');
+      }
+      const verification = await client.auth.signInWithPassword({
+        email: normalizedEmail,
+        password: preservedCurrentPassword,
+      });
+      if (verification.error) throw authError(verification.error, 'Unable to verify your current password.');
+      const result = await client.auth.updateUser({ password: preservedNewPassword });
+      if (result.error) throw authError(result.error, 'Unable to update your password.');
     },
 
     loadProfile,

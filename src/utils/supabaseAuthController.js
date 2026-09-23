@@ -22,6 +22,12 @@ function publicMessage(error, operation) {
     return 'Unable to log in with those details.';
   }
   if (operation === 'signup') return 'Unable to create your account. Please try again.';
+  if (operation === 'name') return 'We could not update your name. Please try again.';
+  if (operation === 'email') return 'We could not update your email. Please try again.';
+  if (operation === 'password') {
+    if (code === 'invalid_credentials') return 'Your current password is incorrect.';
+    return 'We could not update your password. Please try again.';
+  }
   return SETUP_ERROR;
 }
 
@@ -163,6 +169,41 @@ export function createSupabaseAuthController({
 
     getCurrentSession() {
       return auth.getCurrentSession();
+    },
+
+    async updateProfileName(input) {
+      if (!ready?.user) throw new PublicAuthError(SETUP_ERROR);
+      try {
+        const updated = await auth.updateProfileName({ user: ready.user, ...input });
+        const user = { ...ready.user, ...updated, organisationId: ready.user.organisationId };
+        ready = { ...ready, user };
+        return user;
+      } catch (error) {
+        throw new PublicAuthError(publicMessage(error, 'name'));
+      }
+    },
+
+    async updateEmail(email) {
+      if (!ready?.user) throw new PublicAuthError(SETUP_ERROR);
+      try {
+        const result = await auth.updateEmail(email);
+        const user = result.confirmationPending
+          ? ready.user
+          : { ...ready.user, email: result.email };
+        ready = { ...ready, user };
+        return { ...result, user };
+      } catch (error) {
+        throw new PublicAuthError(publicMessage(error, 'email'));
+      }
+    },
+
+    async updatePassword(input) {
+      if (!ready?.user) throw new PublicAuthError(SETUP_ERROR);
+      try {
+        await auth.updatePassword({ email: ready.user.email, ...input });
+      } catch (error) {
+        throw new PublicAuthError(publicMessage(error, 'password'));
+      }
     },
 
     async clearAfterAccountDeletion() {

@@ -109,6 +109,7 @@
 .settings-field input[type='number'],
 .settings-field input[type='time'],
 .settings-field input[type='text'],
+.settings-field input[type='email'],
 .settings-field input[type='password'],
 .settings-field input[type='date'] {
   max-width: 220px;
@@ -150,6 +151,7 @@
 .settings-field--inline input[type='time'],
 .settings-field--inline input[type='number'],
 .settings-field--inline input[type='text'],
+.settings-field--inline input[type='email'],
 .settings-field--inline input[type='password'],
 .settings-field--inline input[type='date'] {
   max-width: 100%;

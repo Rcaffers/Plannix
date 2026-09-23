@@ -109,6 +109,18 @@ export default function App() {
     setUser(null);
   };
 
+  const handleProfileNameUpdate = async (details) => {
+    const updatedUser = await authController.updateProfileName(details);
+    setUser(updatedUser);
+    return updatedUser;
+  };
+
+  const handleEmailUpdate = async (email) => {
+    const result = await authController.updateEmail(email);
+    setUser(result.user);
+    return result;
+  };
+
   const privateRoute = (element) => {
     const state = privateRouteState({ isAuthLoading, user });
     if (state === 'loading') {
@@ -181,6 +193,9 @@ export default function App() {
                   memberships={memberships}
                   membershipsLoading={membershipsLoading}
                   membershipsError={membershipsError}
+                  updateProfileName={handleProfileNameUpdate}
+                  updateEmail={handleEmailUpdate}
+                  updatePassword={(details) => authController.updatePassword(details)}
                   clearAuthenticatedUser={clearAuthenticatedUser}
                   getAccountDeletionSession={() => authController.getCurrentSession()}
                   signOutAfterAccountDeletion={() => authController.clearAfterAccountDeletion()}

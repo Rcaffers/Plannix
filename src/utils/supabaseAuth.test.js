@@ -16,9 +16,11 @@ function createMockClient({ profile = null } = {}) {
   let authCallback;
   const unsubscribe = () => { calls.unsubscribed = true; };
   const profileBuilder = {
+    update(values) { calls.profileUpdate = values; return this; },
     select(columns) { calls.profileColumns = columns; return this; },
     eq(column, value) { calls.profileMatch = [column, value]; return this; },
     async maybeSingle() { return { data: profile, error: null }; },
+    async single() { return calls.profileUpdateResult || { data: profile, error: null }; },
   };
   const client = {
     auth: {
@@ -39,7 +41,11 @@ function createMockClient({ profile = null } = {}) {
         calls.recovery = { email, options };
         return calls.recoveryResult || { error: null };
       },
-      async updateUser(input) { calls.updateUser = input; return calls.updateResult; },
+      async updateUser(input, options) {
+        calls.updateUser = input;
+        calls.updateUserOptions = options;
+        return calls.updateResult;
+      },
     },
     async rpc(name) { calls.rpc = name; return calls.rpcResult || { data: [], error: null }; },
     from(table) { calls.profileTable = table; return profileBuilder; },
@@ -212,6 +218,48 @@ test('logout and recovery email use Supabase Auth with the expected redirect', a
     email: 'recover@example.test',
     options: { redirectTo: 'https://app.plannix.test/reset-password' },
   });
+});
+
+test('profile name updates only the signed-in profile fields and recalculates initials', async () => {
+  const mock = createMockClient();
+  mock.calls.profileUpdateResult = {
+    data: { id: 'user-1', first_name: 'Grace', last_name: 'Hopper', initials: 'GH' },
+    error: null,
+  };
+  const result = await createSupabaseAuthAdapter({ client: mock.client, location }).updateProfileName({
+    user: { id: 'user-1', email: 'grace@example.test' },
+    firstName: ' Grace ',
+    lastName: ' Hopper ',
+  });
+  assert.equal(mock.calls.profileTable, 'plannix_users');
+  assert.deepEqual(mock.calls.profileUpdate, { first_name: 'Grace', last_name: 'Hopper', initials: 'GH' });
+  assert.deepEqual(mock.calls.profileMatch, ['id', 'user-1']);
+  assert.equal(result.name, 'Grace Hopper');
+});
+
+test('email change uses Supabase confirmation redirect and reports pending confirmation', async () => {
+  const mock = createMockClient();
+  mock.calls.updateResult = {
+    data: { user: { email: 'current@example.test' } },
+    error: null,
+  };
+  const result = await createSupabaseAuthAdapter({ client: mock.client, location }).updateEmail(' NEW @Example.Test ');
+  assert.deepEqual(mock.calls.updateUser, { email: 'new@example.test' });
+  assert.deepEqual(mock.calls.updateUserOptions, { emailRedirectTo: 'https://app.plannix.test/profile' });
+  assert.deepEqual(result, { email: 'current@example.test', confirmationPending: true });
+});
+
+test('password change verifies the current password before saving the new password', async () => {
+  const mock = createMockClient();
+  mock.calls.loginResult = { data: { session: { access_token: 'fresh' } }, error: null };
+  mock.calls.updateResult = { data: { user: { id: 'user-1' } }, error: null };
+  await createSupabaseAuthAdapter({ client: mock.client, location }).updatePassword({
+    email: ' USER @Example.Test ',
+    currentPassword: ' current password ',
+    newPassword: ' new password ',
+  });
+  assert.deepEqual(mock.calls.login, { email: 'user@example.test', password: ' current password ' });
+  assert.deepEqual(mock.calls.updateUser, { password: ' new password ' });
 });
 
 test('account deletion cleanup removes only the local Supabase session', async () => {
