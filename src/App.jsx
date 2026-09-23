@@ -12,6 +12,8 @@ import Features from './pages/Features';
 import Contact from './pages/Contact';
 import ResetPassword from './pages/ResetPassword';
 import Settings from './pages/Settings';
+import Profile from './pages/Profile';
+import OrganisationControls from './pages/OrganisationControls';
 import AcademicYear from './pages/AcademicYear';
 import Classes from './pages/Classes';
 import Timetable from './pages/Timetable';
@@ -25,6 +27,7 @@ import { TimetableLayoutProvider } from './context/TimetableLayoutContext';
 import { AcademicYearProvider } from './context/AcademicYearContext';
 import { ClassProvider } from './context/ClassContext';
 import { TimetableSessionProvider } from './context/TimetableSessionContext';
+import { loadOrganisationMemberships } from './utils/organisationMemberships';
 
 const authController = createSupabaseAuthController();
 
@@ -32,6 +35,9 @@ export default function App() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [memberships, setMemberships] = useState([]);
+  const [membershipsLoading, setMembershipsLoading] = useState(false);
+  const [membershipsError, setMembershipsError] = useState('');
   useEffect(() => {
     let isMounted = true;
 
@@ -50,6 +56,34 @@ export default function App() {
       cleanup();
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (!user?.id) {
+      setMemberships([]);
+      setMembershipsLoading(false);
+      setMembershipsError('');
+      return () => { active = false; };
+    }
+
+    setMembershipsLoading(true);
+    setMembershipsError('');
+    loadOrganisationMemberships({ userId: user.id }).then(
+      (nextMemberships) => {
+        if (!active) return;
+        setMemberships(nextMemberships);
+        setMembershipsLoading(false);
+      },
+      () => {
+        if (!active) return;
+        setMemberships([]);
+        setMembershipsError('We could not load your organisation memberships. Please refresh and try again.');
+        setMembershipsLoading(false);
+      },
+    );
+
+    return () => { active = false; };
+  }, [user?.id]);
 
   const handleLogin = async ({ email, password }) => {
     const loggedInUser = await authController.login({ email, password });
@@ -107,6 +141,7 @@ export default function App() {
           <ScrollToTop />
           <Header
             user={user}
+            memberships={memberships}
             isAuthLoading={isAuthLoading}
             onLogin={handleLogin}
             onLogout={handleLogout}
@@ -136,11 +171,29 @@ export default function App() {
             <Route path="/privacy" element={<PrivacyGate />} />
             <Route
               path="/settings"
+              element={privateRoute(<Settings />)}
+            />
+            <Route
+              path="/profile"
               element={privateRoute(
-                <Settings
+                <Profile
+                  user={user}
+                  memberships={memberships}
+                  membershipsLoading={membershipsLoading}
+                  membershipsError={membershipsError}
                   clearAuthenticatedUser={clearAuthenticatedUser}
                   getAccountDeletionSession={() => authController.getCurrentSession()}
                   signOutAfterAccountDeletion={() => authController.clearAfterAccountDeletion()}
+                />,
+              )}
+            />
+            <Route
+              path="/organisation-controls"
+              element={privateRoute(
+                <OrganisationControls
+                  memberships={memberships}
+                  membershipsLoading={membershipsLoading}
+                  membershipsError={membershipsError}
                 />,
               )}
             />

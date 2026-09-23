@@ -12,10 +12,12 @@ import { supabaseRecovery } from '../utils/supabaseRecovery';
 import { headerNavLinks } from '../utils/headerNav';
 import { SETTINGS_SUBNAV_ITEMS } from './SettingsSubnav';
 import { PLANNIX_OPEN_LOGIN_EVENT, PLANNIX_OPEN_SIGNUP_EVENT } from '../utils/plannixEvents';
+import { administeredOrganisations } from '../utils/organisationMemberships';
 import './Header.css';
 
 export default function Header({
   user,
+  memberships = [],
   isAuthLoading,
   onLogin,
   onLogout,
@@ -41,6 +43,7 @@ export default function Header({
   const [isForgotSubmitting, setIsForgotSubmitting] = useState(false);
   const userMenuRef = useRef(null);
   const mobileNavRef = useRef(null);
+  const hasOrganisationControls = administeredOrganisations(memberships).length > 0;
 
   const navLinks = user
     ? [
@@ -347,10 +350,28 @@ export default function Header({
                     <Link
                       className="nav-user-dropdown-item"
                       role="menuitem"
+                      to="/profile"
+                      onClick={() => setIsUserMenuOpen(false)}
+                    >
+                      Personal profile
+                    </Link>
+                    {hasOrganisationControls ? (
+                      <Link
+                        className="nav-user-dropdown-item"
+                        role="menuitem"
+                        to="/organisation-controls"
+                        onClick={() => setIsUserMenuOpen(false)}
+                      >
+                        Organisation controls
+                      </Link>
+                    ) : null}
+                    <Link
+                      className="nav-user-dropdown-item"
+                      role="menuitem"
                       to="/settings"
                       onClick={() => setIsUserMenuOpen(false)}
                     >
-                      Settings
+                      Planner settings
                     </Link>
                     <button
                       type="button"
@@ -434,6 +455,22 @@ export default function Header({
             {user ? (
               <div className="mobile-nav-account">
                 <p className="mobile-nav-account-label">{user.name || user.email || 'Account'}</p>
+                <NavLink
+                  to="/profile"
+                  className={({ isActive }) => `mobile-nav-link${isActive ? ' mobile-nav-link--active' : ''}`}
+                  onClick={closeMobileNav}
+                >
+                  Personal profile
+                </NavLink>
+                {hasOrganisationControls ? (
+                  <NavLink
+                    to="/organisation-controls"
+                    className={({ isActive }) => `mobile-nav-link${isActive ? ' mobile-nav-link--active' : ''}`}
+                    onClick={closeMobileNav}
+                  >
+                    Organisation controls
+                  </NavLink>
+                ) : null}
                 <div className="mobile-nav-settings-block">
                   <button
                     type="button"
@@ -443,7 +480,7 @@ export default function Header({
                     id="mobile-nav-settings-toggle"
                     onClick={() => setMobileSettingsExpanded((open) => !open)}
                   >
-                    <span>Settings</span>
+                    <span>Planner settings</span>
                     <span className="mobile-nav-settings-chevron" aria-hidden />
                   </button>
                   {mobileSettingsExpanded ? (

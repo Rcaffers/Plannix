@@ -195,8 +195,8 @@ test('safe errors retain a valid reference without exposing passwords or tokens'
   assert.equal(captured.join('\n').includes(secretToken), false);
 });
 
-test('Settings implements accessible staged confirmation and clears password state', () => {
-  const source = fs.readFileSync(new URL('../pages/Settings.jsx', import.meta.url), 'utf8');
+test('Personal profile deletion implements accessible staged confirmation and clears password state', () => {
+  const source = fs.readFileSync(new URL('../components/DeleteAccountSection.jsx', import.meta.url), 'utf8');
   assert.match(source, /role="dialog"/);
   assert.match(source, /aria-modal="true"/);
   assert.match(source, /type="password"/);
