@@ -49,6 +49,34 @@
   gap: 16px;
 }
 
+.profile-detail-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.profile-detail-value {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.profile-detail-row .settings-reset {
+  flex-shrink: 0;
+}
+
+.profile-card button:focus-visible {
+  outline: 3px solid #244b47;
+  outline-offset: 3px;
+}
+
+.profile-password-form {
+  width: 100%;
+  max-width: 440px;
+}
+
 .profile-field-grid {
   display: grid;
   gap: 14px;

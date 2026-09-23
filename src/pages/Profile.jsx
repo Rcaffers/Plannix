@@ -23,6 +23,8 @@ export default function Profile({
   signOutAfterAccountDeletion,
 }) {
   const schools = schoolMemberships(memberships);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [firstName, setFirstName] = useState(user.firstName || '');
   const [lastName, setLastName] = useState(user.lastName || '');
   const [email, setEmail] = useState(user.email || '');
@@ -36,14 +38,34 @@ export default function Profile({
   useEffect(() => {
     setFirstName(user.firstName || '');
     setLastName(user.lastName || '');
+  }, [user.firstName, user.lastName]);
+
+  useEffect(() => {
     setEmail(user.email || '');
-  }, [user.firstName, user.lastName, user.email]);
+  }, [user.email]);
+
+  const emailUnchanged = email.trim().toLowerCase() === (user.email || '').trim().toLowerCase();
+
+  function cancelNameEdit() {
+    setFirstName(user.firstName || '');
+    setLastName(user.lastName || '');
+    setNameStatus({ state: 'idle', message: '' });
+    setIsEditingName(false);
+  }
+
+  function cancelEmailEdit() {
+    setEmail(user.email || '');
+    setEmailStatus({ state: 'idle', message: '' });
+    setIsEditingEmail(false);
+  }
 
   async function handleNameSubmit(event) {
     event.preventDefault();
+    if (nameStatus.state === 'saving') return;
     setNameStatus({ state: 'saving', message: '' });
     try {
       await updateProfileName({ firstName, lastName });
+      setIsEditingName(false);
       setNameStatus({ state: 'success', message: 'Your name has been updated.' });
     } catch (error) {
       setNameStatus({ state: 'error', message: error.message });
@@ -52,9 +74,11 @@ export default function Profile({
 
   async function handleEmailSubmit(event) {
     event.preventDefault();
+    if (emailStatus.state === 'saving' || emailUnchanged) return;
     setEmailStatus({ state: 'saving', message: '' });
     try {
       const result = await updateEmail(email);
+      setIsEditingEmail(false);
       setEmailStatus({
         state: 'success',
         message: result.confirmationPending
@@ -112,24 +136,32 @@ export default function Profile({
             <p className="profile-kicker">Account</p>
             <h2 id="personal-details-title" className="settings-section-title">Personal details</h2>
           </div>
-          <form className="profile-form" onSubmit={handleNameSubmit}>
-            <div className="profile-field-grid">
-              <label className="settings-field">
-                <span>First name</span>
-                <input type="text" value={firstName} onChange={(event) => setFirstName(event.target.value)} maxLength={100} required />
-              </label>
-              <label className="settings-field">
-                <span>Last name</span>
-                <input type="text" value={lastName} onChange={(event) => setLastName(event.target.value)} maxLength={100} required />
-              </label>
+          {isEditingName ? (
+            <form className="profile-form" onSubmit={handleNameSubmit}>
+              <div className="profile-field-grid">
+                <label className="settings-field">
+                  <span>First name</span>
+                  <input type="text" value={firstName} onChange={(event) => setFirstName(event.target.value)} maxLength={100} required />
+                </label>
+                <label className="settings-field">
+                  <span>Last name</span>
+                  <input type="text" value={lastName} onChange={(event) => setLastName(event.target.value)} maxLength={100} required />
+                </label>
+              </div>
+              <div className="settings-actions">
+                <button className="settings-save" type="submit" disabled={nameStatus.state === 'saving'}>
+                  {nameStatus.state === 'saving' ? 'Saving…' : 'Save name'}
+                </button>
+                <button className="settings-reset" type="button" onClick={cancelNameEdit} disabled={nameStatus.state === 'saving'}>Cancel</button>
+              </div>
+            </form>
+          ) : (
+            <div className="profile-detail-row">
+              <p className="profile-detail-value">{[user.firstName, user.lastName].filter(Boolean).join(' ') || 'No name set'}</p>
+              <button className="settings-reset" type="button" onClick={() => { cancelNameEdit(); setIsEditingName(true); }}>Edit name</button>
             </div>
-            <div className="settings-actions">
-              <button className="settings-save" type="submit" disabled={nameStatus.state === 'saving'}>
-                {nameStatus.state === 'saving' ? 'Saving…' : 'Save name'}
-              </button>
-            </div>
-            {formMessage(nameStatus)}
-          </form>
+          )}
+          {formMessage(nameStatus)}
         </section>
 
         <section className="profile-card" aria-labelledby="email-title">
@@ -138,18 +170,26 @@ export default function Profile({
             <h2 id="email-title" className="settings-section-title">Email address</h2>
             <p className="settings-hint">We will ask you to confirm a new address before it replaces {user.email}.</p>
           </div>
-          <form className="profile-form" onSubmit={handleEmailSubmit}>
-            <label className="settings-field profile-field--wide">
-              <span>Email</span>
-              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" maxLength={254} required />
-            </label>
-            <div className="settings-actions">
-              <button className="settings-save" type="submit" disabled={emailStatus.state === 'saving' || email.trim().toLowerCase() === user.email}>
-                {emailStatus.state === 'saving' ? 'Sending…' : 'Change email'}
-              </button>
+          {isEditingEmail ? (
+            <form className="profile-form" onSubmit={handleEmailSubmit}>
+              <label className="settings-field profile-field--wide">
+                <span>Email</span>
+                <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" maxLength={254} required />
+              </label>
+              <div className="settings-actions">
+                <button className="settings-save" type="submit" disabled={emailStatus.state === 'saving' || emailUnchanged}>
+                  {emailStatus.state === 'saving' ? 'Sending…' : 'Change email'}
+                </button>
+                <button className="settings-reset" type="button" onClick={cancelEmailEdit} disabled={emailStatus.state === 'saving'}>Cancel</button>
+              </div>
+            </form>
+          ) : (
+            <div className="profile-detail-row">
+              <p className="profile-detail-value">{user.email}</p>
+              <button className="settings-reset" type="button" onClick={() => { cancelEmailEdit(); setIsEditingEmail(true); }}>Edit email</button>
             </div>
-            {formMessage(emailStatus)}
-          </form>
+          )}
+          {formMessage(emailStatus)}
         </section>
 
         <section className="profile-card" aria-labelledby="password-title">
@@ -158,21 +198,19 @@ export default function Profile({
             <h2 id="password-title" className="settings-section-title">Change password</h2>
             <p className="settings-hint">Enter your current password before choosing a new one.</p>
           </div>
-          <form className="profile-form" onSubmit={handlePasswordSubmit}>
+          <form className="profile-form profile-password-form" onSubmit={handlePasswordSubmit}>
             <label className="settings-field profile-field--wide">
               <span>Current password</span>
               <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" maxLength={MAX_PASSWORD_LENGTH} required />
             </label>
-            <div className="profile-field-grid">
-              <label className="settings-field">
-                <span>New password</span>
-                <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={MAX_PASSWORD_LENGTH} required />
-              </label>
-              <label className="settings-field">
-                <span>Confirm new password</span>
-                <input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={MAX_PASSWORD_LENGTH} required />
-              </label>
-            </div>
+            <label className="settings-field">
+              <span>New password</span>
+              <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={MAX_PASSWORD_LENGTH} required />
+            </label>
+            <label className="settings-field">
+              <span>Confirm new password</span>
+              <input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={MAX_PASSWORD_LENGTH} required />
+            </label>
             <div className="settings-actions">
               <button className="settings-save" type="submit" disabled={passwordStatus.state === 'saving'}>
                 {passwordStatus.state === 'saving' ? 'Saving…' : 'Change password'}
