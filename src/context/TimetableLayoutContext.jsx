@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { safeRequestReference } from '../utils/requestReference';
 import { buildDayColumnLabels, buildRowSegments, normalizeLayout } from '../utils/timetableLayout';
 import { createDefaultLayoutDraft, editableLayout, layoutDraftEqual, safeLayoutError } from '../utils/timetableLayoutPersistence';
 import { fetchTimetableLayout, saveTimetableLayout } from '../utils/api';
@@ -36,14 +37,14 @@ export function TimetableLayoutProvider({ children, user }) {
   const clearUserLayout = useCallback(() => {
     generation.current += 1; saving.current = false;
     setAuthoritativeLayout(null); setDraftState(createDefaultLayoutDraft()); setIsPersisted(false);
-    setIsLoading(false); setIsSaving(false); setError(''); setSuccess(''); setRequestReference('');
+    setIsLoading(false); setIsSaving(false); setError(''); setRequestReference(''); setSuccess('');
   }, []);
 
   const load = useCallback(async ({ confirmDirty = false } = {}) => {
     if (!user?.id || !organisationId || !selectedAcademicYearId) return false;
     if (confirmDirty && !confirmDiscard('Discard unsaved timetable layout changes and reload?')) return false;
     const expectedGeneration = ++generation.current;
-    setIsLoading(true); setError(''); setSuccess('');
+    setIsLoading(true); setError(''); setRequestReference(''); setSuccess('');
     try {
       const result = await fetchTimetableLayout(organisationId, selectedAcademicYearId);
       if (expectedGeneration !== generation.current) return false;
@@ -52,12 +53,12 @@ export function TimetableLayoutProvider({ children, user }) {
       } else {
         setAuthoritativeLayout(result.layout); setDraftState(editableLayout(result.layout)); setIsPersisted(true);
       }
-      setRequestReference(result.requestId || '');
+      setRequestReference('');
       return true;
     } catch (loadError) {
       if (expectedGeneration === generation.current) {
         setError(safeLayoutError(loadError, 'Could not load timetable layout.'));
-        setRequestReference(loadError.requestId || '');
+        setRequestReference(safeRequestReference(loadError));
       }
       return false;
     } finally { if (expectedGeneration === generation.current) setIsLoading(false); }
@@ -71,25 +72,25 @@ export function TimetableLayoutProvider({ children, user }) {
   }, [user?.id, organisationId, selectedAcademicYearId, clearUserLayout]);
 
   const setDraft = useCallback((next) => {
-    setSuccess(''); setError('');
+    setSuccess(''); setError(''); setRequestReference('');
     setDraftState((current) => editableLayout(typeof next === 'function' ? next(current) : { ...current, ...next }));
   }, []);
   const resetLayout = useCallback(() => setDraft(createDefaultLayoutDraft()), [setDraft]);
 
   const save = useCallback(async () => {
     if (saving.current || isLoading || !user?.id || !organisationId || !selectedAcademicYearId) return null;
-    saving.current = true; setIsSaving(true); setError(''); setSuccess('');
+    saving.current = true; setIsSaving(true); setError(''); setRequestReference(''); setSuccess('');
     const expectedGeneration = generation.current;
     try {
       const result = await saveTimetableLayout(organisationId, selectedAcademicYearId,
         authoritativeLayout?.timetableId || null, authoritativeLayout?.revision || 0, draft);
       if (expectedGeneration !== generation.current) return null;
       setAuthoritativeLayout(result.layout); setDraftState(editableLayout(result.layout)); setIsPersisted(true);
-      setRequestReference(result.requestId || ''); setSuccess('Timetable layout saved.');
+      setRequestReference(''); setSuccess('Timetable layout saved.');
       return result.layout;
     } catch (saveError) {
       if (expectedGeneration === generation.current) {
-        setError(safeLayoutError(saveError)); setRequestReference(saveError.requestId || '');
+        setError(safeLayoutError(saveError)); setRequestReference(safeRequestReference(saveError));
       }
       return null;
     } finally { saving.current = false; if (expectedGeneration === generation.current) setIsSaving(false); }

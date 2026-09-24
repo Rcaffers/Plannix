@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { safeRequestReference } from '../utils/requestReference';
 import { DEFAULT_ACADEMIC_YEAR, normalizeAcademicYear, selectCurrentAcademicYear } from '../utils/academicYear';
 import { fetchAcademicYears, fetchAcademicYearPlan, saveAcademicYearPlan } from '../utils/api';
 
@@ -42,18 +43,19 @@ export function AcademicYearProvider({ children, user }) {
     if (!organisationId || !yearId) return null;
     setIsLoading(true);
     setError('');
+    setRequestReference('');
     try {
       const result = await fetchAcademicYearPlan(organisationId, yearId);
       if (expectedGeneration !== generation.current) return null;
       const plan = normalizeAcademicYear(result.plan);
       setAcademicYear(plan);
       setSelectedAcademicYearId(plan.id);
-      setRequestReference(result.requestId || '');
+      setRequestReference('');
       return plan;
     } catch (loadError) {
       if (expectedGeneration === generation.current) {
         setError(loadError.message || 'Could not load the academic year.');
-        setRequestReference(loadError.requestId || '');
+        setRequestReference(safeRequestReference(loadError));
       }
       return null;
     } finally {
@@ -69,13 +71,13 @@ export function AcademicYearProvider({ children, user }) {
     fetchAcademicYears(organisationId).then(async (result) => {
       if (expectedGeneration !== generation.current) return;
       setAcademicYears(result.academicYears);
-      setRequestReference(result.requestId || '');
+      setRequestReference('');
       const currentId = selectCurrentAcademicYear(result.academicYears);
       if (currentId) await loadYear(currentId, expectedGeneration);
     }).catch((loadError) => {
       if (expectedGeneration === generation.current) {
         setError(loadError.message || 'Could not load academic years.');
-        setRequestReference(loadError.requestId || '');
+        setRequestReference(safeRequestReference(loadError));
       }
     }).finally(() => {
       if (expectedGeneration === generation.current) setIsLoading(false);
@@ -111,6 +113,7 @@ export function AcademicYearProvider({ children, user }) {
     const expectedGeneration = generation.current;
     setIsSaving(true);
     setError('');
+    setRequestReference('');
     try {
       const result = await saveAcademicYearPlan(organisationId, normalizeAcademicYear(plan));
       if (expectedGeneration !== generation.current) return null;
@@ -122,13 +125,13 @@ export function AcademicYearProvider({ children, user }) {
         return [...years.filter((year) => year.id !== savedPlan.id), summary]
           .sort((a, b) => b.startDate.localeCompare(a.startDate) || a.id.localeCompare(b.id));
       });
-      setRequestReference(result.requestId || '');
+      setRequestReference('');
       await loadYear(result.academicYearId, expectedGeneration);
       return savedPlan;
     } catch (saveError) {
       if (expectedGeneration === generation.current) {
         setError(saveError.message || 'Could not save the academic year.');
-        setRequestReference(saveError.requestId || '');
+        setRequestReference(safeRequestReference(saveError));
       }
       return null;
     } finally {

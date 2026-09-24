@@ -146,7 +146,7 @@ export default function Classes() {
 
               {isLoading ? <p role="status">Loading classes…</p> : null}
               {error ? <p className="classes-hint classes-hint--error" role="alert">{error}</p> : null}
-              {requestReference ? <p className="classes-hint">Support reference: <code>{requestReference}</code></p> : null}
+              {error && requestReference ? <p className="classes-hint">Support reference: <code>{requestReference}</code></p> : null}
               {error ? <button type="button" className="add-row-button" onClick={reload}>Reload classes</button> : null}
               {!isLoading && !isLoaded && !error ? <p className="classes-hint">Select an academic year before editing classes.</p> : null}
 

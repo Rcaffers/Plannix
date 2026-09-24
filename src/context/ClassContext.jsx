@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { safeRequestReference } from '../utils/requestReference';
 import { useAcademicYear } from './AcademicYearContext';
 import { fetchClassCollection, saveClassCollection } from '../utils/api';
 import {
@@ -60,6 +61,7 @@ export function ClassProvider({ children, user }) {
     const expectedGeneration = generation.current;
     setIsLoading(true);
     setError('');
+    setRequestReference('');
     setSaved(false);
     try {
       const result = await fetchClassCollection(organisationId, selectedAcademicYearId);
@@ -68,7 +70,7 @@ export function ClassProvider({ children, user }) {
       setAuthoritativeEntries(loaded);
       setEntriesState(loaded);
       setRevision(result.revision);
-      setRequestReference(result.requestId || '');
+      setRequestReference('');
       return true;
     } catch (loadError) {
       if (expectedGeneration === generation.current) {
@@ -76,7 +78,7 @@ export function ClassProvider({ children, user }) {
         setEntriesState([]);
         setRevision(null);
         setError(safeClassError(loadError, 'Could not load classes.'));
-        setRequestReference(loadError.requestId || '');
+        setRequestReference(safeRequestReference(loadError));
       }
       return false;
     } finally {
@@ -94,6 +96,7 @@ export function ClassProvider({ children, user }) {
   const updateEntries = useCallback((next) => {
     setSaved(false);
     setError('');
+    setRequestReference('');
     setEntriesState((current) => (typeof next === 'function' ? next(current) : next));
   }, []);
 
@@ -104,6 +107,7 @@ export function ClassProvider({ children, user }) {
   const save = useCallback(async () => {
     if (saving.current || isLoading || revision === null
         || !organisationId || !selectedAcademicYearId) return false;
+    setRequestReference('');
     const validationError = validateClassDraft(entries);
     if (validationError) { setError(validationError); return false; }
     saving.current = true;
@@ -123,13 +127,13 @@ export function ClassProvider({ children, user }) {
       setAuthoritativeEntries(authoritative);
       setEntriesState(authoritative);
       setRevision(result.revision);
-      setRequestReference(result.requestId || '');
+      setRequestReference('');
       setSaved(true);
       return true;
     } catch (saveError) {
       if (expectedGeneration === generation.current) {
         setError(safeClassError(saveError, 'Could not save classes.'));
-        setRequestReference(saveError.requestId || '');
+        setRequestReference(safeRequestReference(saveError));
       }
       return false;
     } finally {

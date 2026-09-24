@@ -337,7 +337,7 @@ export default function Settings() {
           </div>
           {layoutSuccess ? <p className="settings-saved" role="status">{layoutSuccess}</p> : null}
           {layoutError ? <p className="settings-error" role="alert">{layoutError}</p> : null}
-          {layoutRequestReference ? <p className="settings-hint">Support reference: <code>{layoutRequestReference}</code></p> : null}
+          {layoutError && layoutRequestReference ? <p className="settings-hint">Support reference: <code>{layoutRequestReference}</code></p> : null}
         </form>
 
       </div>

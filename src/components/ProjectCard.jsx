@@ -825,7 +825,7 @@ export default function ProjectCard({
         {sessionState.saved && !sessionState.isSaving ? <p className="classes-hint" role="status">Saved</p> : null}
         {sessionState.error ? <p className="classes-hint classes-hint--error" role="alert">{sessionState.error}</p> : null}
         {sessionState.conflict ? <p className="classes-hint classes-hint--error">The timetable changed elsewhere. Reload before retrying.</p> : null}
-        {sessionState.requestReference ? <p className="classes-hint">Support reference: {sessionState.requestReference}</p> : null}
+        {sessionState.error && sessionState.requestReference ? <p className="classes-hint">Support reference: {sessionState.requestReference}</p> : null}
         {weekMode === 'date' && sessionState.dated ? (
           <p className="classes-hint">{sessionState.dated.overrideExists
             ? sessionState.dated.sessions.length ? 'Explicit date override' : 'Intentionally empty date override'

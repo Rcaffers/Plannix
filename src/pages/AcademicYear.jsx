@@ -271,7 +271,7 @@ export default function AcademicYear() {
         </div>
         {isLoading ? <p role="status">Loading academic years…</p> : null}
         {error ? <p className="settings-hint settings-hint--error" role="alert">{error}</p> : null}
-        {requestReference ? <p className="settings-hint">Support reference: <code>{requestReference}</code></p> : null}
+        {error && requestReference ? <p className="settings-hint">Support reference: <code>{requestReference}</code></p> : null}
 
         <form className="settings-timetable-form" onSubmit={handleSubmit}>
           <h2 className="settings-section-title">Details</h2>

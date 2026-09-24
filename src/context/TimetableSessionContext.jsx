@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { safeRequestReference } from '../utils/requestReference';
 import { useAcademicYear } from './AcademicYearContext';
 import { useClasses } from './ClassContext';
 import { useTimetableLayout } from './TimetableLayoutContext';
@@ -45,14 +46,14 @@ export function TimetableSessionProvider({ children, user }) {
 
   const loadRecurring = useCallback(async () => {
     if (!scope) return false;
-    const expected = ++generation.current; setIsLoading(true); setError(''); setSaved(false);
+    const expected = ++generation.current; setIsLoading(true); setError(''); setRequestReference(''); setSaved(false);
     try {
       const result = await fetchRecurringTimetableSessions(scope);
       if (expected !== generation.current) return false;
-      setRecurring(result.weeks); setRevision(result.revision); setRequestReference(result.requestId || '');
+      setRecurring(result.weeks); setRevision(result.revision); setRequestReference('');
       setConflict(false); setUnsaved(false); return true;
     } catch (loadError) {
-      if (expected === generation.current) { setError(loadError.message || 'Could not load timetable sessions.'); setRequestReference(loadError.requestId || ''); }
+      if (expected === generation.current) { setError(loadError.message || 'Could not load timetable sessions.'); setRequestReference(safeRequestReference(loadError)); }
       return false;
     } finally { if (expected === generation.current) setIsLoading(false); }
   }, [scope]);
@@ -70,21 +71,21 @@ export function TimetableSessionProvider({ children, user }) {
 
   const loadDate = useCallback(async (weekStartDate) => {
     if (!scope) return false;
-    const expected = ++generation.current; queueRef.current?.reset(); setDated(null); setIsLoading(true); setError(''); setSaved(false); setRestorePoint(null);
+    const expected = ++generation.current; queueRef.current?.reset(); setDated(null); setIsLoading(true); setError(''); setRequestReference(''); setSaved(false); setRestorePoint(null);
     try {
       const result = await fetchDatedTimetableSessions({ ...scope, weekStartDate });
       if (expected !== generation.current) return false;
-      setDated(result); setRevision(result.revision); setRequestReference(result.requestId || '');
+      setDated(result); setRevision(result.revision); setRequestReference('');
       setConflict(false); setUnsaved(false); return true;
     } catch (loadError) {
-      if (expected === generation.current) { setError(loadError.message || 'Could not load timetable sessions.'); setRequestReference(loadError.requestId || ''); }
+      if (expected === generation.current) { setError(loadError.message || 'Could not load timetable sessions.'); setRequestReference(safeRequestReference(loadError)); }
       return false;
     } finally { if (expected === generation.current) setIsLoading(false); }
   }, [scope]);
 
   const applyAuthoritative = useCallback((target, result, queued) => {
     setRevision(result.revision); revisionRef.current = result.revision;
-    setRequestReference(result.requestId || ''); setConflict(false); setError('');
+    setRequestReference(''); setConflict(false); setError('');
     if (!queued) {
       if (target.type === 'recurring') setRecurring((current) => current.map((week) => week.weekId === target.weekId
         ? { ...week, collectionId: result.collectionId, sessions: result.sessions } : week));
@@ -101,12 +102,12 @@ export function TimetableSessionProvider({ children, user }) {
         save: (sessions) => target.type === 'recurring'
           ? saveRecurringTimetableSessions({ ...scope, weekId: target.weekId, expectedRevision: revisionRef.current, sessions })
           : saveDatedTimetableSessions({ ...scope, weekStartDate: target.weekStartDate, expectedRevision: revisionRef.current, sessions }),
-        onOptimistic: (sessions) => { setUnsaved(true); setSaved(false); setError(''); setIsSaving(true); retryRef.current = { target, sessions };
+        onOptimistic: (sessions) => { setUnsaved(true); setSaved(false); setError(''); setRequestReference(''); setIsSaving(true); retryRef.current = { target, sessions };
           if (target.type === 'recurring') setRecurring((current) => current.map((week) => week.weekId === target.weekId ? { ...week, sessions } : week));
           else setDated((current) => ({ ...current, sessions, source: 'override', overrideExists: true })); },
         onAuthoritative: (result, queued) => applyAuthoritative(target, result, queued),
         onError: (saveError) => { setIsSaving(false); setUnsaved(true); setSaved(false); setConflict(saveError.status === 409);
-          setError(saveError.message || 'Could not save timetable sessions.'); setRequestReference(saveError.requestId || ''); },
+          setError(saveError.message || 'Could not save timetable sessions.'); setRequestReference(safeRequestReference(saveError)); },
       });
     }
     return queueRef.current;
@@ -118,24 +119,24 @@ export function TimetableSessionProvider({ children, user }) {
 
   const removeOverride = useCallback(async () => {
     if (!scope || !dated?.weekStartDate || revisionRef.current == null || isSaving) return false;
-    setIsSaving(true); setSaved(false); setError('');
+    setIsSaving(true); setSaved(false); setError(''); setRequestReference('');
     try { const result = await removeDatedTimetableOverride({ ...scope, weekStartDate: dated.weekStartDate, expectedRevision: revisionRef.current });
-      setDated(result); setRevision(result.revision); setRequestReference(result.requestId || ''); setUnsaved(false); setSaved(true); return true;
-    } catch (removeError) { setConflict(removeError.status === 409); setError(removeError.message || 'Could not restore the repeating timetable.'); setRequestReference(removeError.requestId || ''); return false;
+      setDated(result); setRevision(result.revision); setRequestReference(''); setUnsaved(false); setSaved(true); return true;
+    } catch (removeError) { setConflict(removeError.status === 409); setError(removeError.message || 'Could not restore the repeating timetable.'); setRequestReference(safeRequestReference(removeError)); return false;
     } finally { setIsSaving(false); }
   }, [scope, dated?.weekStartDate, isSaving]);
 
   const saveBatch = useCallback(async (mutations) => {
     if (!scope || revisionRef.current == null || isSaving) return null;
-    setIsSaving(true); setSaved(false); setError('');
+    setIsSaving(true); setSaved(false); setError(''); setRequestReference('');
     try { const result = await saveTimetableSessionBatch({ ...scope, expectedRevision: revisionRef.current, mutations });
-      setRevision(result.revision); setRequestReference(result.requestId || ''); setUnsaved(false); setSaved(true);
+      setRevision(result.revision); setRequestReference(''); setUnsaved(false); setSaved(true);
       const current = result.collections.find((collection) => collection.type === 'date_override'
         && collection.weekStartDate === dated?.weekStartDate);
       if (current) setDated((value) => ({ ...value, revision: result.revision, source: 'override', overrideExists: true,
         collectionId: current.collectionId, repeatingWeekId: current.weekId, sessions: current.sessions }));
       return result;
-    } catch (batchError) { setConflict(batchError.status === 409); setError(batchError.message || 'Could not save timetable sessions.'); setRequestReference(batchError.requestId || ''); return null;
+    } catch (batchError) { setConflict(batchError.status === 409); setError(batchError.message || 'Could not save timetable sessions.'); setRequestReference(safeRequestReference(batchError)); return null;
     } finally { setIsSaving(false); }
   }, [scope, isSaving, dated?.weekStartDate]);
 
