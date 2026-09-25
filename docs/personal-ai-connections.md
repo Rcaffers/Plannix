@@ -51,7 +51,10 @@ as personal connections.
 A replacement/switch creates a new Vault secret, updates the same connection row,
 and deletes the previous secret within one transaction. Any exception rolls back
 all steps. Deleting a connection uses the existing after-delete Vault cleanup
-trigger. No RPC returns a secret ID or plaintext key.
+trigger. No browser-accessible RPC or API response returns plaintext credentials
+or a Vault secret ID. The sole plaintext-credential exception is the internal
+service-role-only credential-retrieval RPC described below. Its result must stay
+inside trusted server code and must never be returned to the browser or logged.
 
 ## Validation and future work
 
@@ -71,3 +74,28 @@ scoped server credential retrieval path, fixed provider destinations,
 server-controlled models, timeouts, rate limits/quotas, response validation and
 provider-specific failure tests. Do not expose credential retrieval to React.
 This phase deliberately supplies no pretend adapter and no execution endpoint.
+
+## Stage 2A: internal credential retrieval
+
+`server/ai/credential.js` exports `retrieveAiCredential(validatedUserId)`, returning
+only `{ provider, apiKey }` to its immediate trusted caller. Obtain that canonical
+UUID from confirmed authentication, never from request parameters. The module
+creates an admin client solely to invoke `plannix_get_server_ai_credential(uuid)`;
+it exposes no general-purpose admin client or table access. All failures become
+fixed internal errors without upstream messages or causes. Retrieval retains the
+shared 4096-character credential limit: generous for supported provider keys while
+bounding malformed internal responses. There is no caching,
+logging, disk storage, HTTP route or provider execution.
+
+The RPC is in public solely for PostgREST discovery. Only service_role can execute
+it; PUBLIC, anon and authenticated are explicitly denied. Its SECURITY DEFINER
+boundary uses an empty search path and qualified objects to read the authoritative
+personal mapping and Vault without granting application roles direct access.
+Confirmed users, unique resolution, active status and matching last-four metadata
+are required. Missing or inconsistent records fail closed.
+
+Future adapters must use the returned credential only within the immediate
+server-side operation, then release references. Never attach it to errors, request
+references, responses, logs, analytics, caches or persisted jobs. JavaScript cannot
+guarantee immediate erasure of immutable strings from memory. Stage 2A makes no
+provider requests and exposes no browser endpoint; Stage 2B remains unimplemented.
