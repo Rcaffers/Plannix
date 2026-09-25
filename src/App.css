@@ -7,3 +7,8 @@
 .content-section {
   padding-top: 18px;
 }
+
+/* Restore separation from site navigation without adding rows inside the card. */
+.content-section.main-timetable-section {
+  padding-top: clamp(36px, 4vw, 52px);
+}

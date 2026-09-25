@@ -12,7 +12,9 @@ export function useClassPlacement({ enabled, safe, removalSafe = safe, weekId, s
   const [moving, setMoving] = useState(null);
   const [drag, setDrag] = useState(null);
   const [over, setOver] = useState(null);
-  const [status, setStatus] = useState('');
+  const [status, setStatusText] = useState('');
+  const [statusIsError, setStatusIsError] = useState(false);
+  function setStatus(message, isError = false) { setStatusText(message); setStatusIsError(isError); }
   const dragRef = useRef(null);
   const entries = classPlacementUsage(plannedClasses, frequencySessions);
   const selectedId = enabled && selected && weekId && selected?.weekId === weekId ? selected.classId : null;
@@ -41,12 +43,12 @@ export function useClassPlacement({ enabled, safe, removalSafe = safe, weekId, s
   }
   function place(destination, candidate = action) {
     if (activeMove && candidate === activeMove && sessions.some((entry) => entry.day === destination.day && entry.periodId === destination.periodId)) {
-      setStatus('Choose an empty lesson slot to move this lesson.'); return;
+      setStatus('Choose an empty lesson slot to move this lesson.', true); return;
     }
     const next = result(destination, candidate);
-    if (!next.ok) { setStatus(messages[next.reason] || 'This is not an available lesson destination.'); return; }
+    if (!next.ok) { setStatus(messages[next.reason] || 'This is not an available lesson destination.', true); return; }
     if (next.unchanged) return;
-    if (!save(next.sessions)) { setStatus(messages.UNSAFE); return; }
+    if (!save(next.sessions)) { setStatus(messages.UNSAFE, true); return; }
     setMoving(null);
     setStatus(candidate.type === 'class' ? 'Class placed. Saving changes.' : 'Lesson moved or swapped. Saving changes.');
     if (candidate.type === 'class' && entries.find((entry) => entry.id === candidate.classId)?.remaining <= 1) setSelected(null);
@@ -71,8 +73,8 @@ export function useClassPlacement({ enabled, safe, removalSafe = safe, weekId, s
   function remove(classId, candidate, allowed = safe) {
     const next = removalResult(classId, candidate, allowed);
     endDrag();
-    if (!next.ok) { setStatus(messages[next.reason] || 'Return the lesson to its matching class card.'); return false; }
-    if (!save(next.sessions)) { setStatus(messages.UNSAFE); return false; }
+    if (!next.ok) { setStatus(messages[next.reason] || 'Return the lesson to its matching class card.', true); return false; }
+    if (!save(next.sessions)) { setStatus(messages.UNSAFE, true); return false; }
     setSelected(null);
     const name = plannedClasses.find((entry) => entry.id === classId)?.name || 'Lesson';
     const slot = slots.find((entry) => entry.day === next.removed.day && entry.periodId === next.removed.periodId);
@@ -108,7 +110,7 @@ export function useClassPlacement({ enabled, safe, removalSafe = safe, weekId, s
         if (!dragRef.current) return;
         event.preventDefault();
         const validation = result(slot, dragRef.current);
-        if (!validation.ok) setStatus(messages[validation.reason] || 'This is not an available lesson destination.');
+        if (!validation.ok) setStatus(messages[validation.reason] || 'This is not an available lesson destination.', true);
         event.dataTransfer.dropEffect = validation.ok
           ? dragRef.current.type === 'class' ? 'copy' : 'move' : 'none';
         setOver(`${slot.day}:${slot.periodId}`);
@@ -122,7 +124,7 @@ export function useClassPlacement({ enabled, safe, removalSafe = safe, weekId, s
       },
     };
   }
-  return { entries, selectedId, moving: activeMove, status,
+  return { entries, selectedId, moving: activeMove, status, statusIsError,
     isDragging(slot) { return Boolean(activeDrag?.type === 'session' && activeDrag.source.day === slot.day && activeDrag.source.periodId === slot.periodId); },
     beginMove(source) {
       const session = sessions.find((entry) => entry.day === source.day && entry.periodId === source.periodId);

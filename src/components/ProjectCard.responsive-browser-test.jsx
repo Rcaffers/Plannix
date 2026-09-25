@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import ProjectCard from './ProjectCard.jsx';
+import Timetable from '../pages/Timetable.jsx';
+import '../App.css';
 
 const entries = [{ id: '7a', name: '7A', frequency: 3 }];
 const periods = [{ id: 'p1', type: 'teaching', number: 1 }, { id: 'p2', type: 'teaching', number: 2 }];
@@ -13,7 +15,7 @@ let state;
 export const useTimetableSessions = () => state;
 const initial = { id: 'lesson', day: 0, periodId: 'p1', classId: '7a', title: 'Fractions', notes: 'Rulers' };
 let calls = [];
-let allowEditing = true;
+let allowEditing = true, testPageSpacing = false;
 let feedbackUpdate, observeSave = false, retryCalls = 0, reloadCalls = 0;
 const scope = {}; const loadedDates = []; let mode = 'date';
 function Harness() {
@@ -21,8 +23,12 @@ function Harness() {
   const [sessions, setSessions] = useState([initial]);
   const [weekB, setWeekB] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState('A');
-  state = { ...feedback, retry() { retryCalls++; }, reload() { reloadCalls++; }, scope, revision: 1, periods, dated: { sessions }, loadDate(date) { loadedDates.push(date); }, recurring: [{ code: 'A', weekId: 'A', sessions }, { code: 'B', weekId: 'B', sessions: weekB }],
+  state = { ...feedback, retry() { retryCalls++; }, reload() { reloadCalls++; }, scope, revision: 1, periods, dated: { sessions, overrideExists: feedback.overrideExists }, loadDate(date) { loadedDates.push(date); }, recurring: [{ code: 'A', weekId: 'A', sessions }, { code: 'B', weekId: 'B', sessions: weekB }],
     edit(target, next) { if (observeSave) setFeedback({ isSaving: true }); calls.push({ target, sessions: next }); if (target.weekId === 'B') setWeekB(next); else setSessions(next); return true; } };
+  if (testPageSpacing) return <>
+    <header id="site-header-fixture" style={{ height: 64 }}>Site navigation</header>
+    {mode === 'date' ? <Timetable /> : <section className="classes-input-timetable"><ProjectCard project={{ title: 'Input Classes' }} weekMode="fixed" enableFixedPhoneSingleDay enableClassPlacement /></section>}
+  </>;
   return <>
     {mode === 'fixed' ? <div><button id="week-a" onClick={() => setSelectedWeek('A')}>Week A</button><button id="week-b" onClick={() => setSelectedWeek('B')}>Week B</button></div> : null}
     <ProjectCard project={{ title: 'Test' }} weekMode={mode} enableEditing={allowEditing} enableClassPlacement enableFixedPhoneSingleDay
@@ -36,11 +42,22 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 100));
 const click = el => flushSync(() => el.click());
 async function width(value) { frameElement.style.width = `${value}px`; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); await tick(); }
 function mount() { flushSync(() => root.render(<Harness key={Math.random()} />)); }
+function hiddenAnnouncement(selector) {
+  const el = document.querySelector(selector), style = getComputedStyle(el);
+  check(el.getAttribute('aria-live') === 'polite' && style.position === 'absolute' && style.clipPath === 'inset(50%)' && el.getBoundingClientRect().height <= 1, `${selector}: live announcement is visually hidden and out of flow`);
+}
+function noRoutineStrip() {
+  hiddenAnnouncement('.timetable-save-status');
+  const card = document.querySelector('.schedule-card').getBoundingClientRect();
+  const header = document.querySelector('.schedule-titlebar').getBoundingClientRect();
+  check(Math.abs(header.top-card.top) <= 1, 'No routine status strip above green header');
+  check(!/Inherited from the repeating timetable|Explicit date override|Intentionally empty date override/.test(document.body.textContent), 'No inheritance or override implementation banner');
+}
 function noRestoreControls() {
   check(!/Set restore point|Undo to restore point/.test(document.body.textContent), 'No restore-point controls');
 }
 function fullWeek(label) {
-  noRestoreControls();
+  noRestoreControls(); noRoutineStrip();
   const cols = [...document.querySelectorAll('.day-col')];
   check(cols.length === 5 && document.querySelectorAll('.day-head').length === 5, `${label}: five weekdays mounted`);
   check(!document.querySelector('.schedule-compact-nav') && document.querySelector('[aria-label="Go to next week"]') || mode === 'fixed', `${label}: standard week navigation`);
@@ -119,6 +136,18 @@ async function run() {
   palette.focus(); check(document.activeElement === palette, 'Tablet palette can receive keyboard focus');
   click(palette); click(document.querySelector('.lesson-card--empty'));
   check(calls.length === 1 && calls[0].sessions.length === 2, 'Tablet tap placement makes one edit');
+  hiddenAnnouncement('.class-placement-status');
+  check(document.querySelector('.class-placement-status').textContent.includes('Class placed'), 'Placement success still announced');
+  const paletteBottom = document.querySelector('.class-placement-palette').getBoundingClientRect().bottom;
+  check(Math.abs(document.querySelector('.schedule-dynamic').getBoundingClientRect().top-paletteBottom) <= 1, 'No placement status strip between palette and grid');
+  // Selecting a class then choosing an occupied destination requires action.
+  click(document.querySelector('.class-placement-chip'));
+  const occupied = document.querySelector('.lesson-card--placed').closest('.slot');
+  const transfer = new DataTransfer();
+  flushSync(() => document.querySelector('.class-placement-chip').dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: transfer })));
+  flushSync(() => occupied.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer })));
+  check(!document.querySelector('.class-placement-status').classList.contains('timetable-announcement') && document.querySelector('.class-placement-status').getBoundingClientRect().height > 1, 'Invalid placement feedback remains visible');
+
   for (const size of [320, 375, 390, 430]) {
     await width(size); mount(); await tick(); calls = [];
     singleDay(`Input Classes ${size}px`);
@@ -158,12 +187,18 @@ async function run() {
     const title = document.querySelector('#lesson-title-input');
     flushSync(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(title, 'Edited lesson'); title.dispatchEvent(new Event('input', { bubbles: true })); });
     click(document.querySelector('.lesson-modal-save'));
-    check(calls.length === 1 && calls[0].sessions[0].title === 'Edited lesson' && document.body.textContent.includes('Saving…'), `${view}: lesson edit starts autosave with visible Saving`);
+    check(calls.length === 1 && calls[0].sessions[0].title === 'Edited lesson' && document.body.textContent.includes('Saving…'), `${view}: lesson edit starts autosave with Saving announcement`);
     check(!getButton('Save'), `${view}: no timetable manual Save button`);
-    flushSync(() => feedbackUpdate({ saved: true }));
-    check(document.querySelector('.classes-hint').textContent === 'Saved', `${view}: successful save shows Saved`);
-    flushSync(() => feedbackUpdate({ error: 'Save failed', conflict: true, unsaved: true }));
+    noRoutineStrip();
+    flushSync(() => feedbackUpdate({ saved: true, overrideExists: view === 'date', requestReference: 'test-reference' }));
+    check(document.querySelector('.timetable-save-status').textContent.trim() === 'Saved', `${view}: successful save announces Saved`);
+    noRoutineStrip();
+    check(!document.body.textContent.includes('Support reference:'), 'No support reference without an error');
+    if (view === 'date') check(Boolean(getButton('Restore repeating timetable')), 'Dated override restore control retained without banner');
+    flushSync(() => feedbackUpdate({ error: 'Save failed', conflict: true, unsaved: true, requestReference: 'test-reference' }));
     check(document.body.textContent.includes('Save failed') && document.body.textContent.includes('The timetable changed elsewhere.'), `${view}: save error and conflict remain visible`);
+    check([...document.querySelectorAll('.classes-hint--error')].every(el => el.getBoundingClientRect().height > 1 && getComputedStyle(el).position !== 'absolute'), `${view}: actionable errors occupy visible layout`);
+    check(document.body.textContent.includes('Support reference: test-reference'), `${view}: support reference accompanies error`);
     const retries = retryCalls, reloads = reloadCalls;
     click(getButton('Retry save')); click(getButton('Reload'));
     check(retryCalls === retries+1 && reloadCalls === reloads+1, `${view}: recovery buttons call retry and reload`);
@@ -191,6 +226,22 @@ async function run() {
   noRestoreControls();
   check(!document.querySelector('.schedule-titlebar-actions') && !document.body.textContent.includes('Clear this week'), 'Main read-only toolbar has no empty action gap or Clear this week');
 
+
+  testPageSpacing = true;
+  for (const size of [375, 820, 1366]) {
+    await width(size); mode = 'date'; mount(); await tick();
+    const section = document.querySelector('.main-timetable-section');
+    const card = document.querySelector('.project-card').getBoundingClientRect();
+    const nav = document.querySelector('#site-header-fixture').getBoundingClientRect();
+    const gap = card.top-nav.bottom;
+    const expected = Math.min(52, Math.max(36, size*.04));
+    check(Math.abs(gap-expected) <= 1, `${size}px: main timetable spacing is outside card`);
+    noRoutineStrip();
+    check(Math.abs(card.width-section.getBoundingClientRect().width) <= 1, `${size}px: wrapper preserves container width`);
+    results.push({ viewport: size, mainTimetableGap: gap });
+    mode = 'fixed'; mount(); await tick();
+    check(!document.querySelector('.main-timetable-section') && Math.abs(document.querySelector('.project-card').getBoundingClientRect().top-document.querySelector('#site-header-fixture').getBoundingClientRect().bottom) <= 1, `${size}px: no additional spacing on Input Classes`);
+  }
 
 }
 run().then(() => { parent.document.body.dataset.testResult='passed'; }, error => { parent.document.body.dataset.testResult='failed'; results.push(error.stack); }).finally(() => {
