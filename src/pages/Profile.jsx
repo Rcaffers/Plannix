@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import AiProviderCard from '../components/AiProviderCard';
 import DeleteAccountSection from '../components/DeleteAccountSection';
 import { schoolMemberships } from '../utils/organisationMemberships';
 import { MAX_PASSWORD_LENGTH, validateRecoveryPasswords } from '../utils/supabaseRecovery';
@@ -219,6 +220,8 @@ export default function Profile({
             {formMessage(passwordStatus)}
           </form>
         </section>
+
+        <AiProviderCard key={user.id} />
 
         <section className="profile-card profile-card--memberships" aria-labelledby="membership-title">
           <div>

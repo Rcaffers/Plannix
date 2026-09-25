@@ -17,6 +17,8 @@
     "test:frontend-account-deletion": "node --test src/utils/accountDeletion.test.js",
     "test:academic-year": "node --test src/utils/academicYear.test.js src/utils/academicYearApi.test.js",
     "test:class-placement-browser": "node scripts/test-class-placement-browser.js",
+    "test:ai-connection": "node --test src/utils/aiConnectionApi.test.js server/routes/ai-connection-routes.test.js",
+    "test:ai-provider-browser": "node scripts/test-ai-provider-browser.js",
     "test:classes": "node --test src/utils/classPersistence.test.js",
     "test:timetable-layout": "node --test src/utils/timetableLayoutPersistence.test.js",
     "test:timetable-sessions": "node --test src/utils/timetableSessionApi.test.js src/utils/timetableSessionState.test.js",
