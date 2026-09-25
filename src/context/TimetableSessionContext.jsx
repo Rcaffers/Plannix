@@ -7,7 +7,7 @@ import {
   fetchDatedTimetableSessions, fetchRecurringTimetableSessions, removeDatedTimetableOverride,
   saveDatedTimetableSessions, saveRecurringTimetableSessions, saveTimetableSessionBatch,
 } from '../utils/timetableSessionApi';
-import { createSerializedSaveQueue, sameSessions } from '../utils/timetableSessionState';
+import { assertUniqueSessionSlots, createSerializedSaveQueue, sameSessions } from '../utils/timetableSessionState';
 
 const TimetableSessionContext = createContext(null);
 
@@ -37,16 +37,27 @@ export function TimetableSessionProvider({ children, user }) {
   const queueRef = useRef(null);
   revisionRef.current = revision;
 
-  const clear = useCallback(() => {
-    generation.current += 1; queueRef.current?.reset(); queueRef.current = null; activeRef.current = null;
-    setRecurring([]); setDated(null); setRevision(null); setIsLoading(false); setIsSaving(false);
-    setSaved(false); setError(''); setRequestReference(''); setConflict(false); setUnsaved(false);
-    setRestorePoint(null); retryRef.current = null;
+  const resetSaveQueue = useCallback(() => {
+    // Invalidate callbacks before releasing the queue and its retry payload.
+    generation.current += 1;
+    queueRef.current?.reset();
+    queueRef.current = null;
+    activeRef.current = null;
+    retryRef.current = null;
+    setIsSaving(false);
   }, []);
+
+  const clear = useCallback(() => {
+    resetSaveQueue();
+    setRecurring([]); setDated(null); setRevision(null); setIsLoading(false);
+    setSaved(false); setError(''); setRequestReference(''); setConflict(false); setUnsaved(false);
+    setRestorePoint(null);
+  }, [resetSaveQueue]);
 
   const loadRecurring = useCallback(async () => {
     if (!scope) return false;
-    const expected = ++generation.current; setIsLoading(true); setError(''); setRequestReference(''); setSaved(false);
+    resetSaveQueue();
+    const expected = generation.current; setIsLoading(true); setError(''); setRequestReference(''); setSaved(false);
     try {
       const result = await fetchRecurringTimetableSessions(scope);
       if (expected !== generation.current) return false;
@@ -56,7 +67,7 @@ export function TimetableSessionProvider({ children, user }) {
       if (expected === generation.current) { setError(loadError.message || 'Could not load timetable sessions.'); setRequestReference(safeRequestReference(loadError)); }
       return false;
     } finally { if (expected === generation.current) setIsLoading(false); }
-  }, [scope]);
+  }, [scope, resetSaveQueue]);
 
   useEffect(() => { clear(); if (scope && user?.id) void loadRecurring(); return clear; }, [scope, user?.id]);
   const hasPending = isSaving || unsaved;
@@ -71,7 +82,8 @@ export function TimetableSessionProvider({ children, user }) {
 
   const loadDate = useCallback(async (weekStartDate) => {
     if (!scope) return false;
-    const expected = ++generation.current; queueRef.current?.reset(); setDated(null); setIsLoading(true); setError(''); setRequestReference(''); setSaved(false); setRestorePoint(null);
+    resetSaveQueue();
+    const expected = generation.current; setIsLoading(true); setError(''); setRequestReference(''); setSaved(false); setRestorePoint(null);
     try {
       const result = await fetchDatedTimetableSessions({ ...scope, weekStartDate });
       if (expected !== generation.current) return false;
@@ -81,7 +93,7 @@ export function TimetableSessionProvider({ children, user }) {
       if (expected === generation.current) { setError(loadError.message || 'Could not load timetable sessions.'); setRequestReference(safeRequestReference(loadError)); }
       return false;
     } finally { if (expected === generation.current) setIsLoading(false); }
-  }, [scope]);
+  }, [scope, resetSaveQueue]);
 
   const applyAuthoritative = useCallback((target, result, queued) => {
     setRevision(result.revision); revisionRef.current = result.revision;
@@ -97,7 +109,7 @@ export function TimetableSessionProvider({ children, user }) {
 
   const ensureQueue = useCallback((target) => {
     const key = target.type === 'recurring' ? `recurring:${target.weekId}` : `date:${target.weekStartDate}`;
-    if (activeRef.current !== key) { queueRef.current?.reset(); activeRef.current = key;
+    if (activeRef.current !== key) { resetSaveQueue(); activeRef.current = key;
       queueRef.current = createSerializedSaveQueue({
         save: (sessions) => target.type === 'recurring'
           ? saveRecurringTimetableSessions({ ...scope, weekId: target.weekId, expectedRevision: revisionRef.current, sessions })
@@ -111,9 +123,13 @@ export function TimetableSessionProvider({ children, user }) {
       });
     }
     return queueRef.current;
-  }, [scope, applyAuthoritative]);
+  }, [scope, applyAuthoritative, resetSaveQueue]);
 
-  const edit = useCallback((target, sessions) => Boolean(scope && ensureQueue(target).enqueue(sessions)), [scope, ensureQueue]);
+  const edit = useCallback((target, sessions) => {
+    try { assertUniqueSessionSlots(sessions); }
+    catch (validationError) { setError(validationError.message); return false; }
+    return Boolean(scope && ensureQueue(target).enqueue(sessions));
+  }, [scope, ensureQueue]);
   const retry = useCallback(() => retryRef.current && ensureQueue(retryRef.current.target).retry(retryRef.current.sessions), [ensureQueue]);
   const reload = useCallback(() => dated?.weekStartDate ? loadDate(dated.weekStartDate) : loadRecurring(), [dated?.weekStartDate, loadDate, loadRecurring]);
 

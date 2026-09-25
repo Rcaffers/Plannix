@@ -1,4 +1,4 @@
-import { findSessionAt } from './timetable';
+import { findSessionAt } from './timetable.js';
 
 /** Normalise classes plan entries for timetable class picking (id, name, max frequency). */
 export function getPlannedClassEntries(classesPlan) {

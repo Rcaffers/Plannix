@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(71);
+select extensions.plan(84);
 
 create function pg_temp.call_batch(
   fixture_user_id uuid,
@@ -256,6 +256,75 @@ select extensions.ok((select source='recurring' and not override_exists from abs
 select extensions.ok((select count(*)=2 from public.plannix_timetable_session_collections where timetable_id='31000000-0000-4000-8000-000000000001'),'collection uniqueness prevents duplicates');
 select extensions.is((select delete_rule from information_schema.referential_constraints where constraint_name='fk_plannix_timetable_sessions_collection'),'CASCADE','collection owns its sessions');
 select extensions.is((select delete_rule from information_schema.referential_constraints where constraint_name='fk_plannix_session_teachers_session'),'CASCADE','teacher assignments remain attached to stable sessions');
+
+-- Exercise the public save RPC against the real constraint/reconciler installed by
+-- 20260924130000_allow_atomic_timetable_session_swaps.sql. The outer transaction
+-- rolls back all fixtures; no migration is applied by this test.
+create function pg_temp.call_swap_save(
+  caller uuid, payload jsonb, expected bigint,
+  organisation uuid default '11000000-0000-4000-8000-000000000001',
+  academic_year uuid default '21000000-0000-4000-8000-000000000001'
+) returns table (revision bigint, collection_id uuid, sessions jsonb)
+language plpgsql set search_path='' as $$
+begin
+  perform pg_catalog.set_config('request.jwt.claim.sub',coalesce(caller::text,''),true);
+  execute 'set local role authenticated';
+  return query select * from public.plannix_save_recurring_timetable_sessions(
+    organisation,academic_year,'31000000-0000-4000-8000-000000000001',
+    '32000000-0000-4000-8000-000000000001',expected,payload);
+  execute 'reset role';
+exception when others then execute 'reset role'; raise;
+end;
+$$;
+create temporary table swap_before as select * from pg_temp.call_swap_save(
+ '01000000-0000-4000-8000-000000000001',
+ '[{"day":0,"periodId":"33000000-0000-4000-8000-000000000001","classId":"41000000-0000-4000-8000-000000000001","title":"Fractions","notes":"Rulers"},
+   {"day":1,"periodId":"33000000-0000-4000-8000-000000000002","classId":"41000000-0000-4000-8000-000000000002","title":"Atoms","notes":"Models"}]',9);
+create temporary table swap_payload as
+select jsonb_agg(entry || jsonb_build_object(
+  'day',case when entry->>'day'='0' then 1 else 0 end,
+  'periodId',case when entry->>'day'='0' then '33000000-0000-4000-8000-000000000002' else '33000000-0000-4000-8000-000000000001' end
+) order by entry->>'day') as sessions
+from swap_before, jsonb_array_elements(sessions) as entry;
+select extensions.lives_ok($$create temporary table swap_after as select * from pg_temp.call_swap_save(
+ '01000000-0000-4000-8000-000000000001',(select sessions from swap_payload),10)$$,
+ 'public RPC atomically swaps two occupied slots');
+select extensions.is((select revision from swap_after),11::bigint,'swap advances revision once');
+select extensions.results_eq(
+ $$select id from public.plannix_timetable_sessions where collection_id=(select collection_id from swap_after) order by id$$,
+ $$select (entry->>'id')::uuid from swap_before,jsonb_array_elements(sessions) as entry order by 1$$,
+ 'both original session IDs survive');
+select extensions.results_eq(
+ $$select id,class_id,title,notes from public.plannix_timetable_sessions where collection_id=(select collection_id from swap_after) order by id$$,
+ $$select (entry->>'id')::uuid,(entry->>'classId')::uuid,entry->>'title',entry->>'notes' from swap_before,jsonb_array_elements(sessions) as entry order by 1$$,
+ 'class IDs, titles and notes stay attached to each original session');
+select extensions.results_eq(
+ $$select id,day_number,period_id from public.plannix_timetable_sessions where collection_id=(select collection_id from swap_after) order by id$$,
+ $$select (entry->>'id')::uuid,(entry->>'day')::integer + 1,(entry->>'periodId')::uuid from swap_payload,jsonb_array_elements(sessions) as entry order by 1$$,
+ 'both slot coordinates are exchanged');
+select extensions.throws_ok($$select * from pg_temp.call_swap_save(
+ '01000000-0000-4000-8000-000000000001',
+ (select jsonb_agg(entry || '{"day":0,"periodId":"33000000-0000-4000-8000-000000000001"}'::jsonb)
+  from swap_after,jsonb_array_elements(sessions) as entry),11)$$,
+ '22023','Timetable session slots must be unique.','duplicate final coordinates remain rejected');
+select extensions.is((select sessions_revision from public.plannix_timetables where id='31000000-0000-4000-8000-000000000001'),11::bigint,
+ 'rejected duplicate collection does not advance revision');
+select extensions.results_eq(
+ $$select id,day_number,period_id from public.plannix_timetable_sessions where collection_id=(select collection_id from swap_after) order by id$$,
+ $$select (entry->>'id')::uuid,(entry->>'day')::integer + 1,(entry->>'periodId')::uuid from swap_payload,jsonb_array_elements(sessions) as entry order by 1$$,
+ 'rejected save leaves the swapped collection intact');
+select extensions.throws_ok($$select * from pg_temp.call_swap_save(null,'[]',11)$$,
+ '42501','Authentication is required.','public save denies unauthenticated callers');
+select extensions.throws_ok($$select * from pg_temp.call_swap_save('01000000-0000-4000-8000-000000000002','[]',11)$$,
+ '42501','Organisation Admin access is required.','public save denies non-admin members');
+select extensions.throws_ok($$select * from pg_temp.call_swap_save('01000000-0000-4000-8000-000000000005','[]',11)$$,
+ '42501','Organisation Admin access is required.','another organisation admin cannot save this timetable');
+select extensions.throws_ok($$select * from pg_temp.call_swap_save('01000000-0000-4000-8000-000000000001','[]',11,
+ '11000000-0000-4000-8000-000000000001','21000000-0000-4000-8000-000000000002')$$,
+ 'P0002','Timetable was not found.','public save enforces academic-year scope');
+select extensions.throws_ok($$select * from pg_temp.call_swap_save('01000000-0000-4000-8000-000000000005','[]',11,
+ '11000000-0000-4000-8000-000000000002','21000000-0000-4000-8000-000000000002')$$,
+ 'P0002','Timetable was not found.','public save enforces timetable organisation scope');
 
 select * from extensions.finish();
 rollback;

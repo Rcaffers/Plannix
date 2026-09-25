@@ -1,3 +1,13 @@
+/** Assert collection-local canonical slot uniqueness before optimistic persistence. */
+export function assertUniqueSessionSlots(sessions) {
+  const seen = new Set();
+  for (const session of sessions) {
+    const key = `${session.day}:${String(session.periodId).toLowerCase()}`;
+    if (seen.has(key)) throw new Error(`Duplicate timetable slot: ${key}`);
+    seen.add(key);
+  }
+}
+
 export function sameSessions(left, right) {
   const clean = (items) => items.map(({ id, day, periodId, classId, title, notes }) =>
     ({ id: id || null, day, periodId, classId, title, notes }));

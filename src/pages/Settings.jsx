@@ -325,7 +325,7 @@ export default function Settings() {
           </p>
 
           <div className="settings-actions">
-            <button type="submit" className="settings-save" disabled={isLayoutSaving || isLayoutLoading || !layoutDirty || !selectedAcademicYearId}>
+            <button type="submit" className="settings-save" disabled={isLayoutSaving || isLayoutLoading || (isPersisted && !layoutDirty) || !selectedAcademicYearId}>
               {isLayoutSaving ? 'Saving…' : 'Save timetable layout'}
             </button>
             <button type="button" className="settings-reset" onClick={handleResetTimetable} disabled={isLayoutSaving}>

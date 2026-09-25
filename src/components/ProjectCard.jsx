@@ -22,6 +22,10 @@ import {
   mapsFromPlannedClasses,
   resolveSessionClassDisplay,
 } from '../utils/timetablePlannedClasses';
+import ClassPlacementPalette from './ClassPlacementPalette';
+import PlacedLessonCard from './PlacedLessonCard';
+import { classPlacementUnavailableReason } from '../utils/timetableClassPlacement';
+import { useClassPlacement } from '../hooks/useClassPlacement';
 import './ProjectCard.css';
 
 /** Phones, small laptops, and tablets through large iPad Pro landscape; plus any coarse-pointer primary device. */
@@ -139,11 +143,12 @@ function getCompactBootstrapDayIndex({ weekStartDate, dayCount, weekMode }) {
 export default function ProjectCard({
   project,
   enableEditing = true,
+  enableClassPlacement = false,
   weekMode = 'date',
   fixedWeekKey = 'cycle-1',
   fixedWeekLabel = '',
 }) {
-  const { layout, dayLabels, rowSegments } = useTimetableLayout();
+  const { layout, dayLabels, rowSegments, isLoading: layoutLoading, isSaving: layoutSaving, error: layoutError } = useTimetableLayout();
   const { academicYear } = useAcademicYear();
   const {
     authoritativeEntries: classEntries,
@@ -408,6 +413,40 @@ export default function ProjectCard({
     saveTimetableEditModeToStorage(isEditingClasses);
   }, [isEditingClasses, enableEditing]);
 
+  const placementEnabled = enableClassPlacement && enableEditing && isEditingClasses && weekMode === 'fixed';
+  const placementWeekId = activeCollection?.weekId;
+  const placementSlots = useMemo(() => displayDayLabels.flatMap((_, day) =>
+    columnHolidayLabels[day] ? [] : lessonRows.flatMap((row) => {
+      const periodId = periodIdByIndex.get(row.rowIndex);
+      return periodId ? [{ weekId: placementWeekId, day, periodId,
+        label: `${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'][day % 5]} at ${row.timeLabel}` }] : [];
+    })), [displayDayLabels, columnHolidayLabels, lessonRows, periodIdByIndex, placementWeekId]);
+  const placementUnavailableReason = classPlacementUnavailableReason({ target, sessionState,
+    classesLoading, classesError, layoutLoading, layoutSaving, layoutError, modalSlot, slots: placementSlots });
+  const placementSafe = !placementUnavailableReason;
+  const removalSafe = !classPlacementUnavailableReason({ target, sessionState,
+    classesLoading, classesError, layoutLoading, layoutSaving, layoutError, slots: placementSlots });
+  const placementFrequencySessions = useMemo(() => sessionState.recurring
+    .filter((week) => isTwoWeekCycle || week.code === 'A').flatMap((week) => week.sessions),
+  [sessionState.recurring, isTwoWeekCycle]);
+  const placement = useClassPlacement({ enabled: placementEnabled, safe: placementSafe, removalSafe,
+    weekId: placementWeekId, sessions: activeCollection?.sessions || [],
+    frequencySessions: placementFrequencySessions, plannedClasses, slots: placementSlots,
+    save: (next) => target && sessionState.edit(target, next),
+  });
+
+  function moveModalPlacement() {
+    if (!modalSlot) return;
+    if (placement.beginMove({ weekId: placementWeekId, day: modalSlot.day,
+      periodId: periodIdByIndex.get(modalSlot.time) })) closeLessonModal();
+  }
+
+  function removeModalPlacement() {
+    if (!modalSlot) return;
+    if (placement.removeSession({ weekId: placementWeekId, day: modalSlot.day,
+      periodId: periodIdByIndex.get(modalSlot.time) })) closeLessonModal();
+  }
+
   function toggleEditMode() {
     if (!enableEditing) return;
     setIsEditingClasses((current) => !current);
@@ -590,6 +629,10 @@ export default function ProjectCard({
     }
 
     const selectedClass = classDraft.trim();
+    if (placementEnabled && currentSession && !selectedClass) {
+      removeModalPlacement();
+      return;
+    }
 
     if (selectedClass) {
       const allowedOptions = buildClassOptions(modalSlot.day, modalSlot.time, currentSession);
@@ -941,7 +984,7 @@ export default function ProjectCard({
                 <button type="button" className="schedule-edit-toggle" onClick={sessionState.reload}>Reload</button></>
               ) : null}
               {enableEditing ? <><button type="button" className="schedule-edit-toggle" onClick={toggleEditMode}>
-                {isEditingClasses ? 'Save class positions' : 'Edit classes'}
+                {isEditingClasses ? 'Finish editing' : 'Edit classes'}
               </button>
               <button
                 type="button"
@@ -955,6 +998,16 @@ export default function ProjectCard({
             </div>
           ) : null}
         </div>
+        {placementEnabled ? <>
+          <ClassPlacementPalette entries={placement.entries} selectedId={placement.selectedId}
+            disabled={!placementSafe} disabledReason={placementUnavailableReason} onSelect={placement.select} onDragStart={placement.dragClass}
+            onDragEnd={placement.endDrag} onCancel={placement.cancel} dropProps={placement.paletteDropProps} />
+          {placement.moving ? <div className="class-placement-move">
+            Choose an empty slot to move the lesson.
+            <button type="button" onClick={placement.cancel}>Cancel move</button>
+          </div> : null}
+          <p className="class-placement-status" role="status" aria-live="polite" aria-atomic="true">{placement.status}</p>
+        </> : null}
         <div className="schedule-dynamic" style={scheduleVars}>
           <div className={`schedule-scroll${isSingleDayTimetable ? ' schedule-scroll--single-day' : ''}`}>
             <div
@@ -1011,9 +1064,12 @@ export default function ProjectCard({
                   className={`day-col${holidayLabel ? ' day-col--holiday' : ''}${todayColumnIndex === dayIndex ? ' day-col--today' : ''}`}
                 >
                   {rowSegments.map((seg) => {
+                    const placementSlot = { weekId: placementWeekId, day: dayIndex,
+                      periodId: periodIdByIndex.get(seg.rowIndex) };
+                    const { className: placementStyle = '', ...placementEvents } = placement.slotProps(placementSlot);
                     if (holidayLabel) {
                       return (
-                        <div key={seg.rowIndex} className="slot slot--holiday">
+                        <div key={seg.rowIndex} className={`slot slot--holiday${placementStyle}`} {...placementEvents}>
                           <div
                             className="schedule-block-holiday"
                             aria-label={`School closed, ${holidayLabel}`}
@@ -1034,12 +1090,29 @@ export default function ProjectCard({
                         `Assign class for ${day} at ${seg.rangeLabel}`;
 
                       return (
-                        <div key={seg.rowIndex} className="slot">
+                        <div key={seg.rowIndex} className={`slot${placementStyle}`} {...placementEvents}>
                           {session || (enableEditing && isEditingClasses) ? (
+                            session && placementEnabled ? (
+                              <PlacedLessonCard draggable={placementSafe && Boolean(placementSlot.periodId)}
+                                dragging={placement.isDragging(placementSlot)} label={ariaLabel}
+                                onDragStart={(event) => placement.dragSession(event, placementSlot)}
+                                onDragEnd={placement.endDrag} onOpen={() => openLessonModal(dayIndex, seg.rowIndex)}>
+                                <span className="session-class">{sessionClassName}</span>
+                                <span>{seg.rangeLabel}</span>
+                                {trimmedTitle ? <span className="session-lesson-title">{trimmedTitle}</span> : null}
+                                {trimmedNotes ? <span className="session-lesson-notes">{trimmedNotes}</span> : null}
+                              </PlacedLessonCard>
+                            ) : (
                             <button
                               type="button"
                               className={`lesson-card${session ? '' : ' lesson-card--empty'}`}
-                              onClick={() => openLessonModal(dayIndex, seg.rowIndex)}
+                              draggable={Boolean(placementEnabled && placementSafe && session && placementSlot.periodId)}
+                              onDragStart={placementEnabled ? (event) => placement.dragSession(event, placementSlot) : undefined}
+                              onDragEnd={placementEnabled ? placement.endDrag : undefined}
+                              onClick={() => {
+                                if (placementEnabled && (placement.selectedId || placement.moving) && !session) placement.place(placementSlot);
+                                else openLessonModal(dayIndex, seg.rowIndex);
+                              }}
                               aria-label={ariaLabel}
                             >
                               {session ? (
@@ -1057,13 +1130,14 @@ export default function ProjectCard({
                                 <span className="session-empty-label">+ Add class</span>
                               )}
                             </button>
+                            )
                           ) : null}
                         </div>
                       );
                     }
 
                     return (
-                      <div key={seg.rowIndex} className="slot slot--nonlesson">
+                      <div key={seg.rowIndex} className={`slot slot--nonlesson${placementStyle}`} {...placementEvents}>
                         <div className={`schedule-block-muted schedule-block-muted--${seg.kind}`}>
                           <span className="schedule-block-muted-title">
                             {seg.kind === 'lunch'
@@ -1191,6 +1265,12 @@ export default function ProjectCard({
                   </div>
 
                   <div className="lesson-modal-actions">
+                    {placementEnabled && modalSession ? <button type="button"
+                      className="lesson-modal-cancel" disabled={!removalSafe}
+                      onClick={moveModalPlacement}>Move lesson</button> : null}
+                    {placementEnabled && modalSession ? <button type="button"
+                      className="lesson-modal-cancel" disabled={!removalSafe}
+                      onClick={removeModalPlacement}>Remove from timetable</button> : null}
                     <button type="button" className="lesson-modal-cancel" onClick={closeLessonModal}>
                       Cancel
                     </button>

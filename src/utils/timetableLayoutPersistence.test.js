@@ -103,3 +103,14 @@ test('legacy session helpers and layout identities are removed after scoped sess
   assert.equal(card.includes('makeLayoutKey'), false);
   assert.equal(api.includes("credentials: 'include',\n  });\n  const payload = await parseJsonSafe(response);\n  if (!response.ok) {\n    throw new Error(payload?.message || 'Could not load timetable layout.'"), false);
 });
+
+test('initial default layout can be saved before its draft becomes dirty', () => {
+  const settings = fs.readFileSync(new URL('../pages/Settings.jsx', import.meta.url), 'utf8');
+  const expression = settings.match(/className="settings-save" disabled={([^}]+)}/)[1];
+  const disabled = new Function('isLayoutSaving', 'isLayoutLoading', 'isPersisted', 'layoutDirty', 'selectedAcademicYearId', `return ${expression}`);
+  assert.equal(disabled(false, false, false, false, 'year-id'), false);
+  assert.equal(disabled(false, false, true, false, 'year-id'), true);
+  assert.equal(disabled(true, false, false, false, 'year-id'), true);
+  assert.equal(disabled(false, true, false, false, 'year-id'), true);
+  assert.equal(disabled(false, false, false, false, null), true);
+});

@@ -92,7 +92,7 @@ export default function Classes() {
         {isInputPage ? (
           <>
             <p className="classes-lead">
-              Place classes into timetable slots here. Use Edit classes to change class positions, then save them.
+              Place classes into timetable slots here. Use Edit classes to change class positions. Changes save automatically; choose Finish editing when you are done.
             </p>
             {isLoading ? <p className="classes-hint" role="status">Loading classes…</p> : null}
             {error ? <p className="classes-hint classes-hint--error" role="alert">{error}</p> : null}
@@ -119,6 +119,7 @@ export default function Classes() {
               <ProjectCard
                 project={timetableProject}
                 enableEditing
+                enableClassPlacement
                 weekMode="fixed"
                 fixedWeekKey={layout.cycle === TIMETABLE_CYCLE.TWO_WEEK && inputWeek === 2 ? 'cycle-2' : 'cycle-1'}
                 fixedWeekLabel={
