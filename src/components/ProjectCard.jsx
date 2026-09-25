@@ -28,8 +28,8 @@ import { classPlacementUnavailableReason } from '../utils/timetableClassPlacemen
 import { useClassPlacement } from '../hooks/useClassPlacement';
 import './ProjectCard.css';
 
-/** Phones, small laptops, and tablets through large iPad Pro landscape; plus any coarse-pointer primary device. */
-const COMPACT_TIMETABLE_QUERY = '(max-width: 1366px), (pointer: coarse)';
+/** Single-day navigation is reserved for phone widths, regardless of pointer type. */
+const COMPACT_TIMETABLE_QUERY = '(max-width: 767px)';
 
 function startOfWeek(date) {
   const result = new Date(date);
@@ -290,44 +290,19 @@ export default function ProjectCard({
 
   const gridDayCount = isSingleDayTimetable ? 1 : dayCount;
 
-  /** iOS Safari often ignores `repeat(var(--n), …px)`; inline columns guarantee scrollWidth. */
-  const [viewportNarrowForTimetable, setViewportNarrowForTimetable] = useState(false);
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return undefined;
-    }
-    const mq = window.matchMedia('(max-width: 1024px)');
-    const onChange = () => setViewportNarrowForTimetable(mq.matches);
-    onChange();
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-
-  const mobileFixedTimetableStyle = useMemo(() => {
-    if (!viewportNarrowForTimetable || isSingleDayTimetable || gridDayCount < 1) {
-      return null;
-    }
+  // Use a literal repeat count for WebKit and the same sizing for heading/body.
+  // The minimum protects narrow containers; fractional tracks fill wider ones.
+  const fullWeekGridStyle = useMemo(() => {
+    if (isSingleDayTimetable || gridDayCount < 1) return null;
     const dayPx = 118;
     const timePx = 72;
     return {
-      gridTemplateColumns: `${timePx}px repeat(${gridDayCount}, ${dayPx}px)`,
-      width: 'max-content',
+      gridTemplateColumns: `${timePx}px repeat(${gridDayCount}, minmax(${dayPx}px, 1fr))`,
+      width: '100%',
       minWidth: `${timePx + gridDayCount * dayPx}px`,
-      flexShrink: 0,
+      boxSizing: 'border-box',
     };
-  }, [viewportNarrowForTimetable, isSingleDayTimetable, gridDayCount]);
-
-  const mobileScrollTrackStyle = useMemo(
-    () =>
-      mobileFixedTimetableStyle
-        ? {
-            width: 'max-content',
-            minWidth: '100%',
-            alignItems: 'flex-start',
-          }
-        : null,
-    [mobileFixedTimetableStyle],
-  );
+  }, [isSingleDayTimetable, gridDayCount]);
 
   const teachingPeriods = useMemo(() => sessionState.periods
     .filter((period) => period.type === 'teaching')
@@ -366,6 +341,7 @@ export default function ProjectCard({
   }
 
   const [modalSlot, setModalSlot] = useState(null);
+  const lessonModalRef = useRef(null);
   const [classDraft, setClassDraft] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
   const [notesDraft, setNotesDraft] = useState('');
@@ -388,9 +364,25 @@ export default function ProjectCard({
       return undefined;
     }
     const previousOverflow = document.body.style.overflow;
+    const previousFocus = document.activeElement;
+    const dialog = lessonModalRef.current;
     document.body.style.overflow = 'hidden';
+    dialog?.querySelector('select, input')?.focus();
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopPropagation(); closeLessonModal();
+      } else if (event.key === 'Tab') {
+        const controls = [...dialog.querySelectorAll('button:not(:disabled), input, select, textarea, a[href]')];
+        const first = controls[0], last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
+    };
+    dialog?.addEventListener('keydown', handleKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
+      dialog?.removeEventListener('keydown', handleKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus();
     };
   }, [modalSlot]);
 
@@ -1012,9 +1004,8 @@ export default function ProjectCard({
           <div className={`schedule-scroll${isSingleDayTimetable ? ' schedule-scroll--single-day' : ''}`}>
             <div
               className={`schedule-scroll-track${isSingleDayTimetable ? ' schedule-scroll-track--single-day' : ''}`}
-              style={mobileScrollTrackStyle ?? undefined}
             >
-              <div className={scheduleHeadClass} style={mobileFixedTimetableStyle ?? undefined}>
+              <div className={scheduleHeadClass} style={fullWeekGridStyle ?? undefined}>
                 <span className="time-head">Time</span>
                 {dayIndicesToRender.map((dayIndex) => {
                   const day = displayDayLabels[dayIndex];
@@ -1036,7 +1027,7 @@ export default function ProjectCard({
 
               <div
                 className={`schedule-grid${isSingleDayTimetable ? ' schedule-grid--single-day' : ''}`}
-                style={mobileFixedTimetableStyle ?? undefined}
+                style={fullWeekGridStyle ?? undefined}
               >
               <div className="time-col">
                 {rowSegments.map((seg) => (
@@ -1164,6 +1155,7 @@ export default function ProjectCard({
         ? createPortal(
             <div className="lesson-modal-backdrop" onClick={closeLessonModal}>
               <div
+                ref={lessonModalRef}
                 className="lesson-modal"
                 role="dialog"
                 aria-modal="true"
@@ -1174,7 +1166,7 @@ export default function ProjectCard({
                   ×
                 </button>
                 <p className="lesson-modal-kicker">Lesson details</p>
-                <h2 id="lesson-modal-title">Assign class</h2>
+                <h2 id="lesson-modal-title">{modalSession ? 'Edit lesson' : 'Assign class'}</h2>
                 <p className="lesson-modal-context">
                   <span className="lesson-modal-class">{modalDayLabel}</span>
                   <span className="lesson-modal-meta">{modalRowSegment?.rangeLabel ?? ''}</span>
@@ -1264,13 +1256,15 @@ export default function ProjectCard({
                     ) : null}
                   </div>
 
+                  {placementEnabled && modalSession ? (
+                    <div className="lesson-modal-secondary-actions" role="group" aria-label="Lesson placement actions">
+                      <button type="button" className="lesson-modal-secondary" disabled={!removalSafe}
+                        onClick={moveModalPlacement}>Move lesson</button>
+                      <button type="button" className="lesson-modal-secondary lesson-modal-secondary--danger" disabled={!removalSafe}
+                        onClick={removeModalPlacement}>Remove from timetable</button>
+                    </div>
+                  ) : null}
                   <div className="lesson-modal-actions">
-                    {placementEnabled && modalSession ? <button type="button"
-                      className="lesson-modal-cancel" disabled={!removalSafe}
-                      onClick={moveModalPlacement}>Move lesson</button> : null}
-                    {placementEnabled && modalSession ? <button type="button"
-                      className="lesson-modal-cancel" disabled={!removalSafe}
-                      onClick={removeModalPlacement}>Remove from timetable</button> : null}
                     <button type="button" className="lesson-modal-cancel" onClick={closeLessonModal}>
                       Cancel
                     </button>

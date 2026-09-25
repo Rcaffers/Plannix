@@ -264,9 +264,13 @@
   letter-spacing: 0.02em;
 }
 
-.schedule-grid--single-day {
-  min-width: 0;
+/* Shared single-day tracks override the later full-week defaults. */
+.schedule-head.schedule-head--single-day,
+.schedule-grid.schedule-grid--single-day {
   grid-template-columns: 72px minmax(0, 1fr);
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .project-card--compact-day .lesson-card {
@@ -705,6 +709,10 @@
 .lesson-modal {
   position: relative;
   width: min(400px, 100%);
+  box-sizing: border-box;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 26px 22px 22px;
   border-radius: 10px;
   border: 1px solid rgba(63, 127, 120, 0.24);
@@ -893,6 +901,51 @@
   background: rgba(177, 102, 94, 0.34);
 }
 
+.lesson-modal-secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(63, 127, 120, 0.18);
+}
+
+.lesson-modal-secondary {
+  min-height: 36px;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid rgba(17, 17, 17, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.55);
+  color: rgba(34, 60, 57, 0.95);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.lesson-modal-secondary--danger {
+  color: #84312b;
+  border-color: rgba(177, 102, 94, 0.32);
+}
+
+.lesson-modal-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.lesson-modal-secondary:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
+.lesson-modal-secondary:focus-visible {
+  outline: 2px solid #3f7f78;
+  outline-offset: 2px;
+}
+
+.lesson-modal-form > * {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
 .lesson-modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -937,11 +990,6 @@
     margin-left: 0;
   }
 
-  .schedule-grid--single-day {
-    grid-template-columns: 72px minmax(0, 1fr);
-    min-width: 0;
-    width: 100%;
-  }
 }
 
 @media (max-width: 1024px) {
