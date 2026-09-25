@@ -7,7 +7,7 @@ import {
   fetchDatedTimetableSessions, fetchRecurringTimetableSessions, removeDatedTimetableOverride,
   saveDatedTimetableSessions, saveRecurringTimetableSessions, saveTimetableSessionBatch,
 } from '../utils/timetableSessionApi';
-import { assertUniqueSessionSlots, createSerializedSaveQueue, sameSessions } from '../utils/timetableSessionState';
+import { assertUniqueSessionSlots, createSerializedSaveQueue } from '../utils/timetableSessionState';
 
 const TimetableSessionContext = createContext(null);
 
@@ -29,7 +29,6 @@ export function TimetableSessionProvider({ children, user }) {
   const [requestReference, setRequestReference] = useState('');
   const [conflict, setConflict] = useState(false);
   const [unsaved, setUnsaved] = useState(false);
-  const [restorePoint, setRestorePoint] = useState(null);
   const generation = useRef(0);
   const revisionRef = useRef(null);
   const activeRef = useRef(null);
@@ -51,7 +50,6 @@ export function TimetableSessionProvider({ children, user }) {
     resetSaveQueue();
     setRecurring([]); setDated(null); setRevision(null); setIsLoading(false);
     setSaved(false); setError(''); setRequestReference(''); setConflict(false); setUnsaved(false);
-    setRestorePoint(null);
   }, [resetSaveQueue]);
 
   const loadRecurring = useCallback(async () => {
@@ -83,7 +81,7 @@ export function TimetableSessionProvider({ children, user }) {
   const loadDate = useCallback(async (weekStartDate) => {
     if (!scope) return false;
     resetSaveQueue();
-    const expected = generation.current; setIsLoading(true); setError(''); setRequestReference(''); setSaved(false); setRestorePoint(null);
+    const expected = generation.current; setIsLoading(true); setError(''); setRequestReference(''); setSaved(false);
     try {
       const result = await fetchDatedTimetableSessions({ ...scope, weekStartDate });
       if (expected !== generation.current) return false;
@@ -161,25 +159,11 @@ export function TimetableSessionProvider({ children, user }) {
     return Promise.all(dates.map((weekStartDate) => fetchDatedTimetableSessions({ ...scope, weekStartDate })));
   }, [scope]);
 
-  const setCurrentRestorePoint = useCallback((target, sessions, overrideExists = false) => {
-    if (isLoading || isSaving || unsaved || conflict) return false;
-    setRestorePoint({ key: target.type === 'recurring' ? `recurring:${target.weekId}` : `date:${target.weekStartDate}`,
-      target, sessions: sessions.map((entry) => ({ ...entry })), overrideExists }); return true;
-  }, [isLoading, isSaving, unsaved, conflict]);
-  const undoRestorePoint = useCallback(async (target, current) => {
-    const key = target.type === 'recurring' ? `recurring:${target.weekId}` : `date:${target.weekStartDate}`;
-    if (!restorePoint || restorePoint.key !== key || sameSessions(restorePoint.sessions, current)
-        || !window.confirm('Undo this week to the restore point?')) return false;
-    if (target.type === 'date' && !restorePoint.overrideExists) return removeOverride();
-    edit(target, restorePoint.sessions); return true;
-  }, [restorePoint, removeOverride, edit]);
-
   const value = useMemo(() => ({ scope, recurring, dated, revision, isLoading, isSaving, saved, error,
     requestReference, conflict, unsaved, weeks, periods, classes: classes || [], loadDate, edit, retry,
-    reload, removeOverride, saveBatch, loadDateSnapshots, restorePoint, setCurrentRestorePoint, undoRestorePoint, clearSessions: clear,
+    reload, removeOverride, saveBatch, loadDateSnapshots, clearSessions: clear,
   }), [scope, recurring, dated, revision, isLoading, isSaving, saved, error, requestReference, conflict,
-    unsaved, weeks, periods, classes, loadDate, edit, retry, reload, removeOverride, saveBatch, loadDateSnapshots, restorePoint,
-    setCurrentRestorePoint, undoRestorePoint, clear]);
+    unsaved, weeks, periods, classes, loadDate, edit, retry, reload, removeOverride, saveBatch, loadDateSnapshots, clear]);
   return <TimetableSessionContext.Provider value={value}>{children}</TimetableSessionContext.Provider>;
 }
 

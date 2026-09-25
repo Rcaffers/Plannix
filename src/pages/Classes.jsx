@@ -120,6 +120,7 @@ export default function Classes() {
                 project={timetableProject}
                 enableEditing
                 enableClassPlacement
+                enableFixedPhoneSingleDay
                 weekMode="fixed"
                 fixedWeekKey={layout.cycle === TIMETABLE_CYCLE.TWO_WEEK && inputWeek === 2 ? 'cycle-2' : 'cycle-1'}
                 fixedWeekLabel={

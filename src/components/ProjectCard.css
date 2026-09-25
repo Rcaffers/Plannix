@@ -274,6 +274,7 @@
 }
 
 .project-card--compact-day .lesson-card {
+  box-sizing: border-box;
   font-size: 0.74rem;
 }
 

@@ -8,17 +8,26 @@ const periods = [{ id: 'p1', type: 'teaching', number: 1 }, { id: 'p2', type: 't
 const rowSegments = periods.map((p, i) => ({ kind: 'lesson', rowIndex: i, timeLabel: i ? '10:00' : '09:00', rangeLabel: i ? '10:00 – 11:00' : '09:00 – 10:00' }));
 export const useAcademicYear = () => ({ academicYear: null });
 export const useClasses = () => ({ authoritativeEntries: entries });
-export const useTimetableLayout = () => ({ layout: { cycle: 'weekly' }, dayLabels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], rowSegments });
+export const useTimetableLayout = () => ({ layout: { cycle: mode === 'fixed' ? 'two-week' : 'weekly' }, dayLabels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], rowSegments });
 let state;
 export const useTimetableSessions = () => state;
 const initial = { id: 'lesson', day: 0, periodId: 'p1', classId: '7a', title: 'Fractions', notes: 'Rulers' };
 let calls = [];
+let allowEditing = true;
+let feedbackUpdate, observeSave = false, retryCalls = 0, reloadCalls = 0;
 const scope = {}; const loadedDates = []; let mode = 'date';
 function Harness() {
+  const [feedback, setFeedback] = useState({}); feedbackUpdate = setFeedback;
   const [sessions, setSessions] = useState([initial]);
-  state = { scope, revision: 1, periods, dated: { sessions }, loadDate(date) { loadedDates.push(date); }, recurring: [{ code: 'A', weekId: 'A', sessions }],
-    edit(target, next) { calls.push({ target, sessions: next }); setSessions(next); return true; } };
-  return <ProjectCard project={{ title: 'Test' }} weekMode={mode} enableClassPlacement />;
+  const [weekB, setWeekB] = useState([]);
+  const [selectedWeek, setSelectedWeek] = useState('A');
+  state = { ...feedback, retry() { retryCalls++; }, reload() { reloadCalls++; }, scope, revision: 1, periods, dated: { sessions }, loadDate(date) { loadedDates.push(date); }, recurring: [{ code: 'A', weekId: 'A', sessions }, { code: 'B', weekId: 'B', sessions: weekB }],
+    edit(target, next) { if (observeSave) setFeedback({ isSaving: true }); calls.push({ target, sessions: next }); if (target.weekId === 'B') setWeekB(next); else setSessions(next); return true; } };
+  return <>
+    {mode === 'fixed' ? <div><button id="week-a" onClick={() => setSelectedWeek('A')}>Week A</button><button id="week-b" onClick={() => setSelectedWeek('B')}>Week B</button></div> : null}
+    <ProjectCard project={{ title: 'Test' }} weekMode={mode} enableEditing={allowEditing} enableClassPlacement enableFixedPhoneSingleDay
+      fixedWeekKey={selectedWeek === 'B' ? 'cycle-2' : 'cycle-1'} fixedWeekLabel={`Week ${selectedWeek}`} />
+  </>;
 }
 const root = createRoot(document.body.appendChild(document.createElement('div')));
 const results = [];
@@ -27,7 +36,11 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 100));
 const click = el => flushSync(() => el.click());
 async function width(value) { frameElement.style.width = `${value}px`; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); await tick(); }
 function mount() { flushSync(() => root.render(<Harness key={Math.random()} />)); }
+function noRestoreControls() {
+  check(!/Set restore point|Undo to restore point/.test(document.body.textContent), 'No restore-point controls');
+}
 function fullWeek(label) {
+  noRestoreControls();
   const cols = [...document.querySelectorAll('.day-col')];
   check(cols.length === 5 && document.querySelectorAll('.day-head').length === 5, `${label}: five weekdays mounted`);
   check(!document.querySelector('.schedule-compact-nav') && document.querySelector('[aria-label="Go to next week"]') || mode === 'fixed', `${label}: standard week navigation`);
@@ -52,6 +65,7 @@ function fullWeek(label) {
   check([...document.querySelectorAll('.schedule-titlebar button')].every(el => { const r=el.getBoundingClientRect(); return r.left >= bar.left && r.right <= bar.right; }), `${label}: controls fit titlebar`);
 }
 function singleDay(label) {
+  noRestoreControls();
   const rect = selector => document.querySelector(selector).getBoundingClientRect();
   const timeHead = rect('.time-head'), timeBody = rect('.time-col');
   const dayHead = rect('.day-head'), dayBody = rect('.day-col');
@@ -105,6 +119,79 @@ async function run() {
   palette.focus(); check(document.activeElement === palette, 'Tablet palette can receive keyboard focus');
   click(palette); click(document.querySelector('.lesson-card--empty'));
   check(calls.length === 1 && calls[0].sessions.length === 2, 'Tablet tap placement makes one edit');
+  for (const size of [320, 375, 390, 430]) {
+    await width(size); mount(); await tick(); calls = [];
+    singleDay(`Input Classes ${size}px`);
+    check(document.querySelector('.schedule-day-label').textContent === 'Monday', 'Fixed phone starts on Monday');
+    check(!document.querySelector('.schedule-date-input') && !document.querySelector('.schedule-day-today') && !document.body.textContent.includes('Week commencing'), 'Fixed phone has no calendar controls');
+    const next = () => click(document.querySelector('[aria-label="Next day"]'));
+    click(document.querySelector('[aria-label="Previous day"]'));
+    check(document.querySelector('.schedule-day-label').textContent === 'Friday', 'Previous wraps Monday to Friday');
+    next(); check(document.querySelector('.schedule-day-label').textContent === 'Monday', 'Next wraps Friday to Monday');
+    for (const day of ['Tuesday', 'Wednesday', 'Thursday', 'Friday']) { next(); check(document.querySelector('.schedule-day-label').textContent === day, `Navigates to ${day}`); }
+    next(); next(); // Tuesday
+    check(calls.length === 0, 'Day navigation does not save or change week');
+    click(document.querySelector('.class-placement-chip')); click(document.querySelector('.lesson-card--empty'));
+    check(calls.length === 1 && calls[0].target.weekId === 'A' && calls[0].sessions.some(s => s.day === 1), 'Phone placement targets visible Tuesday in Week A');
+    check(document.querySelector('.schedule-day-label').textContent === 'Tuesday', 'Saving preserves selected weekday');
+    click(document.querySelector('.lesson-card-action'));
+    check(document.querySelector('.lesson-modal-class').textContent === 'Tue', 'Modal edits visible weekday');
+    click(document.querySelector('.lesson-modal-cancel'));
+    check(document.querySelector('.schedule-day-label').textContent === 'Tuesday', 'Modal cancellation preserves weekday');
+    click(document.querySelector('#week-b')); await tick();
+    check(document.querySelector('.schedule-week-label').textContent === 'Week B' && !document.querySelector('.lesson-card--placed'), 'Week B displays its own empty Tuesday');
+    click(document.querySelector('.class-placement-chip')); click(document.querySelector('.lesson-card--empty'));
+    check(calls.length === 2 && calls[1].target.weekId === 'B' && calls[1].sessions.length === 1 && calls[1].sessions[0].day === 1, 'Week B saves independently');
+    check(document.querySelector('.class-placement-chip').disabled, 'Combined A/B frequency limit remains enforced');
+    click(document.querySelector('#week-a')); await tick();
+    check(state.recurring[0].sessions.length === 2 && state.recurring[1].sessions.length === 1 && document.querySelector('.lesson-card--placed'), 'Week A/B placements remain separate and intact');
+  }
+  for (const size of [768, 820, 1024, 1366]) { await width(size); fullWeek(`Input Classes ${size}px`); }
+
+  // These tests drive the actual toolbar against session-state boundary states;
+  // the provider browser suite separately exercises real queue success/recovery.
+  for (const view of ['date', 'fixed']) {
+    mode = view; mount(); await tick(); calls = []; observeSave = true;
+    noRestoreControls();
+    const getButton = label => [...document.querySelectorAll('button')].find(e => e.textContent.trim() === label);
+    click(document.querySelector('.lesson-card-action') || document.querySelector('.lesson-card:not(.lesson-card--empty)'));
+    const title = document.querySelector('#lesson-title-input');
+    flushSync(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(title, 'Edited lesson'); title.dispatchEvent(new Event('input', { bubbles: true })); });
+    click(document.querySelector('.lesson-modal-save'));
+    check(calls.length === 1 && calls[0].sessions[0].title === 'Edited lesson' && document.body.textContent.includes('Saving…'), `${view}: lesson edit starts autosave with visible Saving`);
+    check(!getButton('Save'), `${view}: no timetable manual Save button`);
+    flushSync(() => feedbackUpdate({ saved: true }));
+    check(document.querySelector('.classes-hint').textContent === 'Saved', `${view}: successful save shows Saved`);
+    flushSync(() => feedbackUpdate({ error: 'Save failed', conflict: true, unsaved: true }));
+    check(document.body.textContent.includes('Save failed') && document.body.textContent.includes('The timetable changed elsewhere.'), `${view}: save error and conflict remain visible`);
+    const retries = retryCalls, reloads = reloadCalls;
+    click(getButton('Retry save')); click(getButton('Reload'));
+    check(retryCalls === retries+1 && reloadCalls === reloads+1, `${view}: recovery buttons call retry and reload`);
+    flushSync(() => feedbackUpdate({})); observeSave = false;
+    if (view === 'date') {
+      check(!getButton('Clear this week'), 'Dated timetable has no Clear this week control');
+      click(document.querySelector('.lesson-card:not(.lesson-card--empty)'));
+      const select = document.querySelector('#lesson-class-input');
+      flushSync(() => { select.value = ''; select.dispatchEvent(new Event('change', { bubbles: true })); });
+      const beforeRemove = calls.length; click(document.querySelector('.lesson-modal-save'));
+      check(calls.length === beforeRemove+1 && calls.at(-1).sessions.length === 0, 'Dated individual lesson removal still saves');
+      continue;
+    }
+    const clear = getButton('Clear timetable');
+    check(Boolean(clear), 'Input Classes retains Clear timetable');
+    let confirmations = 0; const originalConfirm = window.confirm;
+    window.confirm = () => { confirmations++; return false; };
+    const beforeClear = calls.length; click(clear);
+    check(confirmations === 1 && calls.length === beforeClear, `${view}: cancelled Clear makes no edit`);
+    window.confirm = () => { confirmations++; return true; }; click(clear);
+    check(confirmations === 2 && calls.length === beforeClear+1 && calls.at(-1).sessions.length === 0, `${view}: confirmed Clear saves empty collection`);
+    window.confirm = originalConfirm;
+  }
+  mode = 'date'; allowEditing = false; mount(); await tick();
+  noRestoreControls();
+  check(!document.querySelector('.schedule-titlebar-actions') && !document.body.textContent.includes('Clear this week'), 'Main read-only toolbar has no empty action gap or Clear this week');
+
+
 }
 run().then(() => { parent.document.body.dataset.testResult='passed'; }, error => { parent.document.body.dataset.testResult='failed'; results.push(error.stack); }).finally(() => {
   const report=parent.document.createElement('pre'); report.textContent=JSON.stringify(results,null,2); parent.document.body.append(report);

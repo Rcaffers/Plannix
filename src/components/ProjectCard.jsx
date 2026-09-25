@@ -145,6 +145,7 @@ export default function ProjectCard({
   enableEditing = true,
   enableClassPlacement = false,
   weekMode = 'date',
+  enableFixedPhoneSingleDay = false,
   fixedWeekKey = 'cycle-1',
   fixedWeekLabel = '',
 }) {
@@ -219,7 +220,7 @@ export default function ProjectCard({
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
-  const isSingleDayTimetable = isCompactTimetable && weekMode === 'date';
+  const isSingleDayTimetable = isCompactTimetable && (weekMode === 'date' || enableFixedPhoneSingleDay);
   const [compactDayIndex, setCompactDayIndex] = useState(0);
   const compactDayBootstrappedRef = useRef(false);
   const weekStartRef = useRef(weekStartDate);
@@ -273,8 +274,10 @@ export default function ProjectCard({
     return d;
   }, [weekMode, weekStartDate, compactDayIndex]);
 
-  const visibleDayTitle =
-    visibleCalendarDay && isSingleDayTimetable ? formatVisibleCalendarDay(visibleCalendarDay) : '';
+  const repeatingDayLabel = displayDayLabels[compactDayIndex] || '';
+  const visibleDayTitle = weekMode === 'date'
+    ? (visibleCalendarDay && isSingleDayTimetable ? formatVisibleCalendarDay(visibleCalendarDay) : '')
+    : ({ Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday' }[repeatingDayLabel] || repeatingDayLabel);
 
   const scheduleDateInputValue = useMemo(() => {
     if (!visibleCalendarDay) return '';
@@ -479,6 +482,10 @@ export default function ProjectCard({
   function moveCompactDay(delta) {
     if (!isSingleDayTimetable || delta === 0) return;
     compactDayBootstrappedRef.current = true;
+    if (weekMode === 'fixed') {
+      setCompactDayIndex((index) => (index + delta + dayCount) % dayCount);
+      return;
+    }
     const nextIndex = compactDayIndex + delta;
     if (nextIndex < 0) {
       moveWeek(-1);
@@ -871,9 +878,9 @@ export default function ProjectCard({
             <strong>{project.title}</strong>
             <span>{project.subtitle}</span>
           </div>
-          {weekMode === 'date' ? (
-            isSingleDayTimetable ? (
+          {isSingleDayTimetable ? (
               <div className="schedule-compact-nav">
+                {weekMode === 'fixed' ? <span className="schedule-week-label">{fixedWeekLabel}</span> : null}
                 <div className="schedule-day-nav-row" aria-label="Day navigation">
                   <button
                     type="button"
@@ -893,7 +900,7 @@ export default function ProjectCard({
                     →
                   </button>
                 </div>
-                <div className="schedule-compact-toolbar">
+                {weekMode === 'date' ? <div className="schedule-compact-toolbar">
                   <button
                     type="button"
                     className="schedule-day-today"
@@ -911,9 +918,9 @@ export default function ProjectCard({
                       aria-label="Choose a date on the timetable"
                     />
                   </label>
-                </div>
+                </div> : null}
               </div>
-            ) : (
+            ) : weekMode === 'date' ? (
               <div className="schedule-week-nav" aria-label="Week navigation">
                 <button
                   type="button"
@@ -941,35 +948,16 @@ export default function ProjectCard({
                   →
                 </button>
               </div>
-            )
           ) : (
             <div className="schedule-week-nav">
               <span className="schedule-week-label">{weekCommencingLabel}</span>
             </div>
           )}
-          {target ? (
+          {target && (enableEditing || sessionState.error || (weekMode === 'date' && sessionState.dated?.overrideExists)) ? (
             <div className="schedule-titlebar-actions">
-              <button type="button" className="schedule-edit-toggle"
-                disabled={sessionState.isLoading || sessionState.isSaving || sessionState.unsaved || sessionState.conflict || !target}
-                onClick={() => sessionState.setCurrentRestorePoint(target,
-                  (activeCollection?.sessions || []), Boolean(sessionState.dated?.overrideExists))}>
-                Set restore point
-              </button>
-              <button type="button" className="schedule-edit-toggle"
-                disabled={!target || !sessionState.restorePoint
-                  || sameSessions(sessionState.restorePoint.sessions, activeCollection?.sessions || [])}
-                onClick={() => sessionState.undoRestorePoint(target, activeCollection?.sessions || [])}>
-                Undo to restore point
-              </button>
               {weekMode === 'date' && sessionState.dated?.overrideExists ? (
                 <button type="button" className="schedule-edit-toggle" disabled={sessionState.isSaving}
                   onClick={() => sessionState.removeOverride()}>Restore repeating timetable</button>
-              ) : null}
-              {weekMode === 'date' ? (
-                <button type="button" className="schedule-edit-toggle schedule-edit-toggle--danger"
-                  disabled={sessionState.isSaving || sessions.length === 0} onClick={handleClearTimetable}>
-                  Clear this week
-                </button>
               ) : null}
               {sessionState.error ? (
                 <><button type="button" className="schedule-edit-toggle" onClick={sessionState.retry}>Retry save</button>

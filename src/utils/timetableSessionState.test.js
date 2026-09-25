@@ -40,11 +40,11 @@ test('reset invalidates in-flight responses and supports scope cleanup', async (
   assert.equal(applied, 0); assert.equal(queue.pending, false);
 });
 
-test('context includes restore point modes, cleanup, batch persistence and transition protection', () => {
+test('context retains cleanup, batch persistence and transition protection without unused restore points', () => {
   const context = fs.readFileSync(new URL('../context/TimetableSessionContext.jsx', import.meta.url), 'utf8');
   const app = fs.readFileSync(new URL('../App.jsx', import.meta.url), 'utf8');
   assert.match(context, /overrideExists/); assert.match(context, /removeOverride/); assert.match(context, /saveBatch/);
-  assert.match(context, /createSerializedSaveQueue/); assert.match(context, /setRestorePoint\(null\)/);
+  assert.match(context, /createSerializedSaveQueue/); assert.doesNotMatch(context, /restorePoint|setCurrentRestorePoint|undoRestorePoint/);
   assert.match(context, /generation\.current/); assert.match(context, /__plannixConfirmSessionDiscard/);
   assert.match(app, /__plannixConfirmSessionDiscard/);
   assert.equal((app.match(/<TimetableSessionProvider user=\{user\}>/g) || []).length, 1);
