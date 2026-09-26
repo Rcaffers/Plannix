@@ -3,15 +3,15 @@
 Profile stores one personal connection for OpenAI (`openai`), Anthropic
 (`anthropic`) or Google Gemini (`google_gemini`). Connection status means the key
 has been stored, not that a provider has validated it. Connection management makes
-no provider requests. Stage 2B adds internal generation only, with no public AI
-execution endpoint or browser UI.
+no provider requests. Stage 2B provides internal generation. Stage 2C exposes only authenticated
+pasted-text holiday suggestions, with no browser UI yet.
 
 ## Boundaries
 
 - `shared/aiProviders.js` contains browser-safe IDs, labels and the key length
   limit. `server/ai/providers.js` binds those IDs to the internal adapters. Its
-  `executionEnabled: false` flag continues to denote disabled public execution;
-  trusted server code can use Stage 2B. Neither accepts caller-selected destinations
+  `executionEnabled: false` flag denotes disabled general-purpose public execution;
+  trusted server code and the narrowly scoped authenticated Stage 2C route use Stage 2B. Neither accepts caller-selected destinations
   or model IDs.
 - GET/POST/PUT/DELETE `/api/ai/connection` require a confirmed Supabase user. The
   request-scoped client carries the validated JWT; it never uses the admin key.
@@ -72,13 +72,17 @@ migration application and deployment are separate, explicitly authorised work.
 
 Before exposing an AI feature, separately review endpoint authentication,
 authorisation, rate limits/quotas, spending controls and product-specific output
-validation. Stage 2B does not register an execution endpoint. Do not expose
-credential retrieval to React. Holiday extraction and PDF handling are not implemented.
+validation. Stage 2B does not register an execution endpoint. Stage 2C registers only the
+authenticated extraction route described below. Do not expose credential retrieval
+to React. PDF handling is not implemented.
 
 ## Stage 2A: internal credential retrieval
 
 `server/ai/credential.js` exports `retrieveAiCredential(validatedUserId)`, returning
-only `{ provider, apiKey }` to its immediate trusted caller. Obtain that canonical
+only `{ provider, apiKey }` to its immediate trusted caller. An optional trusted
+`signal` option is passed to the Supabase RPC builder via `abortSignal` when supported.
+Cancellation and the bounded lookup deadline are safe internal errors; no signal
+reason is returned. Non-cooperative lookup settlement is observed and discarded. Obtain that canonical
 UUID from confirmed authentication, never from request parameters. The module
 creates an admin client solely to invoke `plannix_get_server_ai_credential(uuid)`;
 it exposes no general-purpose admin client or table access. All failures become
@@ -114,8 +118,8 @@ rejected before credential retrieval or network activity.
 Flow: validate and compile the schema → fresh Stage 2A lookup → registry-selected
 adapter → bounded provider request → JSON parsing and local schema validation →
 parsed value only. Future routes must call the orchestration service, never handle
-keys or call the adapters/credential retriever directly. No HTTP route or browser
-import exposes this service. No provider key, raw response, request headers or
+keys or call the adapters/credential retriever directly. No general-purpose HTTP route or browser
+import exposes this service; Stage 2C uses a fixed prompt/schema internally. No provider key, raw response, request headers or
 provider error body reaches the browser. There is no key, prompt, result or schema
 cache in Plannix; provider-side retention/caching is governed separately by the
 provider. OpenAI requests explicitly use `store: false`.
@@ -247,6 +251,7 @@ also rejected if it contains the credential itself.
 | `AI_CREDENTIAL_UNAVAILABLE` | No | Stage 2A lookup failed or credential metadata is invalid |
 | `AI_CREDENTIAL_REJECTED` | No | Provider returned 401 or 403 |
 | `AI_RATE_LIMITED` | Yes | Provider returned 429 |
+| `AI_CANCELLED` | No | Trusted caller cancellation; no raw reason |
 | `AI_TIMEOUT` | Yes | Provider deadline/abort |
 | `AI_PROVIDER_UNAVAILABLE` | Yes | Network failure, 408 or 5xx; native fetch redirect rejection also fails safely here |
 | `AI_INVALID_RESPONSE` | No | Invalid content, schema mismatch, refusal, truncation or observed redirect response |
@@ -276,3 +281,134 @@ before/after reasoning, ambiguous/missing/unknown blocks, chunked ASCII and UTF-
 response overflow with cancellation, and UTF-8 boundaries for all three inputs.
 All fixtures and transport calls are synthetic; no live provider requests are
 part of these tests. Interactions remains Gemini's sole request/response contract.
+
+
+## Stage 2C: authenticated pasted-text holiday suggestions
+
+`POST /api/ai/holidays/extract` requires the existing confirmed Supabase bearer
+user middleware. Only its `req.auth.userId` reaches Stage 2B; the body cannot
+select a user, provider, model, destination, credential, membership or schema.
+There is no unauthenticated variant. Authentication uses the existing request
+boundary; no admin client is added to the route.
+
+Accept `application/json` with exactly:
+```json
+{
+  "text": "School closes after school on 23 October 2026 and reopens 2 November 2026.",
+  "academicYearStartDate": "2026-09-01",
+  "academicYearEndDate": "2027-08-31"
+}
+```
+No query parameters. Only absent or `identity` Content-Encoding is accepted; all
+compressed/multiple encodings are rejected with 415 before decompression or AI
+work. The 64 KiB parser uses `inflate: false`. A grammar-validated token walk
+rejects duplicate decoded JSON keys at every object depth, including escaped
+equivalents, with safe 400 errors. It uses no new dependency and bounds nesting
+to 100; repeated text values and keys in separate objects remain valid.
+Text must be nonempty after trimming and no more than
+50,000 UTF-8 bytes before trimming. The JSON body is capped at 64 KiB (escaped
+JSON can hit this cap before the text limit). Dates must be real ISO calendar
+dates from 1900 through 2200, in order and at most two calendar years apart.
+Equal boundary dates are permitted. No saved academic-year ID is required.
+Validation precedes generation, credential retrieval and provider activity.
+
+A fixed server-owned prompt treats pasted instructions as untrusted data, forbids
+following links or inventing dates, excludes ordinary events and weekends unless
+explicitly part of a closure, and distinguishes after-school closure from the
+first non-teaching day and reopening from the last holiday day. Prompt separation
+is not a guarantee of model accuracy: all suggestions require later human review.
+The fixed closed JSON Schema uses Stage 2B's common subset. Count, date and label
+constraints unsupported by that subset are enforced independently after generation.
+
+Success returns only `{"holidays":[{"label":"Autumn half term","startDate":"2026-10-24","endDate":"2026-11-01"}]}`
+(or an empty array). Each entry has exactly those three fields; no IDs are
+created. Maximum 100 entries and 200 trimmed label characters match Academic Year.
+Labels reject Unicode control (Cc) and formatting (Cf) characters, including
+zero-width/bidi controls, before normalization. NFC normalization, Unicode
+whitespace collapse to ordinary spaces and edge trimming precede the nonempty/
+200-character checks, return value and duplicate comparison. Ordinary international
+letters and punctuation are retained; HTML/Markdown delimiters are rejected.
+Dates must be real, ordered, inclusive and within the submitted boundaries.
+Unknown keys, including prototype-related names, are rejected. Results sort by
+start date, end date, then label using deterministic string comparison.
+Exact duplicates after Unicode/whitespace normalization reject the entire response. Overlapping
+ranges with different labels are preserved, never silently merged. Invalid
+results never return a partial collection.
+
+All responses after authentication are `Cache-Control: no-store`. Existing
+request IDs/support-reference headers and sanitized error logging remain in use;
+no pasted text, generated holidays, prompts, schemas, keys or upstream causes are
+logged. Success contains no support reference in its body.
+
+| Failure | HTTP status |
+| --- | --- |
+| Invalid fields/dates/text/JSON | 400 |
+| Missing/invalid authentication, unconfirmed user | existing 401 / 403 |
+| Unsupported content type / excessive JSON body | 415 / 413 |
+| Missing/unusable AI connection | 409, directs user to Profile |
+| Rejected provider credential | 422, asks user to reconnect in Profile |
+| Rate limit | 429 |
+| Provider/route deadline | 504 |
+| Cancellation while a response remains connected | 409 |
+| Provider unavailable | 503 |
+| Invalid suggestions/provider output | 502 |
+| Unexpected/configuration failure | existing sanitized 500 |
+
+The route reuses the existing bounded, hashed user/IP rate-limiter factory with
+an extraction-specific safe message: five accepted-to-limiter attempts per user
+and per IP per 15 minutes, including failed/concurrent attempts. Local limits
+supply `Retry-After`; Stage 2B does not expose provider headers, so provider 429s
+have no invented retry interval. A per-user token lock rejects concurrent requests
+with 409. Other users are independent except when sharing an IP's rate budget.
+
+Each admitted extraction owns one AbortController and one per-user operation token.
+Only settlement of that exact generation promise releases its lock. A disconnect
+or 35-second route timeout requests cancellation but does not release the lock;
+a subsequent request stays blocked until settlement. Detached rejection is safely
+observed, and disconnected responses never receive a later write. Stale cleanup
+cannot delete another operation's lock.
+
+The route passes an optional signal as a trusted second argument to Stage 2B,
+never as browser-supplied configuration. Cancellation is checked before and after
+credential lookup and immediately before provider fetch. Stage 2A attaches the
+signal to Supabase RPCs where supported; non-cooperative lookups are bounded and
+cannot start a provider request after cancellation. Lookup waiting has a 30-second
+bound. Stage 2B independently retains its own 30-second provider deadline covering
+fetch and body consumption. Cancellation aborts transport, cancels any response
+body and returns `AI_CANCELLED`; internal deadlines return `AI_TIMEOUT`. Signal
+reasons and upstream causes never escape. Expected client disconnects are not
+logged as internal failures; route deadlines remain safe 504 errors.
+
+Aborting transport cannot guarantee cancellation or reversal of provider work
+already started or billed. No automatic retry occurs. A non-cooperative underlying
+promise is observed even after cancellation/deadline, avoiding unhandled rejection.
+The production orchestrator settles within its cancellation/deadline protections;
+a test-injected generation function that ignores them deliberately keeps its lock
+until it settles rather than permitting overlapping operations.
+
+Authentication and input failures do not consume limiter entries. Every request
+reaching the limiter increments separate hashed user and IP counters, including
+concurrency rejections and provider failures. Windows begin at first use and last
+15 minutes; rejected attempts do not extend them. Retry-After uses the latest
+expiry of the exhausted counters only. Entries expire and the map is capped at
+10,000 entries with oldest-entry eviction. Limits reset on restart/eviction and
+are not shared between processes, so this is not a durable spending quota. A
+shared limiter is required before multi-instance production rollout.
+
+Set `TRUST_PROXY_HOPS` to the exact ingress hop count: default 1 when absent,
+explicit 0 for direct connections, accepted integer range 0–10. Empty, negative,
+fractional and excessive values fail startup. Zero ignores forged forwarding
+headers. Do not trust all proxies; prevent direct/shorter ingress paths when
+trusting proxy hops. The authenticated-user budget is the primary account-level
+cost boundary even when IP attribution is imperfect.
+
+Stage 2C performs no academic-year/holiday writes and creates no database IDs.
+Only Stage 2A's credential read RPC is used indirectly. There is no Academic Year
+browser UI, PDF handling or upload endpoint. Stage 2D is planned to provide a
+review-before-save workflow; it is not implemented here.
+
+Tests inject authentication verification and generation, use synthetic data, and
+exercise real localhost Express requests only. External fetch is blocked before
+importing the route/default generation service. Validation covers authentication,
+strict bodies, semantic rejection, error redaction, rate/concurrency controls,
+disconnect/stale completion and structural no-write boundaries.

@@ -1,4 +1,5 @@
 const definitions = Object.freeze({
+  AI_CANCELLED: ['AI generation was cancelled.', false],
   AI_CREDENTIAL_UNAVAILABLE: ['AI connection is unavailable.', false],
   AI_CREDENTIAL_REJECTED: ['AI provider rejected the credential.', false],
   AI_RATE_LIMITED: ['AI provider rate limit reached.', true],

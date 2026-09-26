@@ -52,7 +52,7 @@ export function createAccountDeletionRateLimit({
     if (userEntry.count > limit || ipEntry.count > limit) {
       const retryAfterSeconds = Math.max(
         1,
-        Math.ceil((Math.max(userEntry.expiresAt, ipEntry.expiresAt) - currentTime) / 1000),
+        Math.ceil((Math.max(...[userEntry, ipEntry].filter(entry => entry.count > limit).map(entry => entry.expiresAt)) - currentTime) / 1000),
       );
       res.set('Retry-After', String(retryAfterSeconds));
       next(publicError(retryAfterSeconds));

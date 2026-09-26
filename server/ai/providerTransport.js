@@ -1,3 +1,4 @@
+import { checkCancellation } from './cancellation.js';
 import { AI_LIMITS } from './generationConfig.js';
 import { aiError, safeAiError } from './generationErrors.js';
 
@@ -11,18 +12,27 @@ function statusError(status) {
 
 // Called only with adapter-owned endpoints, never arbitrary caller destinations.
 export async function requestProviderJson({ endpoint, headers, body, extract, validate, apiKey }, {
-  fetchImpl = globalThis.fetch, timeoutMs = AI_LIMITS.timeoutMs,
+  fetchImpl = globalThis.fetch, timeoutMs = AI_LIMITS.timeoutMs, signal,
 } = {}) {
+  checkCancellation(signal);
   const controller = new AbortController();
-  let response, reader, timer;
+  let response, reader, timer, cancel;
+  let cancelled = false, stopped = false;
   const deadline = new Promise((_, reject) => {
-    timer = setTimeout(() => { controller.abort(); reject(aiError('AI_TIMEOUT')); }, timeoutMs);
+    cancel = () => { if (stopped) return; stopped = true; cancelled = true; controller.abort(); reject(aiError('AI_CANCELLED')); };
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
+    timer = setTimeout(() => { if (stopped) return; stopped = true; controller.abort(); reject(aiError('AI_TIMEOUT')); }, timeoutMs);
   });
   const operation = async () => {
+    checkCancellation(signal);
     response = await fetchImpl(endpoint, { method: 'POST', redirect: 'error', credentials: 'omit', cache: 'no-store',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...headers },
       body: JSON.stringify(body), signal: controller.signal });
-    if (controller.signal.aborted) throw aiError('AI_TIMEOUT');
+    if (controller.signal.aborted) {
+      try { void response.body?.cancel()?.catch(() => {}); } catch { /* late response cleanup */ }
+      throw aiError(cancelled ? 'AI_CANCELLED' : 'AI_TIMEOUT');
+    }
     if (response.redirected) throw aiError('AI_INVALID_RESPONSE');
     if (!response.ok) throw statusError(response.status);
     if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') throw aiError('AI_INVALID_RESPONSE');
@@ -53,10 +63,12 @@ export async function requestProviderJson({ endpoint, headers, body, extract, va
   try {
     return await Promise.race([operation(), deadline]);
   } catch (error) {
+    if (cancelled) throw aiError('AI_CANCELLED');
     if (controller.signal.aborted || error?.name === 'AbortError') throw aiError('AI_TIMEOUT');
     throw safeAiError(error);
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', cancel);
     controller.abort();
     // Cancellation must never hold up an error or expose a rejected body error.
     try { void (reader ? reader.cancel() : response?.body?.cancel())?.catch(() => {}); } catch { /* safe cleanup */ }

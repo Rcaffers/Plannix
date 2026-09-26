@@ -182,7 +182,7 @@ test('schemas are not cached across calls', async () => {
   const h = harness('openai'); assert.deepEqual(await h.run(input), expected);
   await safeFailure(h.run, 'AI_INVALID_RESPONSE', false, { ...input, jsonSchema: { ...input.jsonSchema, properties: { count: { type: 'string' } } } });
 });
-test('browser and shared sources do not import server AI code; no route imports generation', async () => {
+test('browser and shared sources do not import server AI code; only authenticated holiday extraction imports generation', async () => {
   async function files(dir) {
     const entries = await readdir(dir, { withFileTypes: true });
     return (await Promise.all(entries.map(e => e.isDirectory() ? files(path.join(dir,e.name)) : path.join(dir,e.name)))).flat();
@@ -192,7 +192,11 @@ test('browser and shared sources do not import server AI code; no route imports 
     assert.doesNotMatch(source, /(?:server\/ai|ai\/(?:credential|adapters)|generateStructuredJson)/, file);
   }
   for (const file of ['server/app.js', ...await files('server/routes')].filter(file => file.endsWith('.js') && !file.endsWith('.test.js'))) {
-    assert.doesNotMatch(await readFile(file,'utf8'), /(?:generateStructuredJson|ai\/credential|ai\/adapters)/, file);
+    const source = await readFile(file, 'utf8');
+    if (file === 'server/routes/ai-holiday-extraction-routes.js') {
+      assert.match(source, /app.post\('\/api\/ai\/holidays\/extract', requireAuth/);
+      assert.doesNotMatch(source, /ai\/(?:credential|adapters)/);
+    } else assert.doesNotMatch(source, /(?:generateStructuredJson|ai\/credential|ai\/adapters)/, file);
   }
 });
 
@@ -434,4 +438,46 @@ test('default fetch path is blocked without native fetch or network IO', async (
   // The guard itself has a clear test-only diagnostic, without destinations/data.
   expectedBlockedNetworkCalls++;
   assert.throws(() => globalThis.fetch(), /Test network disabled/);
+});
+
+for (const phase of ['before lookup', 'during lookup', 'after lookup']) test(`cancellation ${phase} prevents provider fetch`, async () => {
+  const controller = new AbortController(); let lookup = 0, fetches = 0, finish;
+  if (phase === 'before lookup') controller.abort('PRIVATE_SECRET_FIXTURE');
+  const run = createStructuredJsonGenerator({ retrieveCredential: async (_id, { signal }) => {
+    lookup++; assert.equal(signal, controller.signal);
+    if (phase === 'during lookup') return new Promise(resolve => { finish = resolve; });
+    controller.abort('PRIVATE_SECRET_FIXTURE'); return { provider: 'openai', apiKey: key };
+  }, fetchImpl: () => { fetches++; throw Error('unexpected fetch'); } });
+  const failure = safeFailure(value => run(value, { signal: controller.signal }), 'AI_CANCELLED', false, input);
+  if (phase === 'during lookup') { controller.abort(); finish({ provider: 'openai', apiKey: key }); }
+  await failure; assert.equal(fetches, 0); assert.equal(lookup, phase === 'before lookup' ? 0 : 1);
+});
+for (const { id: provider } of AI_PROVIDERS) {
+  for (const phase of ['fetch', 'body']) test(`${provider}: cancellation during ${phase} aborts transport safely`, async () => {
+    const controller = new AbortController(); let ready, signal, cancelled = false;
+    const started = new Promise(r => { ready = r; });
+    const h = harness(provider, (_url, options) => {
+      signal = options.signal;
+      if (phase === 'fetch') { ready(); return new Promise(() => {}); }
+      return new Response(new ReadableStream({ pull() { ready(); }, cancel() { cancelled = true; } }), { headers: { 'Content-Type': 'application/json' } });
+    });
+    const failure = safeFailure(value => h.run(value, { signal: controller.signal }), 'AI_CANCELLED', false);
+    await started; controller.abort('PRIVATE_SECRET_FIXTURE'); await failure;
+    assert.equal(signal.aborted, true); if (phase === 'body') assert.equal(cancelled, true);
+    assert.equal(h.requests.length, 1);
+  });
+}
+test('internal provider deadline remains active with an uncancelled external signal', async () => {
+  const controller = new AbortController();
+  const h = harness('openai', () => new Promise(() => {}), { timeoutMs: 5 });
+  await safeFailure(value => h.run(value, { signal: controller.signal }), 'AI_TIMEOUT', true);
+  assert.equal(controller.signal.aborted, false);
+});
+test('internal timeout wins if its abort synchronously triggers external cancellation', async () => {
+  const controller = new AbortController();
+  const h = harness('openai', (_url, { signal }) => {
+    signal.addEventListener('abort', () => controller.abort());
+    return new Promise(() => {});
+  }, { timeoutMs: 5 });
+  await safeFailure(value => h.run(value, { signal: controller.signal }), 'AI_TIMEOUT', true);
 });

@@ -82,3 +82,15 @@ for (const [label, malformed] of malformedResults) {
     } finally { Object.assign(console, originals); }
   });
 }
+test('credential retrieval passes cancellation to RPC and fails safely before/after lookup', async () => {
+  const pre = new AbortController(); pre.abort('fixture-secret');
+  await assert.rejects(retrieveAiCredential(id, { signal: pre.signal, createClientImpl: () => assert.fail('client created') }), { code: 'AI_CANCELLED' });
+  const controller = new AbortController(); let resolve, attached;
+  const rpc = new Promise(r => { resolve = r; });
+  rpc.abortSignal = signal => { attached = signal; return rpc; };
+  const pending = retrieveAiCredential(id, { signal: controller.signal, config, createClientImpl: () => ({ rpc: () => rpc }) });
+  controller.abort('fixture-secret');
+  await assert.rejects(pending, e => e.code === 'AI_CANCELLED' && !e.cause && !e.message.includes('fixture-secret'));
+  assert.equal(attached, controller.signal);
+  resolve({ data: { provider: 'openai', apiKey: credential } });
+});

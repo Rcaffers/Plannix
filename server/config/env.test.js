@@ -94,3 +94,9 @@ test('removed legacy environment variables have no application configuration eff
   assert.equal(Object.hasOwn(env, 'cookieSecure'), false);
   assert.equal(Object.hasOwn(env, 'enableDemoUser'), false);
 });
+test('proxy hops preserve zero and default; reject malformed or excessive values', async () => {
+  const { parseTrustProxyHops } = await import('./env.js');
+  assert.equal(parseTrustProxyHops(undefined), 1);
+  for (const value of ['0', '1', '10']) assert.equal(parseTrustProxyHops(value), Number(value));
+  for (const value of ['', '-1', '1.5', '11', 'Infinity', 'NaN', 'one', ' 1', '01']) assert.throws(() => parseTrustProxyHops(value), /TRUST_PROXY_HOPS/);
+});

@@ -10,6 +10,7 @@ import { createProductionCspConfig, reportingEndpoints } from './config/csp.js';
 import { errorHandler, logRouteError, sendError } from './middleware/errorHandler.js';
 import { notFound } from './middleware/notFound.js';
 import { requestId } from './middleware/requestId.js';
+import { registerAiHolidayExtractionRoutes } from './routes/ai-holiday-extraction-routes.js';
 import { registerAiConnectionRoutes } from './routes/ai-connection-routes.js';
 import { registerAccountRoutes } from './routes/account-routes.js';
 import { registerAcademicYearRoutes } from './routes/academic-year-routes.js';
@@ -48,6 +49,7 @@ app.get('/health', (_req, res) => {
 
 // Credential routes own their smaller parser and run before the general parser.
 registerAiConnectionRoutes({ app });
+registerAiHolidayExtractionRoutes({ app });
 app.use(express.json({ limit: '100kb' }));
 
 function normalizeEmailInput(value) {

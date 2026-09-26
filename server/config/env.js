@@ -18,10 +18,18 @@ function parseOrigins(value) {
     .filter(Boolean);
 }
 
+export function parseTrustProxyHops(value) {
+  if (value === undefined) return 1;
+  if (!/^(0|[1-9]\d*)$/.test(String(value)) || Number(value) > 10) {
+    throw new Error('TRUST_PROXY_HOPS must be an integer between 0 and 10.');
+  }
+  return Number(value);
+}
+
 export const env = Object.freeze({
   nodeEnv: String(process.env.NODE_ENV || 'development').trim().toLowerCase(),
   port: parsePort(process.env.PORT || process.env.AUTH_PORT, 4000),
-  trustProxyHops: Number(process.env.TRUST_PROXY_HOPS ?? 1) || 1,
+  trustProxyHops: parseTrustProxyHops(process.env.TRUST_PROXY_HOPS),
   frontendOrigins: parseOrigins(process.env.FRONTEND_ORIGIN),
   corsDebug: process.env.CORS_DEBUG === 'true',
   supabaseUrl: String(process.env.SUPABASE_URL || '').trim(),
