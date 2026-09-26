@@ -1,0 +1,12 @@
+{
+  "id": "interaction_test_fixture",
+  "object": "interaction",
+  "created": "2026-09-26T00:00:00Z",
+  "updated": "2026-09-26T00:00:01Z",
+  "model": "gemini-3.8-flash",
+  "status": "completed",
+  "steps": [{ "type": "model_output", "content": [{ "type": "text", "text": "{\"count\":2}" }] }],
+  "usage": { "input_tokens_by_modality": [{ "modality": "text", "tokens": 20 }],
+    "total_cached_tokens": 0, "total_input_tokens": 20, "total_output_tokens": 5,
+    "total_thought_tokens": 0, "total_tokens": 25, "total_tool_use_tokens": 0 }
+}
