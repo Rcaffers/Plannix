@@ -1,0 +1,33 @@
+.academic-holiday-section { display: grid; gap: 16px; min-width: 0; }
+.academic-holiday-section + .academic-holiday-section { border-top: 1px solid var(--stroke, #d5ded8); padding-top: 24px; }
+.school-holiday-ai { border: 1px solid var(--stroke, #d5ded8); border-radius: 16px; padding: 18px; background: rgba(255,255,255,.45); min-width: 0; }
+.school-holiday-ai h3, .school-holiday-ai h4, .school-holiday-ai h5 { margin: 0 0 12px; }
+.school-holiday-ai h4 { font-size: 1rem; }
+.school-holiday-ai h5 { font-size: .95rem; }
+.school-holiday-ai p { overflow-wrap: anywhere; }
+.school-holiday-ai-fields { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.school-holiday-ai textarea { width: 100%; box-sizing: border-box; min-width: 0; resize: vertical; padding: 12px; border: 1px solid var(--stroke, #bccfc5); border-radius: 12px; font: inherit; }
+.school-holiday-ai-fields button { justify-self: start; }
+.school-holiday-review { margin-top: 20px; border-top: 1px solid var(--stroke, #d5ded8); padding-top: 18px; display: grid; gap: 14px; }
+.school-holiday-include { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.school-holiday-include input { flex: 0 0 auto; }
+.academic-year-page .settings-field, .academic-year-page .settings-holiday-grid { min-width: 0; }
+.academic-year-page .settings-field input, .academic-year-page .settings-field select { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.academic-year-page .settings-holiday-grid input { width: 100%; }
+.academic-year-page .settings-year-picker { flex-wrap: wrap; }
+.academic-year-page .settings-holiday-import-manual input { min-width: 0; width: 100%; box-sizing: border-box; }
+.academic-year-page button, .academic-year-page .settings-reset-link { min-height: 44px; white-space: normal; max-width: 100%; }
+.academic-year-page .settings-holiday-import { display: flex; flex-wrap: wrap; gap: 12px; }
+.academic-year-page .settings-holiday-import > p { width: 100%; }
+@media (min-width: 720px) {
+  .academic-year-page .settings-holiday-grid { grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .academic-year-page .settings-timetable-form { padding: 16px 12px; }
+  .school-holiday-ai { padding: 12px; }
+  .academic-year-page .settings-actions { align-items: stretch; }
+}
+
+.academic-holiday-list-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.academic-holiday-manual-action { border-top: 1px solid var(--stroke, #d5ded8); padding-top: 12px; }
+.academic-holiday-section [hidden] { display: none; }

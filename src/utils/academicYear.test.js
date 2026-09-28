@@ -57,3 +57,23 @@ test('context and UI include stale-response, explicit-save, switching and cleanu
   assert.match(page, /academic-year-end/);
   assert.match(page, /Create academic year/);
 });
+
+test('normalization retains both categories and defaults only legacy missing category', () => {
+  const holiday = { id: first, label: 'Break', startDate: '2026-10-01', endDate: '2026-10-02' };
+  const plan = { label: 'Year', startDate: '2026-09-01', endDate: '2027-08-31', holidays: [holiday, { ...holiday, id: second, holidayType: 'public' }] };
+  assert.deepEqual(normalizeAcademicYear(plan).holidays.map(h => h.holidayType), ['school', 'public']);
+  for (const holidayType of ['ai', '', null, 2]) assert.match(validateAcademicYearDraft({ ...plan, holidays: [{ ...holiday, holidayType }] }), /category/);
+});
+
+
+test('manual holidays reject normalized duplicates across categories and count both categories', () => {
+  const holiday = { id: first, label: 'Café break', startDate: '2026-12-25', endDate: '2026-12-25', holidayType: 'school' };
+  const plan = { label: '2026/27', startDate: '2026-09-01', endDate: '2027-08-31', holidays: [holiday, { ...holiday, id: second, label: ' CAFE\u0301   break ', holidayType: 'public' }] };
+  assert.match(validateAcademicYearDraft(plan), /already exists/);
+  plan.holidays[1].label = 'Different holiday';
+  assert.equal(validateAcademicYearDraft(plan), '');
+  plan.holidays = Array.from({ length: 100 }, (_, i) => ({ ...holiday, id: String(i), label: `Holiday ${i}`, holidayType: i % 2 ? 'school' : 'public' }));
+  assert.equal(validateAcademicYearDraft(plan), '');
+  plan.holidays.push({ ...holiday, id: 'extra' });
+  assert.match(validateAcademicYearDraft(plan), /100/);
+});

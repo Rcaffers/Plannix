@@ -15,6 +15,8 @@
     "test:public-api": "node --test server/routes/contact-routes.test.js src/utils/publicApi.test.js",
     "test:account-deletion": "node --test server/middleware/accountDeletionRateLimit.test.js server/routes/account-routes.test.js",
     "test:frontend-account-deletion": "node --test src/utils/accountDeletion.test.js",
+    "test:academic-year-ai": "node --test src/utils/holidayReview.test.js src/utils/holidayExtractionApi.test.js",
+    "test:academic-year-ai-browser": "node scripts/test-academic-year-ai-browser.js",
     "test:academic-year": "node --test src/utils/academicYear.test.js src/utils/academicYearApi.test.js",
     "test:class-placement-browser": "node scripts/test-class-placement-browser.js",
     "test:ai-connection": "node --test src/utils/aiConnectionApi.test.js server/routes/ai-connection-routes.test.js",

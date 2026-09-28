@@ -238,7 +238,7 @@ test('list maps and requests deterministic academic-year ordering', async () => 
 test('single plan maps exactly and orders holidays deterministically', async () => {
   const harness = await createHarness({ tableResults: {
     plannix_academic_years: { data: { id: academicYearId, name: 'Year', start_date: '2026-09-01', end_date: '2027-08-31' }, error: null },
-    plannix_holidays: { data: [{ id: holidayId, name: 'Break', start_date: '2026-10-01', end_date: '2026-10-02' }], error: null },
+    plannix_holidays: { data: [{ id: holidayId, name: 'Break', start_date: '2026-10-01', end_date: '2026-10-02', holiday_type: 'public' }], error: null },
   } });
   try {
     const response = await fetch(`${harness.baseUrl}/api/academic-year?organisationId=${organisationId}&academicYearId=${academicYearId}`, { headers: headers() });
@@ -248,7 +248,7 @@ test('single plan maps exactly and orders holidays deterministically', async () 
       label: 'Year',
       startDate: '2026-09-01',
       endDate: '2027-08-31',
-      holidays: [{ id: holidayId, label: 'Break', startDate: '2026-10-01', endDate: '2026-10-02' }],
+      holidays: [{ id: holidayId, label: 'Break', startDate: '2026-10-01', endDate: '2026-10-02', holidayType: 'public' }],
     } });
     assert.deepEqual(harness.tableCalls[1].calls.slice(-2), [
       ['order', 'start_date', { ascending: true }],
@@ -381,4 +381,54 @@ test('production registers each new route once and removes only legacy academic-
   assert.equal(routes.includes('createDbPool'), false);
   assert.equal(routes.includes('adminClient'), false);
   assert.equal(routes.includes('SUPABASE_SECRET_KEY'), false);
+});
+
+test('both categories reach the atomic RPC and unsupported categories fail before database access', async () => {
+  const harness = await createHarness();
+  try {
+    for (const holidayType of ['school', 'public']) {
+      const plan = validPlan(); plan.holidays[0].holidayType = holidayType;
+      const result = await fetch(`${harness.baseUrl}/api/academic-year`, { method: 'PUT', headers: headers(), body: JSON.stringify({ organisationId, plan }) });
+      assert.equal(result.status, 200);
+      assert.equal(harness.rpcCalls.at(-1).input.target_holidays[0].holiday_type, holidayType);
+    }
+    const calls = harness.rpcCalls.length;
+    for (const holidayType of ['ai', 'School', '', null, 3, {}]) {
+      const plan = validPlan(); plan.holidays[0].holidayType = holidayType;
+      const result = await fetch(`${harness.baseUrl}/api/academic-year`, { method: 'PUT', headers: headers(), body: JSON.stringify({ organisationId, plan }) });
+      assert.equal(result.status, 400);
+    }
+    assert.equal(harness.rpcCalls.length, calls);
+  } finally { await harness.close(); }
+});
+
+for (const mode of ['new omitted', 'existing school omitted', 'existing public omitted']) {
+  test(`PUT preserves category omission for RPC resolution: ${mode}`, async () => {
+    const harness = await createHarness();
+    try {
+      const plan = validPlan(); if (mode === 'new omitted') delete plan.holidays[0].id;
+      const response = await fetch(`${harness.baseUrl}/api/academic-year`, { method: 'PUT', headers: headers(), body: JSON.stringify({ organisationId, plan }) });
+      assert.equal(response.status, 200);
+      assert.equal(harness.rpcCalls.length, 1);
+      assert.equal(Object.hasOwn(harness.rpcCalls[0].input.target_holidays[0], 'holiday_type'), false);
+      assert.equal(harness.tableCalls.length, 0); // No racy read-before-write; RPC resolves stored type atomically.
+    } finally { await harness.close(); }
+  });
+}
+test('cross-category duplicates and invalid second categories reject whole request before RPC; overlaps accepted', async () => {
+  const harness = await createHarness();
+  try {
+    for (const second of [{ label: ' WINTER\u00a0 break ', holidayType: 'public' }, { label: 'Other', holidayType: null }, { label: 'Other', holidayType: 'invalid' }]) {
+      const plan = validPlan(); plan.holidays.push({ ...plan.holidays[0], id: undefined, ...second });
+      const response = await fetch(`${harness.baseUrl}/api/academic-year`, { method: 'PUT', headers: headers(), body: JSON.stringify({ organisationId, plan }) });
+      assert.equal(response.status, 400); assert.equal(harness.rpcCalls.length, 0);
+    }
+    for (const count of [99, 100, 101]) {
+      const plan = validPlan({ holidays: Array.from({ length: count }, (_, i) => ({ label: `Overlap ${i}`, startDate: '2026-12-25', endDate: '2026-12-25', holidayType: i % 2 ? 'school' : 'public' })) });
+      const before = harness.rpcCalls.length;
+      const response = await fetch(`${harness.baseUrl}/api/academic-year`, { method: 'PUT', headers: headers(), body: JSON.stringify({ organisationId, plan }) });
+      assert.equal(response.status, count <= 100 ? 200 : 400);
+      assert.equal(harness.rpcCalls.length, before + (count <= 100 ? 1 : 0));
+    }
+  } finally { await harness.close(); }
 });

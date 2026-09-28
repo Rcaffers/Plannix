@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import SchoolHolidayAiImport from '../components/SchoolHolidayAiImport';
+import { suggestionError } from '../utils/holidayReview.js';
 import SettingsSubnav from '../components/SettingsSubnav';
 import { useAcademicYear } from '../context/AcademicYearContext';
-import { newHolidayId, normalizeAcademicYear, validateAcademicYearDraft } from '../utils/academicYear';
+import { duplicateHoliday, holidayDuplicateKey, newHolidayId, normalizeAcademicYear, validateAcademicYearDraft } from '../utils/academicYear';
 import {
   fetchHolidayCountries,
   fetchPublicHolidays,
@@ -25,6 +27,37 @@ export default function AcademicYear() {
   const [manualCountryInput, setManualCountryInput] = useState('');
   const [isImportingHolidays, setIsImportingHolidays] = useState(false);
   const [formError, setFormError] = useState('');
+  const [reviewScope, setReviewScope] = useState(0);
+
+  const [expanded, setExpanded] = useState({ school: false, public: false });
+  const [focusHoliday, setFocusHoliday] = useState(null);
+  const saveErrorRef = useRef(null);
+  const latestDraft = useRef(draft);
+  latestDraft.current = draft;
+  const importScope = useRef(0);
+  const importController = useRef(null);
+  const importStatusRef = useRef(null);
+  const [focusImportStatus, setFocusImportStatus] = useState(false);
+  useEffect(() => { if (focusImportStatus) { importStatusRef.current?.focus(); setFocusImportStatus(false); } }, [focusImportStatus]);
+  function invalidateImport() { importScope.current++; importController.current?.abort(); importController.current = null; }
+  function beginImport() { invalidateImport(); const controller = new AbortController(); importController.current = controller; return { scope: importScope.current, controller }; }
+
+  useEffect(() => {
+    invalidateImport();
+    setIsImportingHolidays(false); setImportStatus(''); setImportError('');
+    return () => { invalidateImport(); };
+  }, [selectedAcademicYearId, reviewScope, draft.startDate, draft.endDate]);
+  useEffect(() => { setExpanded({ school: false, public: false }); setFocusHoliday(null); }, [selectedAcademicYearId, reviewScope]);
+  useEffect(() => {
+    if (focusHoliday) {
+      document.getElementById(`holiday-label-${focusHoliday}`)?.focus();
+      setFocusHoliday(null);
+    }
+  }, [focusHoliday, expanded]);
+  function revealHoliday(holiday) {
+    setExpanded(value => ({ ...value, [holiday.holidayType || 'school']: true }));
+    setFocusHoliday(holiday.id);
+  }
 
   useEffect(() => {
     setDraft(academicYear);
@@ -54,8 +87,11 @@ export default function AcademicYear() {
     event.preventDefault();
     if (isSaving) return;
     const normalized = normalizeAcademicYear(draft);
-    const validationError = validateAcademicYearDraft(normalized);
-    if (validationError) { setFormError(validationError); return; }
+    const invalidHoliday = draft.holidays.find(({ label, startDate, endDate }) => suggestionError({ label, startDate, endDate }, draft.startDate, draft.endDate)) || duplicateHoliday(draft.holidays);
+    const validationError = draft.holidays.map(({ label, startDate, endDate }) =>
+      suggestionError({ label, startDate, endDate }, draft.startDate, draft.endDate),
+    ).find(Boolean) || validateAcademicYearDraft(normalized);
+    if (validationError) { setFormError(validationError); if (invalidHoliday) revealHoliday(invalidHoliday); return; }
     setFormError('');
     setDraft(normalized);
     const saved = await saveAcademicYear(normalized);
@@ -63,6 +99,9 @@ export default function AcademicYear() {
       setDraft(saved);
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 2400);
+    } else {
+      setExpanded({ school: true, public: true });
+      requestAnimationFrame(() => saveErrorRef.current?.focus());
     }
   }
 
@@ -75,6 +114,7 @@ export default function AcademicYear() {
     if (!approveDiscard()) { event.target.value = selectedAcademicYearId || ''; return; }
     setSavedFlash(false);
     setFormError('');
+    setReviewScope(value => value + 1);
     await selectAcademicYear(nextId || null);
   }
 
@@ -82,14 +122,21 @@ export default function AcademicYear() {
     if (!approveDiscard()) return;
     setSavedFlash(false);
     setFormError('');
+    setReviewScope(value => value + 1);
     createAcademicYear();
   }
 
-  function addHoliday() {
-    setDraft((d) => ({
-      ...d,
-      holidays: [...d.holidays, { id: newHolidayId(), label: '', startDate: '', endDate: '' }],
-    }));
+  function addHoliday(holidayType = 'school') {
+    if (draft.holidays.length >= 100) { setFormError('An academic year can contain no more than 100 holidays.'); return; }
+    const holiday = { id: newHolidayId(), label: '', startDate: '', endDate: '', holidayType };
+    setDraft(d => ({ ...d, holidays: [...d.holidays, holiday] }));
+    revealHoliday(holiday);
+  }
+
+  function acceptAiDraft(next) {
+    const added = next.holidays.find(h => !draft.holidays.some(existing => existing.id === h.id));
+    setDraft(next);
+    if (added) revealHoliday(added);
   }
 
   function removeHoliday(id) {
@@ -138,42 +185,41 @@ export default function AcademicYear() {
   }
 
   function mergeImportedHolidays(currentDraft, importedHolidays) {
-    const existingKeys = new Set(
-      currentDraft.holidays.map((holiday) => {
-        const label = String(holiday.label || '').trim().toLowerCase();
-        return `${holiday.startDate}|${holiday.endDate || holiday.startDate}|${label}`;
-      }),
-    );
+    const existingKeys = new Set(currentDraft.holidays.map(holidayDuplicateKey));
 
     const nextImported = importedHolidays
       .map((holiday) => ({
         id: newHolidayId(),
+        holidayType: 'public',
         label: holiday.localName || holiday.name || 'Public holiday',
         startDate: holiday.date,
         endDate: holiday.date,
       }))
       .filter((holiday) => {
-        const key = `${holiday.startDate}|${holiday.endDate}|${holiday.label.trim().toLowerCase()}`;
+        const key = holidayDuplicateKey(holiday);
         if (existingKeys.has(key)) return false;
         existingKeys.add(key);
         return true;
       });
 
+    if (currentDraft.holidays.length + nextImported.length > 100) throw new Error('An academic year can contain no more than 100 holidays.');
     return {
       ...currentDraft,
       holidays: [...currentDraft.holidays, ...nextImported],
     };
   }
 
-  async function importHolidaysForCountry(countryCode, sourceLabel) {
+  async function importHolidaysForCountry(countryCode, sourceLabel, { scope, controller }) {
+    if (scope !== importScope.current) return;
     setIsImportingHolidays(true);
     setImportError('');
     setImportStatus('');
     try {
       const years = selectedHolidayYears();
       const results = await Promise.all(
-        years.map((year) => fetchPublicHolidays({ countryCode, year })),
+        years.map((year) => fetchPublicHolidays({ countryCode, year }, { signal: controller.signal })),
       );
+      if (scope !== importScope.current) return;
       const allHolidays = results.flat();
       const range = selectedHolidayDateRange();
       if (!range) {
@@ -182,17 +228,25 @@ export default function AcademicYear() {
       const holidays = allHolidays.filter(
         (holiday) => holiday.date >= range.startDate && holiday.date <= range.endDate,
       );
-      setDraft((current) => mergeImportedHolidays(current, holidays));
+      const previous = latestDraft.current;
+      const next = mergeImportedHolidays(previous, holidays);
+      const added = next.holidays.find(h => !previous.holidays.some(existing => existing.id === h.id));
+      setDraft(next);
+      if (added) revealHoliday(added);
+      else setFocusImportStatus(true);
+      setExpanded(value => ({ ...value, public: true }));
       setImportStatus(
-        holidays.length
-          ? `Imported ${holidays.length} holidays for ${sourceLabel} (${range.startDate} to ${range.endDate}). Review and save.`
-          : `No public holidays found for ${sourceLabel} between ${range.startDate} and ${range.endDate}.`,
+        added
+          ? `Imported ${next.holidays.length - previous.holidays.length} holidays for ${sourceLabel} (${range.startDate} to ${range.endDate}). Review and save.`
+          : holidays.length ? 'No new public holidays added. Matching holidays are already in the draft.' : `No public holidays found for ${sourceLabel} between ${range.startDate} and ${range.endDate}.`,
       );
     } catch (error) {
+      if (scope !== importScope.current || controller.signal.aborted || error?.name === 'AbortError') return;
       setImportError(error.message || 'Could not import holidays.');
       setManualCountryMode(true);
     } finally {
-      setIsImportingHolidays(false);
+      controller.abort();
+      if (scope === importScope.current) { setIsImportingHolidays(false); if (importController.current === controller) importController.current = null; }
     }
   }
 
@@ -211,23 +265,30 @@ export default function AcademicYear() {
   }
 
   async function handleUseLocation() {
+    const operation = beginImport();
+    const { scope, controller } = operation;
     setIsImportingHolidays(true);
     setImportError('');
     setImportStatus('');
     try {
       const position = await getCurrentPosition();
+      if (scope !== importScope.current) return;
       const lat = position.coords?.latitude;
       const lng = position.coords?.longitude;
       if (typeof lat !== 'number' || typeof lng !== 'number') {
         throw new Error('Could not read your current location.');
       }
-      const { countryCode, countryName } = await resolveCountryFromCoordinates({ lat, lng });
+      const { countryCode, countryName } = await resolveCountryFromCoordinates({ lat, lng }, { signal: controller.signal });
+      if (scope !== importScope.current) return;
       setManualCountryInput(countryName ? `${countryName} (${countryCode})` : countryCode);
-      await importHolidaysForCountry(countryCode, countryName || countryCode);
+      await importHolidaysForCountry(countryCode, countryName || countryCode, operation);
     } catch (error) {
+      if (scope !== importScope.current || controller.signal.aborted || error?.name === 'AbortError') return;
       setImportError(error.message || 'Could not detect your location.');
       setManualCountryMode(true);
       setIsImportingHolidays(false);
+    } finally {
+      if (importController.current === controller) importController.current = null;
     }
   }
 
@@ -238,11 +299,78 @@ export default function AcademicYear() {
       return;
     }
     const country = holidayCountries.find((entry) => entry.countryCode === countryCode);
-    await importHolidaysForCountry(countryCode, country?.name || countryCode);
+    await importHolidaysForCountry(countryCode, country?.name || countryCode, beginImport());
+  }
+
+  function holidayPanel(category) {
+    const count = draft.holidays.filter(h => (h.holidayType || 'school') === category).length;
+    return <>
+      <div className="academic-holiday-list-controls">
+        <span>{count} {category} holidays</span>
+        <button id={`${category}-holidays-toggle`} type="button" className="settings-reset"
+          aria-expanded={expanded[category]} aria-controls={`${category}-holidays-panel`}
+          aria-label={`${expanded[category] ? 'Hide' : 'Show'} ${category} holidays (${count})`}
+          onClick={() => setExpanded(value => ({ ...value, [category]: !value[category] }))}>
+          {expanded[category] ? `Hide ${category} holidays` : `Show ${category} holidays (${count})`}
+        </button>
+      </div>
+      <div id={`${category}-holidays-panel`} hidden={!expanded[category]} aria-labelledby={`${category}-holidays-toggle`}>
+        {count ? renderHolidays(category) : <p className="settings-hint">No {category} holidays yet.</p>}
+      </div>
+    </>;
+  }
+
+  function renderHolidays(category) {
+    return draft.holidays.filter(h => (h.holidayType || 'school') === category).map((h, index) => (
+      <div key={h.id} className="settings-holiday-card">
+        <div className="settings-holiday-card-head">
+          <h3 className="settings-holiday-heading">Holiday {index + 1}</h3>
+          <button
+            type="button"
+            className="settings-holiday-remove"
+            aria-label={`Remove ${category} holiday ${index + 1}`}
+            onClick={() => { removeHoliday(h.id); document.getElementById(`${category}-holidays-toggle`)?.focus(); }}
+          >
+            Remove
+          </button>
+        </div>
+        <div className="settings-holiday-grid">
+          <div className="settings-field settings-field--inline">
+            <label htmlFor={`holiday-label-${h.id}`}>Label</label>
+            <input
+              id={`holiday-label-${h.id}`}
+              type="text"
+              value={h.label}
+              placeholder="e.g. October half-term"
+              autoComplete="off"
+              onChange={(e) => updateHoliday(h.id, { label: e.target.value })}
+            />
+          </div>
+          <div className="settings-field settings-field--inline">
+            <label htmlFor={`holiday-start-${h.id}`}>First day</label>
+            <input
+              id={`holiday-start-${h.id}`}
+              type="date"
+              value={h.startDate}
+              onChange={(e) => updateHoliday(h.id, { startDate: e.target.value })}
+            />
+          </div>
+          <div className="settings-field settings-field--inline">
+            <label htmlFor={`holiday-end-${h.id}`}>Last day</label>
+            <input
+              id={`holiday-end-${h.id}`}
+              type="date"
+              value={h.endDate}
+              onChange={(e) => updateHoliday(h.id, { endDate: e.target.value })}
+            />
+          </div>
+        </div>
+      </div>
+    ));
   }
 
   return (
-    <main className="settings-page">
+    <main className="settings-page academic-year-page">
       <div className="container settings-inner settings-inner--wide">
         <p className="settings-breadcrumb">
           <Link to="/">Home</Link>
@@ -270,7 +398,7 @@ export default function AcademicYear() {
           <button type="button" className="add-row-button" onClick={handleCreate} disabled={isLoading || isSaving}>Create academic year</button>
         </div>
         {isLoading ? <p role="status">Loading academic years…</p> : null}
-        {error ? <p className="settings-hint settings-hint--error" role="alert">{error}</p> : null}
+        {error ? <p ref={saveErrorRef} tabIndex={-1} className="settings-hint settings-hint--error" role="alert">{error}</p> : null}
         {error && requestReference ? <p className="settings-hint">Support reference: <code>{requestReference}</code></p> : null}
 
         <form className="settings-timetable-form" onSubmit={handleSubmit}>
@@ -305,107 +433,72 @@ export default function AcademicYear() {
             <p className="settings-hint">The end date is inclusive.</p>
           </div>
 
-          <h2 className="settings-section-title settings-section-title--sub">Holidays</h2>
-          <p className="settings-hint settings-hint--tight">
-            Each holiday has a name and an inclusive date range. Overlapping ranges are allowed; the first matching entry
-            in the list is used.
-          </p>
-          <div className="settings-holiday-import">
-            <button
-              type="button"
-              className="add-row-button"
-              onClick={handleUseLocation}
-              disabled={isImportingHolidays}
-            >
-              {isImportingHolidays ? 'Checking location…' : 'Use my location'}
-            </button>
-            {manualCountryMode ? (
-              <div className="settings-holiday-import-manual">
-                <label htmlFor="holiday-country-input">Country</label>
-                <input
-                  id="holiday-country-input"
-                  type="text"
-                  list="holiday-country-options"
-                  placeholder="Type country name"
-                  value={manualCountryInput}
-                  onChange={(event) => setManualCountryInput(event.target.value)}
-                  autoComplete="off"
-                />
-                <datalist id="holiday-country-options">
-                  {holidayCountries.map((country) => (
-                    <option key={country.countryCode} value={`${country.name} (${country.countryCode})`} />
-                  ))}
-                </datalist>
-                <button
-                  type="button"
-                  className="settings-reset"
-                  onClick={handleManualImport}
-                  disabled={isImportingHolidays}
-                >
-                  Import holidays
-                </button>
-              </div>
-            ) : null}
-            {holidayCountriesError ? <p className="settings-hint">{holidayCountriesError}</p> : null}
-            {importError ? <p className="settings-hint settings-hint--error">{importError}</p> : null}
-            {importStatus ? <p className="settings-hint settings-hint--success">{importStatus}</p> : null}
-          </div>
+          <section className="academic-holiday-section" aria-labelledby="school-holidays-heading">
+            <h2 id="school-holidays-heading" className="settings-section-title settings-section-title--sub">School holidays</h2>
+            <p className="settings-hint settings-hint--tight">
+              Each holiday has a name and an inclusive date range. Overlapping ranges are allowed; the first matching entry
+              in the list is used. Manual entries and reviewed AI suggestions are saved as school holidays.
+            </p>
 
-          {draft.holidays.length === 0 ? (
-            <p className="settings-hint">No holidays yet. Use &quot;Add holiday&quot; to create one.</p>
-          ) : null}
+            {holidayPanel('school')}
 
-          {draft.holidays.map((h, index) => (
-            <div key={h.id} className="settings-holiday-card">
-              <div className="settings-holiday-card-head">
-                <h3 className="settings-holiday-heading">Holiday {index + 1}</h3>
-                <button
-                  type="button"
-                  className="settings-holiday-remove"
-                  onClick={() => removeHoliday(h.id)}
-                >
-                  Remove
-                </button>
-              </div>
-              <div className="settings-holiday-grid">
-                <div className="settings-field settings-field--inline">
-                  <label htmlFor={`holiday-label-${h.id}`}>Label</label>
-                  <input
-                    id={`holiday-label-${h.id}`}
-                    type="text"
-                    value={h.label}
-                    placeholder="e.g. October half-term"
-                    autoComplete="off"
-                    onChange={(e) => updateHoliday(h.id, { label: e.target.value })}
-                  />
-                </div>
-                <div className="settings-field settings-field--inline">
-                  <label htmlFor={`holiday-start-${h.id}`}>First day</label>
-                  <input
-                    id={`holiday-start-${h.id}`}
-                    type="date"
-                    value={h.startDate}
-                    onChange={(e) => updateHoliday(h.id, { startDate: e.target.value })}
-                  />
-                </div>
-                <div className="settings-field settings-field--inline">
-                  <label htmlFor={`holiday-end-${h.id}`}>Last day</label>
-                  <input
-                    id={`holiday-end-${h.id}`}
-                    type="date"
-                    value={h.endDate}
-                    onChange={(e) => updateHoliday(h.id, { endDate: e.target.value })}
-                  />
-                </div>
-              </div>
+            <div className="settings-actions settings-actions--stack">
+              <button type="button" className="add-row-button" onClick={() => addHoliday('school')} disabled={isLoading || isSaving || draft.holidays.length >= 100}>
+                + Add holiday
+              </button>
             </div>
-          ))}
 
-          <div className="settings-actions settings-actions--stack">
-            <button type="button" className="add-row-button" onClick={addHoliday}>
-              + Add holiday
-            </button>
-          </div>
+            <SchoolHolidayAiImport key={`${selectedAcademicYearId || 'new'}-${reviewScope}`} draft={draft} onDraftChange={acceptAiDraft} disabled={isLoading || isSaving} />
+          </section>
+          <section className="academic-holiday-section" aria-labelledby="public-holidays-heading">
+            <h2 id="public-holidays-heading" className="settings-section-title">Public holidays</h2>
+            <p className="settings-hint">Import public holidays for your selected location, without AI. They are saved separately as public holidays. Review them below before saving.</p>
+            <div className="settings-holiday-import">
+              <button
+                type="button"
+                className="add-row-button"
+                onClick={handleUseLocation}
+                disabled={isImportingHolidays}
+              >
+                {isImportingHolidays ? 'Checking location…' : 'Use my location'}
+              </button>
+              <button type="button" className="settings-reset" onClick={() => { invalidateImport(); setIsImportingHolidays(false); setManualCountryMode(true); }}>Choose country</button>
+              {manualCountryMode ? (
+                <div className="settings-holiday-import-manual">
+                  <label htmlFor="holiday-country-input">Country</label>
+                  <input
+                    id="holiday-country-input"
+                    type="text"
+                    list="holiday-country-options"
+                    placeholder="Type country name"
+                    value={manualCountryInput}
+                    onChange={(event) => { invalidateImport(); setIsImportingHolidays(false); setImportStatus(''); setImportError(''); setManualCountryInput(event.target.value); }}
+                    autoComplete="off"
+                  />
+                  <datalist id="holiday-country-options">
+                    {holidayCountries.map((country) => (
+                      <option key={country.countryCode} value={`${country.name} (${country.countryCode})`} />
+                    ))}
+                  </datalist>
+                  <button
+                    type="button"
+                    className="settings-reset"
+                    onClick={handleManualImport}
+                    disabled={isImportingHolidays}
+                  >
+                    Import holidays
+                  </button>
+                </div>
+              ) : null}
+              {holidayCountriesError ? <p className="settings-hint">{holidayCountriesError}</p> : null}
+              {importError ? <p className="settings-hint settings-hint--error">{importError}</p> : null}
+              {importStatus ? <p ref={importStatusRef} id="public-holiday-import-status" tabIndex={-1} role="status" className="settings-hint settings-hint--success">{importStatus}</p> : null}
+            </div>
+            <div className="academic-holiday-manual-action">
+              <button type="button" className="add-row-button" onClick={() => addHoliday('public')} disabled={isLoading || isSaving || draft.holidays.length >= 100}>+ Add public holiday</button>
+            </div>
+            {holidayPanel('public')}
+          </section>
 
           <div className="settings-actions">
             <button type="submit" className="settings-save" disabled={isSaving || isLoading}>

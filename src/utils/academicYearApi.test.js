@@ -32,7 +32,7 @@ test('list and load retain only approved fields and canonical support references
   const api = createAcademicYearApi({ getSession: async () => ({ access_token: 'token' }), fetchImpl: async () => results.shift() });
   assert.deepEqual((await api.list(org)).academicYears[0], { id: year, label: 'Year', startDate: '2026-09-01', endDate: '2027-08-31' });
   assert.deepEqual(await api.load(org, year), {
-    plan: { id: year, label: 'Year', startDate: '2026-09-01', endDate: '2027-08-31', holidays: [{ id: holiday, label: 'Half term', startDate: '2026-10-20', endDate: '2026-10-24' }] },
+    plan: { id: year, label: 'Year', startDate: '2026-09-01', endDate: '2027-08-31', holidays: [{ id: holiday, label: 'Half term', startDate: '2026-10-20', endDate: '2026-10-24', holidayType: 'school' }] },
     requestId: null,
   });
 });
@@ -64,4 +64,20 @@ test('a missing session never makes a data request', async () => {
   const api = createAcademicYearApi({ getSession: async () => null, fetchImpl: async () => { fetched = true; } });
   await assert.rejects(() => api.list(org), /Authentication is required/);
   assert.equal(fetched, false);
+});
+
+test('save and reload preserves category and holiday IDs through the API boundary', async () => {
+  const plan = { id: year, label: 'Year', startDate: '2026-09-01', endDate: '2027-08-31', holidays: [
+    { id: holiday, label: 'Break', startDate: '2026-10-01', endDate: '2026-10-02', holidayType: 'school' },
+    { id: '50000000-0000-4000-8000-000000000002', label: 'Public day', startDate: '2026-12-25', endDate: '2026-12-25', holidayType: 'public' },
+  ] };
+  let stored;
+  const api = createAcademicYearApi({ getSession: async () => ({ access_token: 'fixture-token' }), fetchImpl: async (_url, options) => {
+    if (options.method === 'PUT') { stored = JSON.parse(options.body).plan; return response({ academicYearId: year }); }
+    return response({ plan: stored });
+  } });
+  await api.save(org, plan);
+  assert.deepEqual((await api.load(org, year)).plan, plan);
+  stored.holidays[0].holidayType = 'other';
+  await assert.rejects(api.load(org, year), /category/);
 });

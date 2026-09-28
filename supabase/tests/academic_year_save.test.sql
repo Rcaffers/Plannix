@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(43);
+select extensions.no_plan();
 
 create function pg_temp.save_academic_year_as(
   fixture_user_id uuid,
@@ -283,6 +283,7 @@ select extensions.is(
   'caller-supplied holiday UUIDs remain stable'
 );
 
+
 select extensions.is(
   pg_temp.save_academic_year_as(
     '40000000-0000-0000-0000-000000000001',
@@ -478,6 +479,67 @@ select extensions.is(
   1,
   'organisation isolation preserves the other organisation year'
 );
+
+select extensions.has_column('public', 'plannix_holidays', 'holiday_type', 'holiday category is persisted');
+select extensions.col_not_null('public', 'plannix_holidays', 'holiday_type', 'category cannot be null');
+select extensions.col_default_is('public', 'plannix_holidays', 'holiday_type', 'school', 'legacy/new rows default to school');
+
+select extensions.lives_ok(
+  $$select pg_temp.save_academic_year_as('40000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000001', (select id from academic_year_result where key='first'), 'Categorised year', '2026-09-01', '2027-08-31', '[{"id":"70000000-0000-0000-0000-000000000001","name":"School break","start_date":"2026-10-01","end_date":"2026-10-02","holiday_type":"school"},{"id":"70000000-0000-0000-0000-000000000003","name":"Public day","start_date":"2026-12-25","end_date":"2026-12-25","holiday_type":"public"}]')$$,
+  'one atomic save accepts school and public holidays'
+);
+select extensions.results_eq(
+  $$select id::text, holiday_type from public.plannix_holidays where academic_year_id=(select id from academic_year_result where key='first') order by id$$,
+  $$values ('70000000-0000-0000-0000-000000000001'::text,'school'::text),('70000000-0000-0000-0000-000000000003'::text,'public'::text)$$,
+  'reload retains both categories and stable IDs'
+);
+select extensions.lives_ok(
+  $$select pg_temp.save_academic_year_as('40000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000001', (select id from academic_year_result where key='first'), 'Legacy update', '2026-09-01', '2027-08-31', '[{"id":"70000000-0000-0000-0000-000000000001","name":"School break","start_date":"2026-10-01","end_date":"2026-10-02"},{"id":"70000000-0000-0000-0000-000000000003","name":"Public day","start_date":"2026-12-25","end_date":"2026-12-25"}]')$$,
+  'legacy callers can save without a category'
+);
+select extensions.is((select holiday_type from public.plannix_holidays where id='70000000-0000-0000-0000-000000000003'), 'public', 'omitting category preserves existing public holiday');
+select extensions.throws_ok(
+  $$select pg_temp.save_academic_year_as('40000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000001', (select id from academic_year_result where key='first'), 'Must roll back', '2026-09-01', '2027-08-31', '[{"name":"Bad category","start_date":"2026-10-01","end_date":"2026-10-02","holiday_type":"ai"}]')$$,
+  '22023', 'Holiday category must be school or public.', 'unknown category is rejected by RPC'
+);
+select extensions.is((select name from public.plannix_academic_years where id=(select id from academic_year_result where key='first')), 'Legacy update', 'invalid category rolls back the parent update and reconciliation');
+select extensions.throws_ok(
+  $$select pg_temp.save_academic_year_as('40000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000001', null, 'Null category', '2026-09-01', '2027-08-31', '[{"name":"Bad category","start_date":"2026-10-01","end_date":"2026-10-02","holiday_type":null}]')$$,
+  '22023', 'Holiday category must be school or public.', 'explicit null is rejected by RPC'
+);
+select extensions.throws_ok($$update public.plannix_holidays set holiday_type='other' where id='70000000-0000-0000-0000-000000000003'$$, '23514', null, 'table constraint rejects arbitrary categories');
+select extensions.throws_ok($$update public.plannix_holidays set holiday_type=null where id='70000000-0000-0000-0000-000000000003'$$, '23502', null, 'table rejects null categories');
+select extensions.is((select holiday_type from public.plannix_holidays where id='70000000-0000-0000-0000-000000000004'), 'school', 'legacy insert defaults to school without name-based inference');
+
+
+select extensions.is((select holiday_type from public.plannix_holidays where id='70000000-0000-0000-0000-000000000001'), 'school', 'omitted type preserves existing school');
+
+create temporary table rollback_parents as select to_jsonb(y) as row from public.plannix_academic_years y;
+create temporary table rollback_children as select to_jsonb(h) as row from public.plannix_holidays h;
+select extensions.throws_ok(
+  $$select pg_temp.save_academic_year_as('40000000-0000-0000-0000-000000000001','50000000-0000-0000-0000-000000000001',(select id from academic_year_result where key='first'),'Changed parent','2026-09-02','2027-08-30', '[{"id":"70000000-0000-0000-0000-000000000001","name":"Changed first child","start_date":"2026-10-03","end_date":"2026-10-04","holiday_type":"public"},{"id":"70000000-0000-0000-0000-000000000003","name":"Invalid second","start_date":"2026-12-25","end_date":"2026-12-25","holiday_type":null}]')$$,
+  '22023','Holiday category must be school or public.','invalid second child rolls back valid parent and first child');
+select extensions.results_eq($$select to_jsonb(y) from public.plannix_academic_years y order by id$$, $$select row from rollback_parents order by row->>'id'$$, 'all parent fields unchanged after second-child rejection');
+select extensions.results_eq($$select to_jsonb(h) from public.plannix_holidays h order by id$$, $$select row from rollback_children order by row->>'id'$$, 'every child field unchanged after second-child rejection');
+
+select extensions.throws_ok(
+  $$select pg_temp.save_academic_year_as('40000000-0000-0000-0000-000000000001','50000000-0000-0000-0000-000000000001',(select id from academic_year_result where key='first'),'Duplicate parent','2026-09-01','2027-08-31', '[{"id":"70000000-0000-0000-0000-000000000001","name":"Café break","start_date":"2026-12-25","end_date":"2026-12-25","holiday_type":"school"},{"id":"70000000-0000-0000-0000-000000000003","name":" CAFE\u0301\u00a0  break ","start_date":"2026-12-25","end_date":"2026-12-25","holiday_type":"public"}]')$$,
+  '22023','A holiday with this name and date range already exists.','normalized cross-category duplicate rejected atomically');
+select extensions.results_eq($$select to_jsonb(y) from public.plannix_academic_years y order by id$$, $$select row from rollback_parents order by row->>'id'$$, 'duplicate rejection preserves parents');
+select extensions.results_eq($$select to_jsonb(h) from public.plannix_holidays h order by id$$, $$select row from rollback_children order by row->>'id'$$, 'duplicate rejection preserves every child');
+
+select extensions.lives_ok(format($query$select pg_temp.save_academic_year_as('40000000-0000-0000-0000-000000000001','50000000-0000-0000-0000-000000000001',null,'Boundary %s','2026-09-01','2027-08-31',(select jsonb_agg(jsonb_build_object('name','Holiday ' || n,'start_date','2026-12-25','end_date','2026-12-25','holiday_type',case when n %% 2=0 then 'school' else 'public' end)) from generate_series(1,%s) n))$query$, total,total), 'combined ' || total || ' differently labelled overlapping holidays accepted') from (values(99),(100)) counts(total);
+
+select extensions.ok(not pg_catalog.has_table_privilege(role_name,'public.plannix_holidays',privilege), role_name || ' lacks ' || privilege)
+from (values('anon'),('authenticated')) roles(role_name) cross join (values('TRUNCATE'),('TRIGGER'),('REFERENCES')) privileges(privilege);
+select extensions.ok(not exists(select 1 from pg_catalog.pg_class c cross join lateral pg_catalog.aclexplode(c.relacl) a where c.oid='public.plannix_holidays'::regclass and a.grantee=0 and a.privilege_type in ('TRUNCATE','TRIGGER','REFERENCES')), 'PUBLIC lacks unnecessary table privileges');
+select extensions.ok(pg_catalog.has_table_privilege('authenticated','public.plannix_holidays',privilege), 'authenticated retains ' || privilege) from (values('SELECT'),('INSERT'),('UPDATE'),('DELETE')) privileges(privilege);
+
+select pg_catalog.set_config('request.jwt.claim.sub','40000000-0000-0000-0000-000000000001',true);
+set local role authenticated;
+select extensions.results_eq($$select holiday_type from public.plannix_holidays where id in ('70000000-0000-0000-0000-000000000001','70000000-0000-0000-0000-000000000003') order by id$$, $$values ('school'::text),('public'::text)$$, 'authenticated RLS load retains both categories');
+select extensions.is((select count(*) from public.plannix_holidays where id='70000000-0000-0000-0000-000000000005'),0::bigint,'authenticated cannot read other organisation holidays');
+reset role;
 
 select * from extensions.finish();
 

@@ -1,3 +1,6 @@
+import { holidayDuplicateKey } from '../../shared/holidayKey.js';
+export { holidayDuplicateKey } from '../../shared/holidayKey.js';
+
 export const DEFAULT_ACADEMIC_YEAR = {
   id: null,
   label: '',
@@ -40,7 +43,7 @@ export function normalizeHoliday(raw) {
     startDate = endDate;
     endDate = t;
   }
-  return { id, label, startDate, endDate };
+  return { id, label, startDate, endDate, holidayType: raw?.holidayType === undefined ? 'school' : raw.holidayType };
 }
 
 export function normalizeAcademicYear(partial) {
@@ -64,13 +67,26 @@ export function selectCurrentAcademicYear(academicYears, today = toLocalYmd(new 
     .sort((a, b) => b.startDate.localeCompare(a.startDate) || a.id.localeCompare(b.id))[0]?.id || null;
 }
 
+
+export function duplicateHoliday(holidays) {
+  const seen = new Set();
+  return holidays.find(holiday => {
+    const key = holidayDuplicateKey(holiday);
+    if (seen.has(key)) return true;
+    seen.add(key);
+    return false;
+  });
+}
+
 export function validateAcademicYearDraft(plan) {
   const normalized = normalizeAcademicYear(plan);
   if (!normalized.label || normalized.label.length > 200) return 'Enter an academic-year name of no more than 200 characters.';
   if (!isValidYmd(normalized.startDate) || !isValidYmd(normalized.endDate)
     || normalized.startDate > normalized.endDate) return 'Enter a valid start and end date.';
   if (normalized.holidays.length > 100) return 'An academic year can contain no more than 100 holidays.';
+  if (duplicateHoliday(normalized.holidays)) return 'A holiday with this name and date range already exists.';
   for (const holiday of normalized.holidays) {
+    if (!['school', 'public'].includes(holiday.holidayType)) return 'Holiday category must be school or public.';
     if (!holiday.label || holiday.label.length > 200) return 'Each holiday needs a name of no more than 200 characters.';
     if (!isValidYmd(holiday.startDate) || !isValidYmd(holiday.endDate)
       || holiday.startDate > holiday.endDate

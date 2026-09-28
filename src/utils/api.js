@@ -131,12 +131,13 @@ export async function fetchHolidayCountries() {
   return Array.isArray(payload?.countries) ? payload.countries : [];
 }
 
-export async function resolveCountryFromCoordinates({ lat, lng }) {
+export async function resolveCountryFromCoordinates({ lat, lng }, { signal } = {}) {
   const params = new URLSearchParams({
     lat: String(lat),
     lng: String(lng),
   });
   const response = await fetch(`${API_BASE_URL}/holidays/resolve-country?${params.toString()}`, {
+    signal,
     method: 'GET',
     credentials: 'omit',
   });
@@ -150,12 +151,13 @@ export async function resolveCountryFromCoordinates({ lat, lng }) {
   };
 }
 
-export async function fetchPublicHolidays({ countryCode, year }) {
+export async function fetchPublicHolidays({ countryCode, year }, { signal } = {}) {
   const params = new URLSearchParams({
     country: String(countryCode || '').toUpperCase(),
     year: String(year),
   });
   const response = await fetch(`${API_BASE_URL}/holidays/public?${params.toString()}`, {
+    signal,
     method: 'GET',
     credentials: 'omit',
   });
@@ -335,6 +337,12 @@ function canonicalUuid(value, label) {
   return value;
 }
 
+function publicHolidayType(value) {
+  if (value === undefined) return 'school'; // Compatibility with older responses.
+  if (!['school', 'public'].includes(value)) throw new ApiError('Could not read the holiday category.');
+  return value;
+}
+
 function publicYear(value, withHolidays = false) {
   const year = {
     id: canonicalUuid(value?.id, 'Academic year'),
@@ -345,6 +353,7 @@ function publicYear(value, withHolidays = false) {
   if (withHolidays) {
     year.holidays = (Array.isArray(value?.holidays) ? value.holidays : []).map((holiday) => ({
       id: canonicalUuid(holiday?.id, 'Holiday'),
+      holidayType: publicHolidayType(holiday?.holidayType),
       label: String(holiday?.label || ''),
       startDate: DATE.test(String(holiday?.startDate || '')) ? holiday.startDate : '',
       endDate: DATE.test(String(holiday?.endDate || '')) ? holiday.endDate : '',

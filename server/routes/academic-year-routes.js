@@ -1,3 +1,4 @@
+import { holidayDuplicateKey } from '../../shared/holidayKey.js';
 import { requireSupabaseAuth } from '../middleware/requireSupabaseAuth.js';
 import { createRequestSupabaseClient } from '../supabase/client.js';
 
@@ -71,9 +72,13 @@ export function validateAcademicYearBody(body) {
   }
 
   const holidayIds = new Set();
+  const holidayKeys = new Set();
   const holidays = plan.holidays.map((holiday) => {
-    if (!hasOnlyKeys(holiday, new Set(['id', 'label', 'startDate', 'endDate']))) {
+    if (!hasOnlyKeys(holiday, new Set(['id', 'label', 'startDate', 'endDate', 'holidayType']))) {
       throw publicError(400, 'A holiday contains unexpected fields.');
+    }
+    if (Object.hasOwn(holiday, 'holidayType') && !['school', 'public'].includes(holiday.holidayType)) {
+      throw publicError(400, 'Holiday category must be school or public.');
     }
     if (holiday.id != null && !validUuid(holiday.id)) {
       throw publicError(400, 'Holiday IDs must be valid UUIDs when supplied.');
@@ -90,8 +95,12 @@ export function validateAcademicYearBody(body) {
       || holiday.startDate < plan.startDate || holiday.endDate > plan.endDate) {
       throw publicError(400, 'Holiday dates must fall within the academic year.');
     }
+    const key = holidayDuplicateKey(holiday);
+    if (holidayKeys.has(key)) throw publicError(400, 'A holiday with this name and date range already exists.');
+    holidayKeys.add(key);
     return {
       ...(holiday.id ? { id: holiday.id } : {}),
+      ...(Object.hasOwn(holiday, 'holidayType') ? { holiday_type: holiday.holidayType } : {}),
       name: holiday.label.trim(),
       start_date: holiday.startDate,
       end_date: holiday.endDate,
@@ -118,7 +127,9 @@ function mapAcademicYear(row) {
 }
 
 function mapHoliday(row) {
+  if (!['school', 'public'].includes(row.holiday_type)) throw dataFailure('Could not load the academic year.');
   return {
+    holidayType: row.holiday_type,
     id: row.id,
     label: row.name,
     startDate: row.start_date,
@@ -167,7 +178,7 @@ export function registerAcademicYearRoutes({
 
       const { data: holidays, error: holidaysError } = await client
         .from('plannix_holidays')
-        .select('id, name, start_date, end_date')
+        .select('id, name, start_date, end_date, holiday_type')
         .eq('academic_year_id', academicYear.id)
         .order('start_date', { ascending: true })
         .order('id', { ascending: true });

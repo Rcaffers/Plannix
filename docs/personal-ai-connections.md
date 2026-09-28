@@ -4,7 +4,7 @@ Profile stores one personal connection for OpenAI (`openai`), Anthropic
 (`anthropic`) or Google Gemini (`google_gemini`). Connection status means the key
 has been stored, not that a provider has validated it. Connection management makes
 no provider requests. Stage 2B provides internal generation. Stage 2C exposes only authenticated
-pasted-text holiday suggestions, with no browser UI yet.
+pasted-text holiday suggestions. Stage 2D adds Academic Year review before saving.
 
 ## Boundaries
 
@@ -403,12 +403,95 @@ trusting proxy hops. The authenticated-user budget is the primary account-level
 cost boundary even when IP attribution is imperfect.
 
 Stage 2C performs no academic-year/holiday writes and creates no database IDs.
-Only Stage 2A's credential read RPC is used indirectly. There is no Academic Year
-browser UI, PDF handling or upload endpoint. Stage 2D is planned to provide a
-review-before-save workflow; it is not implemented here.
+Only Stage 2A's credential read RPC is used indirectly. Stage 2D supplies the
+Academic Year review interface described below. There is no PDF handling or upload endpoint.
 
 Tests inject authentication verification and generation, use synthetic data, and
 exercise real localhost Express requests only. External fetch is blocked before
 importing the route/default generation service. Validation covers authentication,
 strict bodies, semantic rejection, error redaction, rate/concurrency controls,
 disconnect/stale completion and structural no-write boundaries.
+
+## Stage 2D: Academic Year review interface
+
+The Academic Year page separates **School holidays** (manual rows and AI review)
+from **Public holidays** (existing location/country import, without AI). The additive `20260927090000_add_holiday_categories.sql` migration adds
+`public.plannix_holidays.holiday_type`, NOT NULL with default `school` and a check
+allowing exactly `school` and `public`. This is a category, not provider provenance.
+Manual school and AI-reviewed additions are `school`; manual public additions and location imports are `public`.
+Every existing holiday is backfilled as `school`; historical public holidays are not inferred.
+The API exposes `holidayType` and both sections filter on that persisted value.
+
+The import component reads safe metadata from `GET /api/ai/connection`. It displays
+the approved provider label, not a key. Disconnected users see Profile guidance;
+metadata failures have an explicit retry. Conditional rendering is not authorization:
+the confirmed-authentication Stage 2C endpoint remains authoritative.
+
+`holidayExtractionApi.js` sends an authenticated, non-cached POST containing exactly
+`text`, `academicYearStartDate`, and `academicYearEndDate`. It checks the 50,000 UTF-8
+byte limit and real date bounds before obtaining a session, rejects malformed result
+shapes, and converts failures into fixed safe messages. Only the known public
+missing-connection message distinguishes that 409 response from an in-progress
+request. Support references are canonical UUIDs; numeric Retry-After is shown on
+429 responses. There are no automatic retries. No browser code imports the internal
+server generation/credential modules or retrieves a decrypted credential.
+
+Pasted text and suggestions live only in component state. Cancellation, unmount,
+year switching and date changes abort pending extraction and ignore late results.
+A replacement extraction discards the previous review; date edits retain pending
+review edits and revalidate their range. Nothing enters the draft on extraction.
+“Add selected holidays” validates every included row before making one draft update;
+“Save academic year” remains the only database save. Discarding suggestions does
+not alter existing draft rows. Manual rows are checked for real dates and ordered
+ranges before normalization as well, so invalid/reversed dates are not silently
+repaired on save.
+
+Duplicates compare NFC-normalized, whitespace-normalized, case-insensitive labels
+and exact dates across both categories, including duplicates within the selected suggestions. Skipped
+counts are announced. Differently labelled overlapping holidays remain separate;
+no existing row is overwritten. The combined draft cannot exceed 100 holidays.
+Reviewed rows use the existing client holiday ID generator only after validation.
+Manual public holidays need no location lookup and explicitly use the public category.
+Both holiday lists start collapsed and reset on year selection; their independent
+visibility is component state only. Adding rows opens the relevant list, with manual
+and AI additions focusing the new label. Hidden rows remain in validation and Save;
+invalid rows are revealed, and save failures reveal both lists without discarding edits.
+
+Tests use synthetic calendar text and mocked APIs, with native browser fetch blocked
+before fixture module evaluation. The rendered fixture exercises the actual page,
+review, combined save, independent public import, safe failures, cancellation,
+focus and 320/375/390/430/820/1366px layouts. The browser runner additionally uses
+real Chrome keyboard input to activate extraction. It never contacts an AI provider.
+
+### Persisted holiday categories
+
+Both categories still use one complete holiday array and the existing six-argument
+`public.plannix_save_academic_year` SECURITY INVOKER RPC. The additive migration
+replaces its body without changing its signature, ownership checks or RLS. It revokes unnecessary TRUNCATE, TRIGGER and REFERENCES table privileges from PUBLIC, anon and authenticated, retaining authenticated CRUD.
+It validates explicit `holiday_type` values, stores them on insert/update and keeps
+reconciliation atomic. Omitted categories default to `school` only on new rows; existing rows retain their stored category. The server forwards omission to the RPC without a racy read-before-write. Explicit null and unknown
+values fail, including through direct table writes. No provider provenance is stored.
+
+The existing authenticated GET reads `holiday_type` with the holiday ID/name/dates;
+there is no separate load RPC. Browser normalization and save/reload mapping retain
+`holidayType`. Both categories continue to close timetable days. Combined limits,
+review-before-add and explicit Save academic year remain unchanged. Public holidays
+have their own editable rows and remove controls; the shared normalized duplicate key spans both categories in the browser and server, with equivalent NFC/whitespace/lowercase/date validation in the atomic RPC. Differently labelled overlaps remain permitted. Public imports own an AbortController passed through public-holiday and country-resolution fetches. Year, boundary, location, replacement and unmount changes abort transport; scope checks still reject non-cooperative stale successes/errors. New public rows receive focus after import; duplicate-only results focus the live status summary.
+
+Apply the additive migration before deploying the updated server/client. It does not
+infer which historical rows came from public-holiday imports. Existing public holidays
+without historical category data will initially appear under School holidays.
+The local pgTAP suite covers the categories and legacy compatibility alongside the
+existing role, organisation, year-isolation and rollback checks. Remote migration
+application is a separate operation and is not part of Stage 2D implementation.
+
+Local upgrade regression: `node scripts/test-academic-year-migration.js` executes
+the actual category migration against pre-category fixtures in a rollback-only
+transaction on the verified local Supabase container. The runner rejects non-Unix
+Docker endpoints and contexts, checks the socket, running container ID, project and
+repository labels, and pins subsequent commands to the verified endpoint/container.
+It accepts only a completed 17-assertion TAP result, not merely a zero exit code.
+`node --test scripts/test-academic-year-migration.test.js` covers refusal paths and
+strict TAP parsing using safe command stubs. No credentials or raw Docker errors
+are printed.
+The complete local pgTAP suite remains `supabase test db --local`.
