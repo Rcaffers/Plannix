@@ -1,3 +1,4 @@
+import { normalizeHolidayLabel } from '../../shared/holidayLabel.js';
 import { aiError } from './generationErrors.js';
 
 export const MAX_CALENDAR_TEXT_BYTES = 50_000;
@@ -41,10 +42,9 @@ export function validateHolidaySuggestions(result, input) {
   const seen = new Set();
   const holidays = result.holidays.map(item => {
     if (!exactKeys(item, ['label', 'startDate', 'endDate']) || typeof item.label !== 'string') throw invalid();
-    if (/[\p{Cc}\p{Cf}]/u.test(item.label)) throw invalid();
-    const label = item.label.normalize('NFC').replace(/\p{White_Space}+/gu, ' ').trim();
+    const label = normalizeHolidayLabel(item.label);
     // Plain-text suggestions only. Never return markup for a later UI to interpret.
-    if (!label || label.length > 200 || /[<>`*\[\]]/.test(label)
+    if (label === null
       || !validDate(item.startDate) || !validDate(item.endDate) || item.startDate > item.endDate
       || item.startDate < input.academicYearStartDate || item.endDate > input.academicYearEndDate) throw invalid();
     const holiday = { label, startDate: item.startDate, endDate: item.endDate };

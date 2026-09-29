@@ -1,3 +1,5 @@
+import { normalizeHolidayLabel } from '../../shared/holidayLabel.js';
+export { normalizeHolidayLabel };
 import { holidayDuplicateKey } from './academicYear.js';
 import { newHolidayId } from './academicYear.js';
 
@@ -15,10 +17,9 @@ export function boundaryError(start, end) {
     || end > `${Number(start.slice(0, 4)) + 2}${start.slice(4)}`
     ? 'Set valid academic-year start and end dates (1900–2200, at most two years) before extracting holidays.' : '';
 }
-export const normalizeHolidayLabel = value => value.normalize('NFC').replace(/\s+/gu, ' ').trim();
 export function suggestionError(holiday, start, end) {
   if (!exactKeys(holiday, ['label', 'startDate', 'endDate'])) return 'A suggestion contains unexpected fields.';
-  if (typeof holiday.label !== 'string' || !normalizeHolidayLabel(holiday.label) || normalizeHolidayLabel(holiday.label).length > 200) return 'Each holiday needs a name of no more than 200 characters.';
+  if (normalizeHolidayLabel(holiday.label) === null) return 'Each holiday needs a name of no more than 200 characters.';
   if (!realDate(holiday.startDate) || !realDate(holiday.endDate) || holiday.startDate > holiday.endDate) return 'Enter real dates, with the first day no later than the last day.';
   if (!realDate(start) || !realDate(end) || start > end || holiday.startDate < start || holiday.endDate > end) return 'Holiday dates must fall within the academic year.';
   return '';

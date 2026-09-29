@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { aiConnectionApi } from '../utils/aiConnectionApi.js';
+import { extractSchoolHolidaysFromPdf, pdfFileError } from '../utils/holidayPdfExtractionApi.js';
 import { extractSchoolHolidays } from '../utils/holidayExtractionApi.js';
 import { boundaryError, MAX_HOLIDAY_TEXT_BYTES, mergeReviewedHolidays, suggestionError, textBytes } from '../utils/holidayReview.js';
 import { safeRequestReference } from '../utils/requestReference.js';
@@ -11,6 +12,9 @@ export default function SchoolHolidayAiImport({ draft, onDraftChange, disabled =
   const [loading, setLoading] = useState(true);
   const [connectionError, setConnectionError] = useState(null);
   const [lookup, setLookup] = useState(0);
+  const [mode, setMode] = useState('text');
+  const [file, setFile] = useState(null);
+  const fileInput = useRef(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -28,24 +32,30 @@ export default function SchoolHolidayAiImport({ draft, onDraftChange, disabled =
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [lookup]);
+  function focusSource() { (mode === 'pdf' ? fileInput.current : extractButton.current)?.focus(); }
+  function clearFile() { setFile(null); if (fileInput.current) fileInput.current.value = ''; }
   function cancel() {
+    clearFile();
     operation.current?.abort(); operation.current = null; setBusy(false);
   }
   useEffect(() => {
     // Date edits invalidate an in-flight request, but retain review edits for revalidation.
     cancel();
     return () => { operation.current?.abort(); operation.current = null; };
-  }, [draft.startDate, draft.endDate]);
+  }, [draft.id, draft.startDate, draft.endDate]);
   useEffect(() => { if (review !== null) reviewHeading.current?.focus(); }, [review === null]);
   useEffect(() => { if (error) errorSummary.current?.focus(); }, [error]);
   const datesError = boundaryError(draft.startDate, draft.endDate);
   const bytes = textBytes(text);
   async function extract() {
-    if (operation.current || disabled || datesError || !text.trim() || bytes > MAX_HOLIDAY_TEXT_BYTES) return;
+    if (operation.current || disabled || datesError || (mode === 'pdf' ? !!pdfFileError(file) : !text.trim() || bytes > MAX_HOLIDAY_TEXT_BYTES)) return;
     const controller = new AbortController(); operation.current = controller;
     setBusy(true); setError(null); setReview(null); setAnnouncement('');
     try {
-      const holidays = await extractSchoolHolidays({ text, academicYearStartDate: draft.startDate, academicYearEndDate: draft.endDate }, { signal: controller.signal });
+      const boundaries = { academicYearStartDate: draft.startDate, academicYearEndDate: draft.endDate };
+      const holidays = mode === 'pdf'
+        ? (await extractSchoolHolidaysFromPdf({ file, ...boundaries }, { signal: controller.signal })).holidays
+        : await extractSchoolHolidays({ text, ...boundaries }, { signal: controller.signal });
       if (operation.current !== controller || controller.signal.aborted) return;
       setReview(holidays.map(holiday => ({ holiday, included: true })));
     } catch (failure) {
@@ -53,7 +63,7 @@ export default function SchoolHolidayAiImport({ draft, onDraftChange, disabled =
       setError(failure);
       if (failure.reason === 'connection') { setConnection(null); setLookup(value => value + 1); }
     } finally {
-      if (operation.current === controller) { operation.current = null; setBusy(false); }
+      if (operation.current === controller) { operation.current = null; setBusy(false); clearFile(); }
     }
   }
   function edit(index, patch) {
@@ -72,7 +82,7 @@ export default function SchoolHolidayAiImport({ draft, onDraftChange, disabled =
       onDraftChange(result.draft);
       setReview(null); setText(''); setError(null);
       setAnnouncement(`${result.added} holidays added to the draft. ${result.skipped} exact duplicates skipped. Save the academic year to keep these changes.`);
-      extractButton.current?.focus();
+      focusSource();
     } catch (failure) { setError(failure); }
   }
   const reference = safeRequestReference(error);
@@ -83,18 +93,35 @@ export default function SchoolHolidayAiImport({ draft, onDraftChange, disabled =
       {safeRequestReference(connectionError) && <p>Support reference: <code>{safeRequestReference(connectionError)}</code></p>}
       <button type="button" className="settings-reset" onClick={() => setLookup(value => value + 1)}>Retry connection</button>
     </div> : !connection ? <p>Connect an AI provider in your Profile to import school holidays automatically. <Link to="/profile">Go to Profile</Link></p> : <>
-      <p>Connected to {connection.providerLabel}. Paste school calendar text to find suggested holidays for review.</p>
+      <p>Connected to {connection.providerLabel}. Find suggested school holidays to review before saving.</p>
+      <div className="settings-actions" role="group" aria-label="Holiday extraction method">
+        {[['text', 'Paste text'], ['pdf', 'Upload PDF']].map(([value, label]) => <button type="button" className="settings-reset" key={value} aria-pressed={mode === value} onClick={() => { cancel(); setMode(value); setReview(null); setError(null); setAnnouncement(''); }}>{label}</button>)}
+      </div>
       <fieldset disabled={busy || disabled} className="school-holiday-ai-fields" aria-labelledby="school-holiday-ai-heading">
+        {mode === 'pdf' ? <>
+          <label htmlFor="school-holiday-pdf">School calendar PDF</label>
+          <input ref={fileInput} id="school-holiday-pdf" type="file" accept="application/pdf" aria-describedby="school-holiday-privacy school-holiday-dates school-holiday-pdf-limit school-holiday-error" onChange={event => {
+            const files = event.target.files;
+            const chosen = files?.length === 1 ? files[0] : null;
+            operation.current?.abort(); operation.current = null; setBusy(false); setReview(null); setError(null);
+            const invalid = pdfFileError(chosen);
+            if (invalid) { clearFile(); setError(new Error(invalid)); } else setFile(chosen);
+          }} />
+          {file && <p>{file.name}</p>}
+          <p id="school-holiday-pdf-limit" className="settings-hint">One PDF, up to 10 MiB and 50 pages. Scanned PDFs without text are not supported.</p>
+          <p id="school-holiday-privacy" className="settings-hint">Extracted PDF text will be sent to {connection.providerLabel}. Plannix does not save your PDF or extracted text. Do not include pupil, staff or other personal information. Review suggestions before saving.</p>
+        </> : <>
         <label htmlFor="school-holiday-text">Pasted school calendar text</label>
         <textarea id="school-holiday-text" value={text} rows={6} onChange={event => setText(event.target.value)} aria-describedby="school-holiday-privacy school-holiday-limit school-holiday-dates" />
         <p id="school-holiday-privacy" className="settings-hint">This text will be sent to {connection.providerLabel}. Do not paste pupil, staff or other personal information.</p>
         <p id="school-holiday-limit" className={`settings-hint${bytes > MAX_HOLIDAY_TEXT_BYTES ? ' settings-hint--error' : ''}`}>{text.length.toLocaleString()} characters · {bytes.toLocaleString()} / 50,000 UTF-8 bytes</p>
+        </>}
         <p id="school-holiday-dates" className="settings-hint">{datesError || 'Only holidays within the academic-year dates will be suggested.'}</p>
-        <button ref={extractButton} type="button" className="settings-reset" onClick={extract} disabled={!!datesError || !text.trim() || bytes > MAX_HOLIDAY_TEXT_BYTES}>{busy ? 'Extracting holidays…' : 'Extract holidays'}</button>
+        <button ref={extractButton} type="button" className="settings-reset" onClick={extract} disabled={!!datesError || (mode === 'pdf' ? !!pdfFileError(file) : !text.trim() || bytes > MAX_HOLIDAY_TEXT_BYTES)}>{busy ? 'Extracting holidays…' : mode === 'pdf' ? 'Extract holidays from PDF' : 'Extract holidays'}</button>
       </fieldset>
-      {busy && <div className="settings-actions"><span role="status">Extracting suggestions…</span><button type="button" className="settings-reset" onClick={() => { cancel(); setAnnouncement('Extraction cancelled.'); requestAnimationFrame(() => { if (!operation.current && !reviewHeading.current && !errorSummary.current) extractButton.current?.focus(); }); }}>Cancel extraction</button></div>}
+      {busy && <div className="settings-actions"><span role="status">Extracting suggestions…</span><button type="button" className="settings-reset" onClick={() => { cancel(); setAnnouncement('Extraction cancelled.'); requestAnimationFrame(() => { if (!operation.current && !reviewHeading.current && !errorSummary.current) focusSource(); }); }}>Cancel extraction</button></div>}
     </>}
-    {error && <div ref={errorSummary} tabIndex={-1} role="alert" className="settings-hint--error school-holiday-error">
+    {error && <div id="school-holiday-error" ref={errorSummary} tabIndex={-1} role="alert" className="settings-hint--error school-holiday-error">
       <p>{error.message}</p>
       {error.retryAfter !== undefined && <p>Try again in {error.retryAfter} seconds.</p>}
       {reference && <p>Support reference: <code>{reference}</code></p>}
@@ -121,7 +148,7 @@ export default function SchoolHolidayAiImport({ draft, onDraftChange, disabled =
       {addError && <p className="settings-hint settings-hint--error">{addError}</p>}
       <div className="settings-actions">
         <button type="button" className="settings-reset" disabled={disabled || !selected.length || !!addError} onClick={add}>Add selected holidays</button>
-        <button type="button" className="settings-reset" onClick={() => { setReview(null); setError(null); extractButton.current?.focus(); }}>Discard suggestions</button>
+        <button type="button" className="settings-reset" onClick={() => { setReview(null); setError(null); focusSource(); }}>Discard suggestions</button>
       </div>
     </section>}
     <p role="status" className="settings-hint settings-hint--success">{announcement}</p>

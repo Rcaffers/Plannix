@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../lib/supabase.js';
 import { API_BASE_URL, ApiError, parseJsonSafe } from './api.js';
-import { boundaryError, exactKeys, MAX_HOLIDAY_TEXT_BYTES, suggestionError, textBytes } from './holidayReview.js';
+import { boundaryError, exactKeys, normalizeHolidayLabel, MAX_HOLIDAY_TEXT_BYTES, suggestionError, textBytes } from './holidayReview.js';
 
 const fallback = 'Could not extract holidays. Please try again.';
 const messages = {
@@ -14,7 +14,7 @@ const messages = {
   503: 'The AI provider is temporarily unavailable. Please try again later.',
   504: 'Holiday extraction timed out. Please try again.',
 };
-async function currentSession() {
+export async function currentSession() {
   const { data, error } = await getSupabaseClient().auth.getSession();
   if (error) throw new ApiError(messages[401], { status: 401 });
   return data?.session;
@@ -49,7 +49,7 @@ export function createHolidayExtractionApi({ fetchImpl = fetch, getSession = cur
         || payload.holidays.some(holiday => suggestionError(holiday, input.academicYearStartDate, input.academicYearEndDate))) {
         throw new ApiError(messages[502], { status: 502, requestId });
       }
-      return payload.holidays.map(({ label, startDate, endDate }) => ({ label, startDate, endDate }));
+      return payload.holidays.map(({ label, startDate, endDate }) => ({ label: normalizeHolidayLabel(label), startDate, endDate }));
     } catch (error) {
       if (signal?.aborted) throw new DOMException('Holiday extraction cancelled.', 'AbortError');
       if (error instanceof ApiError) throw error;

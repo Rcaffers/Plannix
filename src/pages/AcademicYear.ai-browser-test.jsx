@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { MemoryRouter } from 'react-router-dom';
 import AcademicYear from './AcademicYear.jsx';
+import { createHolidayPdfExtractionApi, pdfFileError } from '../utils/holidayPdfExtractionApi.js';
+export { pdfFileError };
 import { createHolidayExtractionApi } from '../utils/holidayExtractionApi.js';
 import { ApiError } from '../utils/api.js';
 import { AI_PROVIDERS } from '../../shared/aiProviders.js';
@@ -25,6 +27,12 @@ export const extractSchoolHolidays = createHolidayExtractionApi({ getSession: as
   const returned = structuredClone(holidays);
   if (gate) await gate; // Intentionally ignore AbortSignal to test stale-result protection too.
   return new Response(JSON.stringify(status === 200 ? { holidays: returned } : { message }), { status, headers: { 'retry-after': '30', 'x-request-id': '00000000-0000-4000-8000-000000000001' } });
+} });
+export const extractSchoolHolidaysFromPdf = createHolidayPdfExtractionApi({ getSession: async () => ({ access_token: 'synthetic-test-session' }), fetchImpl: async (url, options) => {
+  requests.push({ url, ...options });
+  const returned = structuredClone(holidays);
+  if (gate) await gate;
+  return new Response(JSON.stringify(status === 200 ? { holidays: returned, pageCount: 2 } : { message }), { status });
 } });
 export const fetchHolidayCountries = async () => [{ countryCode: 'GB', name: 'United Kingdom' }];
 export const resolveCountryFromCoordinates = async () => ({ countryCode: 'GB', countryName: 'United Kingdom' });
@@ -62,6 +70,58 @@ async function mount(connection = connected(AI_PROVIDERS[0])) {
 async function extract() { input('#school-holiday-text', 'Synthetic calendar text'); click('Extract holidays'); await settle(); }
 const manualRows = () => host.querySelectorAll('[id^="holiday-label-"]');
 async function run() {
+  const selectPdf = (file = new File(['Synthetic PDF'], 'local-calendar.pdf', { type: 'application/pdf' })) => {
+    const transfer = new DataTransfer(); transfer.items.add(file);
+    const element = host.querySelector('#school-holiday-pdf');
+    flushSync(() => { element.files = transfer.files; element.dispatchEvent(new Event('change', { bubbles: true })); });
+  };
+  for (const provider of AI_PROVIDERS) {
+    await mount(connected(provider)); click('Upload PDF'); selectPdf();
+    check(host.textContent.includes('local-calendar.pdf') && button('Upload PDF').getAttribute('aria-pressed') === 'true', `${provider.label}: PDF selected locally and mode accessible`);
+    const previousSaves = saves.length; click('Extract holidays from PDF'); await settle();
+    check(host.querySelector('#school-holiday-review-heading') === document.activeElement && !host.querySelector('#school-holiday-pdf').value, `${provider.label}: PDF success focuses shared review and clears file`);
+    check(requests.at(-1).body instanceof File && saves.length === previousSaves && !manualRows().length, `${provider.label}: raw file upload, no automatic draft/save`);
+    input('#suggestion-0-label', 'Reviewed PDF closure'); click('Add selected holidays');
+    check(host.querySelector('#school-holidays-panel input').value === 'Reviewed PDF closure', 'PDF review adds edited school holiday');
+    click('Save academic year'); await settle(); check(saves.at(-1).holidays[0].holidayType === 'school', 'Separate Save preserves school category');
+  }
+  initialHolidays = [{ ...suggestion, id: 'public-duplicate', holidayType: 'public' }];
+  await mount(); click('Upload PDF'); selectPdf(); click('Extract holidays from PDF'); await settle(); click('Add selected holidays');
+  click('Save academic year'); await settle();
+  check(saves[0].holidays.length === 1 && saves[0].holidays[0].holidayType === 'public', 'PDF cross-category duplicate skipped without recategorising');
+  initialHolidays = Array.from({ length: 100 }, (_, i) => ({ ...suggestion, id: `limit-${i}`, label: `Existing ${i}`, holidayType: i % 2 ? 'school' : 'public' }));
+  await mount(); click('Upload PDF'); selectPdf(); click('Extract holidays from PDF'); await settle();
+  check(button('Add selected holidays').disabled, 'PDF review obeys combined 100-holiday limit');
+  initialHolidays = [];
+  await mount(null); check(!button('Upload PDF'), 'Disconnected PDF controls unavailable');
+  await mount(); click('Upload PDF');
+  for (const file of [new File(['x'], 'not.pdf', { type: 'text/plain' }), new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'large.pdf', { type: 'application/pdf' })]) {
+    selectPdf(file); check(button('Extract holidays from PDF').disabled && !host.querySelector('#school-holiday-pdf').value && !requests.length, 'Invalid PDF rejected and cleared without network');
+  }
+  status = 422; message = 'Password-protected PDFs are not supported.'; selectPdf(); click('Extract holidays from PDF'); await settle();
+  check(host.textContent.includes(message) && !host.querySelector('#school-holiday-pdf').value, 'PDF safe failure clears file and stays visible');
+  status = 200; selectPdf(); click('Extract holidays from PDF'); await settle(); check(!!host.querySelector('#school-holiday-review-heading'), 'PDF retry succeeds');
+  for (const action of ['cancel', 'mode', 'boundary', 'year', 'unmount', 'replacement']) {
+    await mount(); click('Upload PDF'); selectPdf(); let release;
+    gate = new Promise(resolve => { release = resolve; }); click('Extract holidays from PDF'); await settle(); const pending = requests.at(-1);
+    if (action === 'mode') click('Paste text');
+    else if (action === 'boundary') input('#academic-year-end', '2027-07-31');
+    else if (action === 'year') input('#academic-year-selector', 'year-b');
+    else if (action === 'unmount') await mount();
+    else click('Cancel extraction');
+    await settle(); check(pending.signal.aborted, `PDF ${action} aborts pending operation`);
+    if (action === 'replacement') { gate = null; holidays = [{ ...suggestion, label: 'New PDF suggestion' }]; selectPdf(); click('Extract holidays from PDF'); await settle(); }
+    release(); await settle();
+    check(action === 'replacement' ? host.querySelector('#suggestion-0-label').value === 'New PDF suggestion' : !host.querySelector('#school-holiday-review-heading'), `PDF ${action} ignores stale completion`);
+    check(!host.querySelector('#school-holiday-pdf')?.value, `PDF ${action} clears file input`);
+  }
+  await mount(); click('Upload PDF'); selectPdf(new File(['x'], 'long-local-name-'.repeat(20) + '.pdf', { type: 'application/pdf' }));
+  for (const width of [320, 375, 390, 430, 820, 1366]) {
+    window.frameElement.style.width = `${width}px`; await settle();
+    const rect = host.querySelector('#school-holiday-pdf').getBoundingClientRect();
+    check(document.documentElement.scrollWidth <= innerWidth && rect.right <= innerWidth, `${width}px PDF controls and filename do not overflow`);
+    measurements.push({ pdfViewport: innerWidth, documentWidth: document.documentElement.scrollWidth, fileInputWidth: Math.round(rect.width) });
+  }
   window.confirm = () => true;
   initialHolidays = [{ ...suggestion, id: 'school-1', holidayType: 'school' }, { ...suggestion, id: 'public-1', label: 'Public fixture', holidayType: 'public' }];
   await mount();

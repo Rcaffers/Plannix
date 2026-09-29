@@ -31,3 +31,5 @@
 .academic-holiday-list-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
 .academic-holiday-manual-action { border-top: 1px solid var(--stroke, #d5ded8); padding-top: 12px; }
 .academic-holiday-section [hidden] { display: none; }
+.school-holiday-ai input[type=file] { width: 100%; min-width: 0; max-width: 100%; }
+.school-holiday-ai [aria-pressed=true] { outline: 2px solid var(--stroke, #537962); outline-offset: 2px; }

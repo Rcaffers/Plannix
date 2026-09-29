@@ -2,16 +2,27 @@ import { aiError } from './generationErrors.js';
 export function checkCancellation(signal) {
   if (signal?.aborted) throw aiError('AI_CANCELLED');
 }
-// Observe late settlement too: cancelled non-cooperative dependencies must never
-// create unhandled rejections. Only fixed errors escape, never signal.reason.
-export async function waitForOperation(operation, signal, timeoutMs = 30_000) {
-  let timer, cancel;
-  const stopped = new Promise((_, reject) => {
-    cancel = () => reject(aiError('AI_CANCELLED'));
-    signal?.addEventListener('abort', cancel, { once: true });
-    if (signal?.aborted) cancel();
-    timer = setTimeout(() => reject(aiError('AI_TIMEOUT')), timeoutMs);
-  });
-  try { return await Promise.race([operation, stopped]); }
-  finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel); }
+// This promise represents actual settlement, not prompt response cancellation.
+// Abort requests cooperation; even an uncooperative dependency must settle before
+// its owner can release a concurrency lock. HTTP response races live at the route.
+export async function runOperationToSettlement(start, { signal, timeoutMs = 30_000 } = {}) {
+  checkCancellation(signal);
+  const controller = new AbortController();
+  let reason;
+  const stop = code => { if (!reason) { reason = code; controller.abort(); } };
+  const cancel = () => stop('AI_CANCELLED');
+  signal?.addEventListener('abort', cancel, { once: true });
+  const timer = setTimeout(() => stop('AI_TIMEOUT'), timeoutMs);
+  try {
+    const result = await start(controller.signal);
+    if (reason) throw aiError(reason);
+    checkCancellation(signal);
+    return result;
+  } catch (error) {
+    if (reason) throw aiError(reason);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', cancel);
+  }
 }

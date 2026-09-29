@@ -12,7 +12,7 @@ let chrome; let socket;
 try {
   await build({ plugins: [{ name: 'academic-ai-test-boundaries', enforce: 'pre', resolveId(source, importer) {
     if (importer?.endsWith('/AcademicYear.jsx') && ['../context/AcademicYearContext', '../utils/api'].includes(source)) return path.resolve('src/pages/AcademicYear.ai-browser-test.jsx');
-    if (importer?.endsWith('/SchoolHolidayAiImport.jsx') && ['../utils/aiConnectionApi.js', '../utils/holidayExtractionApi.js'].includes(source)) return path.resolve('src/pages/AcademicYear.ai-browser-test.jsx');
+    if (importer?.endsWith('/SchoolHolidayAiImport.jsx') && ['../utils/aiConnectionApi.js', '../utils/holidayExtractionApi.js', '../utils/holidayPdfExtractionApi.js'].includes(source)) return path.resolve('src/pages/AcademicYear.ai-browser-test.jsx');
   } }], configFile: false, logLevel: 'error', define: { 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
     build: { outDir: directory, emptyOutDir: false, lib: {
       entry: 'src/pages/AcademicYear.ai-browser-test.jsx', formats: ['iife'], name: 'SessionProviderTest', fileName: () => 'test.js', cssFileName: 'test',
@@ -96,6 +96,25 @@ try {
   await frameEval('[...d.querySelectorAll("button")].find(b => b.textContent === "Import holidays").focus()');
   await press('Enter', 'Enter', 13, '\r');
   assert.equal(await evaluate(`new Promise(resolve=>setTimeout(()=>resolve(document.querySelector('iframe').contentDocument.activeElement.id),100))`), 'public-holiday-import-status');
+  await frameEval('[...d.querySelectorAll("button")].find(b => b.textContent === "Upload PDF").focus()');
+  await press('Enter', 'Enter', 13, '\r');
+  await writeFile(path.join(directory, 'synthetic.pdf'), 'Synthetic PDF browser fixture; parsing is mocked.');
+  const fileObject = await send('Runtime.evaluate', { expression: "document.querySelector('iframe').contentDocument.querySelector('#school-holiday-pdf')" }, sessionId);
+  await send('DOM.setFileInputFiles', { objectId: fileObject.result.objectId, files: [path.join(directory, 'synthetic.pdf')] }, sessionId);
+  await frameEval('d.querySelector("#school-holiday-pdf").focus()');
+  await press('Tab', 'Tab', 9);
+  assert.equal(await frameEval('d.activeElement.textContent'), 'Extract holidays from PDF');
+  await press('Enter', 'Enter', 13, '\r');
+  assert.equal(await evaluate(`new Promise(resolve=>setTimeout(()=>resolve(document.querySelector('iframe').contentDocument.activeElement.id),100))`), 'school-holiday-review-heading');
+  assert.equal(await frameEval('d.querySelector("#school-holiday-pdf").value'), '');
+  await press('Tab', 'Tab', 9); await press('Tab', 'Tab', 9);
+  assert.equal(await frameEval('d.activeElement.id'), 'suggestion-0-label');
+  await frameEval('d.activeElement.select()');
+  await send('Input.insertText', { text: 'Keyboard PDF holiday' }, sessionId);
+  for (let i = 0; i < 20 && await frameEval('d.activeElement.textContent') !== 'Add selected holidays'; i++) await press('Tab', 'Tab', 9);
+  await press('Enter', 'Enter', 13, '\r');
+  assert.equal(await frameEval('[...d.querySelectorAll("#school-holidays-panel input")].some(input => input.value === "Keyboard PDF holiday")'), true);
+  console.log('Native keyboard PDF mode, file selection via CDP, extraction, review editing and draft addition passed.');
   console.log('Native keyboard location import focuses new row; duplicate-only import focuses status.');
   console.log('Native keyboard holiday toggle Enter/Space and retained focus passed.');
   console.log('Native keyboard extraction, focus, include/exclude, label editing, Add and separate Save passed.');

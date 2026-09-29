@@ -1,5 +1,5 @@
 import { safeAiError } from './generationErrors.js';
-import { checkCancellation, waitForOperation } from './cancellation.js';
+import { checkCancellation, runOperationToSettlement } from './cancellation.js';
 import { createClient } from '@supabase/supabase-js';
 import { env, requireSupabaseAdminConfig } from '../config/env.js';
 import { getProvider } from './providers.js';
@@ -20,9 +20,11 @@ export async function retrieveAiCredential(validatedUserId, {
     const client = createClientImpl(url, secretKey, {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     });
-    let rpc = client.rpc('plannix_get_server_ai_credential', { validated_user_id: validatedUserId });
-    if (signal && typeof rpc.abortSignal === 'function') rpc = rpc.abortSignal(signal);
-    const { data, error } = await waitForOperation(rpc, signal);
+    const { data, error } = await runOperationToSettlement(async operationSignal => {
+      let rpc = client.rpc('plannix_get_server_ai_credential', { validated_user_id: validatedUserId });
+      if (typeof rpc.abortSignal === 'function') rpc = rpc.abortSignal(operationSignal);
+      return await rpc;
+    }, { signal });
     checkCancellation(signal);
     if (error || !data || typeof data.provider !== 'string' || !getProvider(data.provider)
       || typeof data.apiKey !== 'string' || data.apiKey.trim().length < 5 || data.apiKey.length > MAX_AI_KEY_LENGTH) throw unavailable();

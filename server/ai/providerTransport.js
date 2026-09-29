@@ -18,19 +18,24 @@ export async function requestProviderJson({ endpoint, headers, body, extract, va
   const controller = new AbortController();
   let response, reader, timer, cancel;
   let cancelled = false, stopped = false;
-  const deadline = new Promise((_, reject) => {
-    cancel = () => { if (stopped) return; stopped = true; cancelled = true; controller.abort(); reject(aiError('AI_CANCELLED')); };
-    signal?.addEventListener('abort', cancel, { once: true });
-    if (signal?.aborted) cancel();
-    timer = setTimeout(() => { if (stopped) return; stopped = true; controller.abort(); reject(aiError('AI_TIMEOUT')); }, timeoutMs);
-  });
+  let bodyCleanup;
+  const cancelBody = () => {
+    if (bodyCleanup || (!reader && !response?.body)) return;
+    // Observe immediately, but await cleanup before reporting operation settlement.
+    try { bodyCleanup = Promise.resolve(reader ? reader.cancel() : response.body.cancel()).catch(() => {}); }
+    catch { bodyCleanup = Promise.resolve(); }
+  };
+  cancel = () => { if (stopped) return; stopped = true; cancelled = true; controller.abort(); cancelBody(); };
+  signal?.addEventListener('abort', cancel, { once: true });
+  if (signal?.aborted) cancel();
+  timer = setTimeout(() => { if (stopped) return; stopped = true; controller.abort(); cancelBody(); }, timeoutMs);
   const operation = async () => {
     checkCancellation(signal);
     response = await fetchImpl(endpoint, { method: 'POST', redirect: 'error', credentials: 'omit', cache: 'no-store',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...headers },
       body: JSON.stringify(body), signal: controller.signal });
     if (controller.signal.aborted) {
-      try { void response.body?.cancel()?.catch(() => {}); } catch { /* late response cleanup */ }
+      cancelBody();
       throw aiError(cancelled ? 'AI_CANCELLED' : 'AI_TIMEOUT');
     }
     if (response.redirected) throw aiError('AI_INVALID_RESPONSE');
@@ -61,16 +66,17 @@ export async function requestProviderJson({ endpoint, headers, body, extract, va
     return parsed;
   };
   try {
-    return await Promise.race([operation(), deadline]);
+    return await operation();
   } catch (error) {
     if (cancelled) throw aiError('AI_CANCELLED');
     if (controller.signal.aborted || error?.name === 'AbortError') throw aiError('AI_TIMEOUT');
     throw safeAiError(error);
   } finally {
+    controller.abort();
+    cancelBody();
+    await bodyCleanup;
     clearTimeout(timer);
     signal?.removeEventListener('abort', cancel);
-    controller.abort();
-    // Cancellation must never hold up an error or expose a rejected body error.
-    try { void (reader ? reader.cancel() : response?.body?.cancel())?.catch(() => {}); } catch { /* safe cleanup */ }
+    if (stopped) throw aiError(cancelled ? 'AI_CANCELLED' : 'AI_TIMEOUT');
   }
 }

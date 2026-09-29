@@ -56,8 +56,8 @@ async function sources(dir) {
   }
   return output;
 }
-test('no client import or HTTP route exposes PDF module; PDF modules have no provider integration', async () => {
-  for (const [path, source] of [...await sources('src'), ...await sources('server/routes')]) {
+test('no client imports PDF module; parser remains independent of provider integration', async () => {
+  for (const [path, source] of await sources('src')) {
     assert.doesNotMatch(source, /pdfjs-dist|extractTextFromHolidayPdf|pdfWorker\.js/, path);
   }
   for (const [path, source] of await sources('server/pdf')) if (!/test|Fixtures/.test(path)) {

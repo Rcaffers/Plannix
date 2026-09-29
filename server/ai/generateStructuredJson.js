@@ -1,4 +1,4 @@
-import { checkCancellation, waitForOperation } from './cancellation.js';
+import { checkCancellation } from './cancellation.js';
 import { retrieveAiCredential } from './credential.js';
 import { getProvider } from './providers.js';
 import { prepareGeneration } from './generationInput.js';
@@ -14,7 +14,7 @@ export function createStructuredJsonGenerator({ retrieveCredential = retrieveAiC
     const prepared = prepareGeneration(input); // reject invalid/oversized input before secrets or IO
     checkCancellation(signal);
     let connection;
-    try { connection = await waitForOperation(retrieveCredential(prepared.userId, { signal }), signal); }
+    try { connection = await retrieveCredential(prepared.userId, { signal }); }
     catch (error) {
       checkCancellation(signal);
       if (error?.code === 'AI_TIMEOUT') throw aiError('AI_TIMEOUT');

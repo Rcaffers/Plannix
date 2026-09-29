@@ -458,7 +458,7 @@ for (const { id: provider } of AI_PROVIDERS) {
     const started = new Promise(r => { ready = r; });
     const h = harness(provider, (_url, options) => {
       signal = options.signal;
-      if (phase === 'fetch') { ready(); return new Promise(() => {}); }
+      if (phase === 'fetch') { ready(); return new Promise((_, reject) => signal.addEventListener('abort', () => reject(Error('Synthetic abort')))); }
       return new Response(new ReadableStream({ pull() { ready(); }, cancel() { cancelled = true; } }), { headers: { 'Content-Type': 'application/json' } });
     });
     const failure = safeFailure(value => h.run(value, { signal: controller.signal }), 'AI_CANCELLED', false);
@@ -469,7 +469,7 @@ for (const { id: provider } of AI_PROVIDERS) {
 }
 test('internal provider deadline remains active with an uncancelled external signal', async () => {
   const controller = new AbortController();
-  const h = harness('openai', () => new Promise(() => {}), { timeoutMs: 5 });
+  const h = harness('openai', (_url, { signal }) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(Error('Synthetic abort')))), { timeoutMs: 5 });
   await safeFailure(value => h.run(value, { signal: controller.signal }), 'AI_TIMEOUT', true);
   assert.equal(controller.signal.aborted, false);
 });
@@ -477,7 +477,20 @@ test('internal timeout wins if its abort synchronously triggers external cancell
   const controller = new AbortController();
   const h = harness('openai', (_url, { signal }) => {
     signal.addEventListener('abort', () => controller.abort());
-    return new Promise(() => {});
+    return new Promise((_, reject) => signal.addEventListener('abort', () => reject(Error('Synthetic abort'))));
   }, { timeoutMs: 5 });
   await safeFailure(value => h.run(value, { signal: controller.signal }), 'AI_TIMEOUT', true);
+});
+test('provider deadline aborts promptly but generation tracks non-cooperative fetch settlement', async () => {
+  let finish, observedSignal, settled = false;
+  const aborted = new Promise(resolve => {
+    const h = harness('openai', (_url, { signal }) => {
+      observedSignal = signal; signal.addEventListener('abort', resolve, { once: true });
+      return new Promise((_, reject) => { finish = reject; });
+    }, { timeoutMs: 5 });
+    const pending = safeFailure(h.run, 'AI_TIMEOUT', true);
+    pending.then(() => { settled = true; });
+  });
+  await aborted; assert.equal(observedSignal.aborted, true); assert.equal(settled, false);
+  finish(Error('PRIVATE_LATE_ERROR')); await new Promise(resolve => setImmediate(resolve)); assert.equal(settled, true);
 });

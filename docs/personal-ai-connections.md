@@ -3,8 +3,8 @@
 Profile stores one personal connection for OpenAI (`openai`), Anthropic
 (`anthropic`) or Google Gemini (`google_gemini`). Connection status means the key
 has been stored, not that a provider has validated it. Connection management makes
-no provider requests. Stage 2B provides internal generation. Stage 2C exposes only authenticated
-pasted-text holiday suggestions. Stage 2D adds Academic Year review before saving.
+no provider requests. Stage 2B provides internal generation. Stage 2C exposes authenticated pasted-text holiday suggestions; Stage 2E-B adds
+authenticated raw PDF extraction. Both use the Stage 2D Academic Year review before saving.
 
 ## Boundaries
 
@@ -74,15 +74,16 @@ Before exposing an AI feature, separately review endpoint authentication,
 authorisation, rate limits/quotas, spending controls and product-specific output
 validation. Stage 2B does not register an execution endpoint. Stage 2C registers only the
 authenticated extraction route described below. Do not expose credential retrieval
-to React. PDF handling is not implemented.
+to React. PDF extraction is described in Stage 2E-B below.
 
 ## Stage 2A: internal credential retrieval
 
 `server/ai/credential.js` exports `retrieveAiCredential(validatedUserId)`, returning
 only `{ provider, apiKey }` to its immediate trusted caller. An optional trusted
 `signal` option is passed to the Supabase RPC builder via `abortSignal` when supported.
-Cancellation and the bounded lookup deadline are safe internal errors; no signal
-reason is returned. Non-cooperative lookup settlement is observed and discarded. Obtain that canonical
+Cancellation and the lookup deadline request abort using safe internal errors;
+no signal reason is returned. The actual RPC remains tracked until settlement,
+even if it ignores abort; cancelled results are discarded. Obtain that canonical
 UUID from confirmed authentication, never from request parameters. The module
 creates an admin client solely to invoke `plannix_get_server_ai_credential(uuid)`;
 it exposes no general-purpose admin client or table access. All failures become
@@ -234,8 +235,8 @@ All other constructs fail locally with `AI_CONFIGURATION_ERROR`, including refs,
 definitions, recursion, anyOf/oneOf/allOf, conditionals, defaults, const, patterns,
 formats, numeric bounds and string/array length or uniqueness constraints. This
 avoids Anthropic's unsupported numeric/length constraints and OpenAI's optional
-property restrictions. Dates can be strings; future domain-specific date checking
-belongs in the future feature, not a weakened schema or Stage 2C implementation.
+property restrictions. Dates are strings in the schema; Stage 2C performs the required domain-specific
+date validation after generation without weakening the shared schema.
 Ajv still validates every returned value without coercion, including exact enums,
 required fields and unknown-field rejection. Schemas are passed unchanged.
 
@@ -362,7 +363,7 @@ have no invented retry interval. A per-user token lock rejects concurrent reques
 with 409. Other users are independent except when sharing an IP's rate budget.
 
 Each admitted extraction owns one AbortController and one per-user operation token.
-Only settlement of that exact generation promise releases its lock. A disconnect
+Only actual operation settlement releases its operation-specific lock. A disconnect
 or 35-second route timeout requests cancellation but does not release the lock;
 a subsequent request stays blocked until settlement. Detached rejection is safely
 observed, and disconnected responses never receive a later write. Stale cleanup
@@ -371,9 +372,9 @@ cannot delete another operation's lock.
 The route passes an optional signal as a trusted second argument to Stage 2B,
 never as browser-supplied configuration. Cancellation is checked before and after
 credential lookup and immediately before provider fetch. Stage 2A attaches the
-signal to Supabase RPCs where supported; non-cooperative lookups are bounded and
-cannot start a provider request after cancellation. Lookup waiting has a 30-second
-bound. Stage 2B independently retains its own 30-second provider deadline covering
+linked signal to Supabase RPCs where supported. The 30-second lookup deadline
+requests abort but does not prove settlement or release the user lock. A cancelled
+lookup result cannot start provider work. Stage 2B retains its 30-second deadline covering
 fetch and body consumption. Cancellation aborts transport, cancels any response
 body and returns `AI_CANCELLED`; internal deadlines return `AI_TIMEOUT`. Signal
 reasons and upstream causes never escape. Expected client disconnects are not
@@ -382,9 +383,10 @@ logged as internal failures; route deadlines remain safe 504 errors.
 Aborting transport cannot guarantee cancellation or reversal of provider work
 already started or billed. No automatic retry occurs. A non-cooperative underlying
 promise is observed even after cancellation/deadline, avoiding unhandled rejection.
-The production orchestrator settles within its cancellation/deadline protections;
-a test-injected generation function that ignores them deliberately keeps its lock
-until it settles rather than permitting overlapping operations.
+HTTP response cancellation/deadlines may finish response handling earlier.
+Credential and provider operations remain tracked until actual settlement,
+including body cleanup. A non-cooperative dependency intentionally retains its
+user lock until settlement; no timeout releases that lock early.
 
 Authentication and input failures do not consume limiter entries. Every request
 reaching the limiter increments separate hashed user and IP counters, including
@@ -404,7 +406,7 @@ cost boundary even when IP attribution is imperfect.
 
 Stage 2C performs no academic-year/holiday writes and creates no database IDs.
 Only Stage 2A's credential read RPC is used indirectly. Stage 2D supplies the
-Academic Year review interface described below. There is no PDF handling or upload endpoint.
+Academic Year review interface described below. PDF uploads use the separate Stage 2E-B endpoint below.
 
 Tests inject authentication verification and generation, use synthetic data, and
 exercise real localhost Express requests only. External fetch is blocked before
@@ -501,11 +503,10 @@ The complete local pgTAP suite remains `supabase test db --local`.
 `server/pdf/extractTextFromHolidayPdf.js` exposes
 `extractTextFromHolidayPdf({ data, signal })` to trusted server code only. `data`
 must be an in-memory Buffer/Uint8Array; paths, URLs, filenames and additional
-options are rejected. The result contains only `{ text, pageCount }`. There is
-no HTTP endpoint, browser control, database change or AI-provider integration.
-Raw PDFs are never sent to a provider. A future Stage 2E-B flow may submit only
-bounded extracted text to the existing extraction/review flow; review before
-save remains required and unchanged.
+options are rejected. The result contains only `{ text, pageCount }`. The parser itself has no HTTP or provider integration. Stage 2E-B now composes
+it with authenticated extraction and review (below). Raw PDFs are never sent
+to a provider; only bounded extracted text is submitted. No database changes
+are needed, and review before save remains required.
 
 Limits in `server/pdf/pdfConfig.js` are 10 MiB input, 50 pages, 50,000 normalized
 UTF-8 text bytes (shared with Stage 2C), 10 seconds and a 128 MiB V8 old-generation
@@ -556,7 +557,9 @@ OCR, which this module does not provide.
 Errors have fixed messages and codes: `PDF_INVALID`, `PDF_TOO_LARGE`,
 `PDF_ENCRYPTED`, `PDF_TOO_MANY_PAGES`, `PDF_NO_TEXT`, `PDF_TEXT_TOO_LARGE`,
 `PDF_TIMEOUT`, `PDF_CANCELLED`, `PDF_PROCESSING_FAILED`. Only timeout and unknown
-processing failure are marked retryable. There is no HTTP mapping yet.
+processing failure are marked retryable internally. Stage 2E-B maps these codes
+to fixed safe HTTP statuses/messages in the authenticated PDF route; parser
+diagnostics are never forwarded.
 
 ### Parser and deployment prerequisite
 
@@ -596,7 +599,8 @@ less direct control over the PDF.js security/resource boundary. No second PDF
 generator was installed: tests hand-build synthetic objects, xrefs, image data
 and encrypted fixtures. Tests block networking before loading PDF modules,
 exercise real extraction and controlled worker failures, and check that no
-browser/route imports expose the module. A worker thread remains defence in
+browser imports expose the module. Only the authenticated server extraction
+route composes the parser with generation. A worker thread remains defence in
 depth, not an adversarial-code security sandbox.
 
 ### Installation and lifecycle regression coverage
@@ -619,3 +623,95 @@ subsequent valid extraction and no remaining MessagePort/Timeout resources.
 The worker stress fixture currently returns safe `PDF_PROCESSING_FAILED`; parser
 implementation details are never used as a public diagnostic. This supplements,
 rather than replaces, the protocol/race tests using controlled doubles.
+
+
+## Stage 2E-B: authenticated PDF holiday review
+
+`POST /api/ai/holidays/extract-pdf?boundaryStart=YYYY-MM-DD&boundaryEnd=YYYY-MM-DD`
+accepts raw `application/pdf` bytes with the existing confirmed-user bearer
+session. Authentication, exact query/date validation and media checks precede
+the route-scoped raw parser. Compressed bodies, empty bodies, unexpected or
+repeated query parameters and inputs over exactly 10 MiB are rejected. The byte
+limit also applies to chunked requests. No filename is required or accepted as
+a query parameter. Other routes retain their existing JSON parsers.
+
+The HTTP result is exactly `{ holidays: [{ label, startDate, endDate }], pageCount }`.
+PDF bytes and extracted text are never returned to the browser or persisted.
+It contains no source text, filename, credential, provider/model metadata or
+parser diagnostics. The server calls the existing fixed prompt/schema generator
+and semantic validator directly, using only the authenticated UUID. No internal
+HTTP call or academic-year write occurs.
+
+Both extraction routes share one five-attempt user/IP limiter (15 minutes) and
+one per-user operation-token lock in the registration instance. A valid request
+that fails PDF parsing consumes one attempt. Basic malformed/auth failures do
+not consume an attempt. Local attempt-limit errors remain distinct from provider
+rate-limit errors. These controls are per process; shared quotas are required
+before horizontal scaling. They do not provide a global worker/memory quota.
+
+The PDF route has a 45-second HTTP response deadline; pasted text retains 35 seconds.
+The independent 10-second PDF deadline and provider/credential deadlines remain.
+One AbortSignal propagates through parsing and generation, including credential
+lookup and transport. Disconnect or timeout aborts the work; the operation's
+settlement alone releases its token. Non-cooperative late results/rejections are
+observed and discarded. Cancellation cannot reverse already billed provider work.
+The response deadline begins after bounded request-body reception; upstream
+HTTP infrastructure must continue to enforce upload/connection time limits.
+
+PDF bytes and extracted text exist only in request/worker/generation memory;
+references are released on settlement, without logging, caching or persistence.
+Raw parser failures use the existing sanitized error middleware, which logs only
+safe request metadata, never bodies/Buffers or error causes. Success responses
+are `no-store`; support references are displayed only alongside errors.
+
+The existing School Holiday AI component offers keyboard-operable Paste text and
+Upload PDF buttons only with an active connection. The browser sends the File
+itself, never parses it, and displays its name only locally. It clears selection
+on success, failure, cancellation, year/boundary/mode changes and unmount. Scope
+changes invalidate pending operations even if a transport ignores cancellation.
+PDF suggestions enter the same editable review, cross-category duplicate check,
+combined 100-holiday limit and school-only draft addition. Only Save academic year
+persists changes. Manual holidays and public location imports remain independent.
+No OCR, PDF storage, new migration, provider call in tests or browser PDF.js import
+is introduced. Tests use synthetic PDFs and explicitly mocked generation/fetch.
+
+### Response deadlines and actual operation settlement
+
+The extraction route keeps two promises: `responsePromise` may finish promptly
+on disconnect/deadline, while `operationSettlementPromise` owns the per-user
+lock. Only the latter's `finally` releases its operation-local token. Tracked
+work and lock cleanup receive no Express request/response objects. Request body
+references are removed as work starts; PDF references are dropped after parsing
+and source text is cleared on final settlement.
+
+`runOperationToSettlement` replaces the former cancellation race. It passes a
+linked AbortSignal to the Supabase RPC, requests abort at the existing 30-second
+credential deadline, and still awaits the actual RPC. Generation awaits this
+lookup directly and checks cancellation before using its result. Provider
+transport likewise awaits actual fetch/read settlement and body cancellation
+cleanup, including non-cooperative test dependencies. No late credential can
+start a provider request after cancellation. The existing provider deadline,
+10-second PDF deadline, 35-second text response deadline and 45-second PDF
+response deadline remain unchanged.
+
+A dependency that ignores abort can retain the user's lock indefinitely until
+it actually settles; there is deliberately no unsafe lock-release timeout.
+Responses still end promptly at the route deadline. Late failures are observed,
+raw errors are discarded, and stale response events cannot release newer work.
+
+
+### Shared holiday-label validation
+
+`shared/holidayLabel.js` contains the environment-neutral rules used by server
+semantic validation, browser text/PDF response validation and manual/review row
+validation. It rejects non-strings and Unicode Cc/Cf characters before any
+normalization (including ASCII controls, tabs/newlines and zero-width format
+characters). Valid strings are NFC-normalized, Unicode White_Space runs become
+one space, and surrounding whitespace is trimmed. Empty results, more than 200
+UTF-16 code units, and the existing forbidden characters `<`, `>`, backtick,
+asterisk and square brackets are rejected. This preserves the authoritative
+server behaviour, rather than stripping unsafe content into an accepted label.
+Both browser APIs reject the entire collection if any suggestion is invalid and
+return normalized labels only after validation. Errors never include the rejected
+label. React continues to render text; additions remain draft-only until Save
+academic year. No OCR, PDF persistence or additional database write is introduced.

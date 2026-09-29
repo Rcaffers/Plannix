@@ -90,7 +90,9 @@ test('credential retrieval passes cancellation to RPC and fails safely before/af
   rpc.abortSignal = signal => { attached = signal; return rpc; };
   const pending = retrieveAiCredential(id, { signal: controller.signal, config, createClientImpl: () => ({ rpc: () => rpc }) });
   controller.abort('fixture-secret');
-  await assert.rejects(pending, e => e.code === 'AI_CANCELLED' && !e.cause && !e.message.includes('fixture-secret'));
-  assert.equal(attached, controller.signal);
+  let settled = false; void pending.catch(() => {}).finally(() => { settled = true; });
+  await new Promise(r => setImmediate(r)); assert.equal(settled, false);
+  assert.equal(attached.aborted, true);
   resolve({ data: { provider: 'openai', apiKey: credential } });
+  await assert.rejects(pending, e => e.code === 'AI_CANCELLED' && !e.cause && !e.message.includes('fixture-secret'));
 });
