@@ -26,7 +26,7 @@
     "test:timetable-sessions": "node --test src/utils/timetableSessionApi.test.js src/utils/timetableSessionState.test.js",
     "test:backup": "node --test scripts/backup-tooling.test.js",
     "secrets:check": "gitleaks detect --source . --config .gitleaks.toml --baseline-path .gitleaks-baseline.json --redact --verbose",
-    "prepare": "simple-git-hooks",
+    "prepare": "node scripts/setup-git-hooks.js",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -38,6 +38,7 @@
     "express": "^5.2.1",
     "gitleaks": "^1.0.0",
     "helmet": "^8.3.0",
+    "pdfjs-dist": "6.3.289",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.14.2",
@@ -51,5 +52,8 @@
   },
   "simple-git-hooks": {
     "pre-commit": "npm run secrets:check"
+  },
+  "engines": {
+    "node": "24.x"
   }
 }

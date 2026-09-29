@@ -495,3 +495,127 @@ It accepts only a completed 17-assertion TAP result, not merely a zero exit code
 strict TAP parsing using safe command stubs. No credentials or raw Docker errors
 are printed.
 The complete local pgTAP suite remains `supabase test db --local`.
+
+## Stage 2E-A: internal PDF text extraction
+
+`server/pdf/extractTextFromHolidayPdf.js` exposes
+`extractTextFromHolidayPdf({ data, signal })` to trusted server code only. `data`
+must be an in-memory Buffer/Uint8Array; paths, URLs, filenames and additional
+options are rejected. The result contains only `{ text, pageCount }`. There is
+no HTTP endpoint, browser control, database change or AI-provider integration.
+Raw PDFs are never sent to a provider. A future Stage 2E-B flow may submit only
+bounded extracted text to the existing extraction/review flow; review before
+save remains required and unchanged.
+
+Limits in `server/pdf/pdfConfig.js` are 10 MiB input, 50 pages, 50,000 normalized
+UTF-8 text bytes (shared with Stage 2C), 10 seconds and a 128 MiB V8 old-generation
+worker limit, with 16 MiB young-generation and 4 MiB stack limits. Text traversal
+also stops at 100,000 items or 1,000,000 raw text bytes. Limits reject rather than
+truncate. The V8 limits are **not an overall RSS/ArrayBuffer limit or an OS
+sandbox**. A worker isolates JS exceptions, hangs and V8 heap exhaustion from
+the Express event loop; it cannot guarantee containment of a native runtime
+crash or system-wide memory exhaustion. Before exposing uploads, deployment
+must additionally bound concurrent requests and process/container memory.
+Decompression-bomb containment is not absolute: V8 heap limits do not bound every
+native or ArrayBuffer allocation, and JavaScript monkey-patching is not an OS sandbox.
+
+Each call copies and transfers its own input to a fixed local worker, with an
+empty environment and no inherited Node preload flags. PDF.js runs inside that
+worker using its local loopback worker implementation. Network, shell and file
+write entry points are blocked; parser resource factories reject external
+resources. Module loading reads installed code, but no PDF is written to disk,
+retained in temporary files or cached. Worker console output is discarded;
+parser errors and abort reasons never enter returned errors. Parent messages
+are strictly validated, including duplicate/early/nonzero-exit rejection. Every
+outcome clears timers/listeners and awaits worker termination. Stream cancellation
+and document destruction each have a referenced 250 ms cleanup timer. Rejections
+are observed even if the bound wins; an unresolved PDF.js cleanup promise cannot
+leave the top-level worker await without a live handle. Cleanup completion is not
+required indefinitely before the single terminal response and worker exit.
+A referenced worker watchdog also bounds unresolved parser promises. Detached
+parser rejections/exceptions trigger a controlled failure race; the scoped fault
+listeners last only for the disposable worker lifetime, including late cleanup
+callbacks. They never change the main server process exception or stderr handling.
+Cancellation wins if it arrives before settlement.
+
+Page text is extracted in order, with blank lines separating pages. Newlines
+are normalized, NULs removed, Unicode normalized to NFC, repeated whitespace
+collapsed and other control/format characters rejected. No OCR, rendering,
+annotations, hyperlinks, actions, attachments or document metadata are exposed
+or interpreted. Missing text produces a scanned-document-friendly error.
+Encryption is rejected, including empty-password encryption. Signature/EOF
+checks and strict parser error handling reject detected invalid/incomplete documents.
+PDF.js can recover and accept some malformed documents, including inaccurate stream
+lengths; these checks are not comprehensive conformance validation.
+The pinned parser's cross-reference recovery diagnostic also causes rejection
+instead of silently accepting a repaired xref (covered by a real-parser test);
+this is text extraction, not a general PDF conformance validator. Extracted text
+order follows PDF.js and may not match visual reading order. Scanned pages require
+OCR, which this module does not provide.
+
+Errors have fixed messages and codes: `PDF_INVALID`, `PDF_TOO_LARGE`,
+`PDF_ENCRYPTED`, `PDF_TOO_MANY_PAGES`, `PDF_NO_TEXT`, `PDF_TEXT_TOO_LARGE`,
+`PDF_TIMEOUT`, `PDF_CANCELLED`, `PDF_PROCESSING_FAILED`. Only timeout and unknown
+processing failure are marked retryable. There is no HTTP mapping yet.
+
+### Parser and deployment prerequisite
+
+The pinned dependency is `pdfjs-dist@6.3.289`, using Mozilla's
+[documented Node legacy build](https://github.com/mozilla/pdf.js/blob/master/examples/node/getinfo.mjs).
+Its engine requirement is Node `>=22.13.0 || >=24`. Plannix now requires Node
+**24.x** for local development, tests, builds and deployment through the root
+`engines.node` and lockfile metadata; validation uses Node 24.12.0. DigitalOcean's
+current Node buildpack supports 24.x and reads this engine declaration. Confirm
+the selected runtime in deployment logs; no deployment occurs in this stage. The
+modern build requires JS APIs unavailable in this tested Node release; the
+legacy build supplies the compatibility polyfills.
+
+PDF.js provides direct byte input, streamed page text, `stopAtErrors`, disabled
+XFA/Wasm/worker resource fetching, and replaceable resource factories; see its
+[official API reference](https://mozilla.github.io/pdf.js/api/draft/module-pdfjsLib.html).
+This version does not expose the historical `isEvalSupported` setting. The
+worker disables global eval/Function after trusted module initialization and
+never evaluates PDF actions. The historical
+[PDF.js JavaScript-execution advisory](https://github.com/mozilla/pdf.js/security/advisories/GHSA-wgrm-67xf-hhpq)
+reinforces the need to maintain the pinned parser and these boundaries.
+
+The only added direct dependency is PDF.js. It has no install lifecycle
+scripts. Its optional dependency is `@napi-rs/canvas@1.0.9`, plus platform binary
+packages recorded in the lockfile; locally only the Darwin x64 binary was
+installed. The legacy build imports canvas for compatibility even though this
+flow never renders. These packages have no installation hooks; the install
+used `--ignore-scripts`, with no native compilation. Canvas's package includes
+maintainer build/publish scripts, which were not executed. The installation
+and subsequent npm audit reported zero vulnerabilities. Existing dependency
+versions were unchanged. The root prepare command was subsequently hardened as
+described below, without adding a new install lifecycle stage.
+
+`pdf-parse@2.4.5` was rejected because it adds another abstraction, pins older
+PDF.js 5.4.296 and requires canvas; `pdfreader` adds a pdf2json abstraction with
+less direct control over the PDF.js security/resource boundary. No second PDF
+generator was installed: tests hand-build synthetic objects, xrefs, image data
+and encrypted fixtures. Tests block networking before loading PDF modules,
+exercise real extraction and controlled worker failures, and check that no
+browser/route imports expose the module. A worker thread remains defence in
+depth, not an adversarial-code security sandbox.
+
+### Installation and lifecycle regression coverage
+
+The root prepare command is `node scripts/setup-git-hooks.js`. Production installs
+(`NODE_ENV=production`, npm production mode, or `npm_config_omit` containing `dev`)
+skip hook setup before importing any dev dependency. Development installs use
+`simple-git-hooks`' exported `setHooksFromConfig` API, retain the existing Gitleaks
+pre-commit command, and fail with a fixed safe error when setup fails. No dynamic
+download or npx invocation is used. Clean install verification uses disposable
+directories and an isolated Git repository, never the working repository's hooks.
+
+The permanent lifecycle probe runs real worker threads in an isolated test process
+and captures that process's stdout/stderr. It repeats valid, malformed, 120,000
+compressed text-operation, active-cancellation and actual ten-second-timeout cases.
+A test-only reader observer establishes that page parsing has begun before
+cancellation; the timeout case deliberately stalls that real worker. Assertions
+check one controlled stress-error message, clean stress exit, native termination,
+subsequent valid extraction and no remaining MessagePort/Timeout resources.
+The worker stress fixture currently returns safe `PDF_PROCESSING_FAILED`; parser
+implementation details are never used as a public diagnostic. This supplements,
+rather than replaces, the protocol/race tests using controlled doubles.
