@@ -102,6 +102,7 @@ try {
   const fileObject = await send('Runtime.evaluate', { expression: "document.querySelector('iframe').contentDocument.querySelector('#school-holiday-pdf')" }, sessionId);
   await send('DOM.setFileInputFiles', { objectId: fileObject.result.objectId, files: [path.join(directory, 'synthetic.pdf')] }, sessionId);
   await frameEval('d.querySelector("#school-holiday-pdf").focus()');
+  assert.equal(await frameEval('getComputedStyle(d.querySelector(".school-holiday-file-button")).outlineWidth'), '3px');
   await press('Tab', 'Tab', 9);
   assert.equal(await frameEval('d.activeElement.textContent'), 'Extract holidays from PDF');
   await press('Enter', 'Enter', 13, '\r');

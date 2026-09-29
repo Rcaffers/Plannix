@@ -76,9 +76,20 @@ async function run() {
     flushSync(() => { element.files = transfer.files; element.dispatchEvent(new Event('change', { bubbles: true })); });
   };
   for (const provider of AI_PROVIDERS) {
-    await mount(connected(provider)); click('Upload PDF'); selectPdf();
+    await mount(connected(provider)); click('Upload PDF');
+    const picker = host.querySelector('#school-holiday-pdf');
+    check(picker.type === 'file' && [...picker.labels].some(label => label.textContent === 'Choose PDF'), 'Real input has associated custom picker label');
+    check(host.querySelector('.school-holiday-filename').textContent === 'No PDF selected', 'Picker initial empty state');
+    let activated = false;
+    picker.addEventListener('click', event => { activated = true; event.preventDefault(); }, { once: true });
+    host.querySelector('.school-holiday-file-button').click();
+    check(activated, 'Associated label activates real file input without click simulation code');
+    selectPdf();
     check(host.textContent.includes('local-calendar.pdf') && button('Upload PDF').getAttribute('aria-pressed') === 'true', `${provider.label}: PDF selected locally and mode accessible`);
-    const previousSaves = saves.length; click('Extract holidays from PDF'); await settle();
+    const previousSaves = saves.length; click('Extract holidays from PDF');
+    check(picker.matches(':disabled'), 'Processing disables native picker');
+    await settle();
+    check(host.querySelector('.school-holiday-filename').textContent === 'No PDF selected', 'Success clears displayed filename');
     check(host.querySelector('#school-holiday-review-heading') === document.activeElement && !host.querySelector('#school-holiday-pdf').value, `${provider.label}: PDF success focuses shared review and clears file`);
     check(requests.at(-1).body instanceof File && saves.length === previousSaves && !manualRows().length, `${provider.label}: raw file upload, no automatic draft/save`);
     input('#suggestion-0-label', 'Reviewed PDF closure'); click('Add selected holidays');
@@ -99,6 +110,7 @@ async function run() {
     selectPdf(file); check(button('Extract holidays from PDF').disabled && !host.querySelector('#school-holiday-pdf').value && !requests.length, 'Invalid PDF rejected and cleared without network');
   }
   status = 422; message = 'Password-protected PDFs are not supported.'; selectPdf(); click('Extract holidays from PDF'); await settle();
+  check(host.querySelector('.school-holiday-filename').textContent === 'No PDF selected', 'Failure clears displayed filename');
   check(host.textContent.includes(message) && !host.querySelector('#school-holiday-pdf').value, 'PDF safe failure clears file and stays visible');
   status = 200; selectPdf(); click('Extract holidays from PDF'); await settle(); check(!!host.querySelector('#school-holiday-review-heading'), 'PDF retry succeeds');
   for (const action of ['cancel', 'mode', 'boundary', 'year', 'unmount', 'replacement']) {
@@ -113,14 +125,20 @@ async function run() {
     if (action === 'replacement') { gate = null; holidays = [{ ...suggestion, label: 'New PDF suggestion' }]; selectPdf(); click('Extract holidays from PDF'); await settle(); }
     release(); await settle();
     check(action === 'replacement' ? host.querySelector('#suggestion-0-label').value === 'New PDF suggestion' : !host.querySelector('#school-holiday-review-heading'), `PDF ${action} ignores stale completion`);
+    check(!host.textContent.includes('local-calendar.pdf'), `PDF ${action} clears displayed filename`);
     check(!host.querySelector('#school-holiday-pdf')?.value, `PDF ${action} clears file input`);
   }
   await mount(); click('Upload PDF'); selectPdf(new File(['x'], 'long-local-name-'.repeat(20) + '.pdf', { type: 'application/pdf' }));
   for (const width of [320, 375, 390, 430, 820, 1366]) {
     window.frameElement.style.width = `${width}px`; await settle();
-    const rect = host.querySelector('#school-holiday-pdf').getBoundingClientRect();
+    const rect = host.querySelector('.school-holiday-picker').getBoundingClientRect();
+    const modes = host.querySelector('.school-holiday-modes');
+    const gap = host.querySelector('.school-holiday-ai-fields').getBoundingClientRect().top - modes.getBoundingClientRect().bottom;
+    check(gap >= 20 && gap <= 24, `${width}px mode-to-form gap is 20–24px`);
+    check(getComputedStyle(button('Upload PDF')).backgroundColor !== getComputedStyle(button('Paste text')).backgroundColor, 'Selected mode has distinct tinted background');
+    check(host.querySelector('.school-holiday-file-button').getBoundingClientRect().height >= 44, 'Picker has 44px tap target');
     check(document.documentElement.scrollWidth <= innerWidth && rect.right <= innerWidth, `${width}px PDF controls and filename do not overflow`);
-    measurements.push({ pdfViewport: innerWidth, documentWidth: document.documentElement.scrollWidth, fileInputWidth: Math.round(rect.width) });
+    measurements.push({ pdfViewport: innerWidth, documentWidth: document.documentElement.scrollWidth, pickerWidth: Math.round(rect.width), modeGap: gap });
   }
   window.confirm = () => true;
   initialHolidays = [{ ...suggestion, id: 'school-1', holidayType: 'school' }, { ...suggestion, id: 'public-1', label: 'Public fixture', holidayType: 'public' }];

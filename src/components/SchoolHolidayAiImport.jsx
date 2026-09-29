@@ -94,20 +94,23 @@ export default function SchoolHolidayAiImport({ draft, onDraftChange, disabled =
       <button type="button" className="settings-reset" onClick={() => setLookup(value => value + 1)}>Retry connection</button>
     </div> : !connection ? <p>Connect an AI provider in your Profile to import school holidays and closures automatically. <Link to="/profile">Go to Profile</Link></p> : <>
       <p>Connected to {connection.providerLabel}. Review suggested holidays and pupil closures, including INSET days, before saving.</p>
-      <div className="settings-actions" role="group" aria-label="Holiday extraction method">
+      <div className="settings-actions school-holiday-modes" role="group" aria-label="Holiday extraction method">
         {[['text', 'Paste text'], ['pdf', 'Upload PDF']].map(([value, label]) => <button type="button" className="settings-reset" key={value} aria-pressed={mode === value} onClick={() => { cancel(); setMode(value); setReview(null); setError(null); setAnnouncement(''); }}>{label}</button>)}
       </div>
       <fieldset disabled={busy || disabled} className="school-holiday-ai-fields" aria-labelledby="school-holiday-ai-heading">
         {mode === 'pdf' ? <>
           <label htmlFor="school-holiday-pdf">School calendar PDF</label>
-          <input ref={fileInput} id="school-holiday-pdf" type="file" accept="application/pdf" aria-describedby="school-holiday-privacy school-holiday-dates school-holiday-pdf-limit school-holiday-error" onChange={event => {
+          <div className="school-holiday-picker">
+          <input className="school-holiday-file-input" ref={fileInput} id="school-holiday-pdf" type="file" accept="application/pdf" aria-describedby="school-holiday-privacy school-holiday-dates school-holiday-pdf-limit school-holiday-error" onChange={event => {
             const files = event.target.files;
             const chosen = files?.length === 1 ? files[0] : null;
             operation.current?.abort(); operation.current = null; setBusy(false); setReview(null); setError(null);
             const invalid = pdfFileError(chosen);
             if (invalid) { clearFile(); setError(new Error(invalid)); } else setFile(chosen);
           }} />
-          {file && <p>{file.name}</p>}
+          <label className="settings-reset school-holiday-file-button" htmlFor="school-holiday-pdf">Choose PDF</label>
+          <span className="school-holiday-filename">{file ? file.name : 'No PDF selected'}</span>
+          </div>
           <p id="school-holiday-pdf-limit" className="settings-hint">One PDF, up to 10 MiB and 50 pages. Scanned PDFs without text are not supported.</p>
           <p id="school-holiday-privacy" className="settings-hint">Extracted PDF text will be sent to {connection.providerLabel}. Plannix does not save your PDF or extracted text. Do not include pupil, staff or other personal information. Review suggestions before saving.</p>
         </> : <>
