@@ -35,6 +35,6 @@ export function corsDelegate(req, callback) {
   callback(null, {
     origin: allowed,
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
-    exposedHeaders: ['X-Request-ID'],
+    exposedHeaders: ['X-Request-ID', 'Retry-After'],
   });
 }

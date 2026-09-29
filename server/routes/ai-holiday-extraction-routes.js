@@ -30,7 +30,7 @@ const errors = Object.freeze({
 export function createHolidayExtractionRateLimit(options = {}) {
   const limiter = createAccountDeletionRateLimit({ limit: 5, windowMs: 15 * 60 * 1000, ...options });
   return (req, res, next) => limiter(req, res, error => next(error
-    ? publicError(429, 'Too many holiday extraction attempts. Please try again later.') : undefined));
+    ? Object.assign(publicError(429, 'Too many holiday extraction attempts. Please try again later.'), { publicCode: 'HOLIDAY_ATTEMPT_LIMIT' }) : undefined));
 }
 // No request/response objects enter the tracked work or its lock cleanup.
 async function settleHolidayOperation({ input, data, pdf, userId, signal, extractPdf, generate }) {
@@ -91,7 +91,7 @@ export function registerAiHolidayExtractionRoutes({ app, requireAuth = requireSu
       if (!disconnected && !res.destroyed) {
         const code = timedOut ? 'AI_TIMEOUT' : error?.code;
         const mapping = typeof code === 'string' && Object.hasOwn(errors, code) ? errors[code] : null;
-        next(mapping ? publicError(...mapping) : new Error('Holiday extraction failed.'));
+        next(mapping ? Object.assign(publicError(...mapping), code === 'AI_RATE_LIMITED' ? { publicCode: 'AI_RATE_LIMITED' } : {}) : new Error('Holiday extraction failed.'));
       }
     } finally {
       clearTimeout(timer);

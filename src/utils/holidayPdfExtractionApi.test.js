@@ -33,8 +33,8 @@ for (const status of [400, 401, 403, 409, 413, 415, 422, 429, 500, 502, 503, 504
   await assert.rejects(extract(input), error => error.status === status && !error.message.includes('PRIVATE') && !error.cause);
 });
 test('application attempt limit and provider rate limit stay distinct', async () => {
-  for (const message of ['Too many holiday extraction attempts. Please try again later.', 'AI provider rate limit reached. Please try again later.']) {
-    await assert.rejects(createHolidayPdfExtractionApi({ getSession, fetchImpl: async () => response({ message }, 429) })(input), error => error.message === message);
+  for (const [code, message] of [['HOLIDAY_ATTEMPT_LIMIT', 'Too many holiday extraction attempts. Please wait before trying again.'], ['AI_RATE_LIMITED', 'Your AI provider is currently rate limiting requests. Please try again later.']]) {
+    await assert.rejects(createHolidayPdfExtractionApi({ getSession, fetchImpl: async () => response({ code, message: 'unsafe upstream' }, 429) })(input), error => error.message === message);
   }
 });
 test('missing connection, missing authentication, cancellation before/after session and response', async () => {

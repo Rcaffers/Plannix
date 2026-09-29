@@ -719,3 +719,7 @@ academic year. No OCR, PDF persistence or additional database write is introduce
 ### Pupil closures in holiday extraction
 
 PDF-extracted and pasted text use the same fixed server-controlled instructions for every provider. Explicit INSET, training and other non-pupil days are school closures; single-day entries use identical start and end dates and retain meaningful numbering. Reopening dates and opening-count summaries are not closure events. A closure after school does not make that day a pupil absence: a range is derived only from clear boundaries, starting the following day and excluding reopening. No missing dates are invented. Reviewed suggestions remain in the school category and only Save academic year persists them. Synthetic, mocked tests check the prompt contract and review flow; they do not establish live model recall.
+
+### Stage 2F release polish
+
+Changing the Profile provider selector discards the unsaved key and stale errors immediately; same-provider replacement retains input until submission. Saving stores rather than verifies a key. AI requests occur only when using an AI feature. Extraction 429 responses expose only server-owned codes: HOLIDAY_ATTEMPT_LIMIT or AI_RATE_LIMITED. Both browser input modes map these codes to distinct safe messages; unknown 429 responses use a generic fallback without upstream prose. CORS exposes X-Request-ID and Retry-After without changing the origin or request-header policy.

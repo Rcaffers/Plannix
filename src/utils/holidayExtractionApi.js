@@ -1,3 +1,4 @@
+import { holidayRateLimitMessage } from './holidayRateLimit.js';
 import { getSupabaseClient } from '../lib/supabase.js';
 import { API_BASE_URL, ApiError, parseJsonSafe } from './api.js';
 import { boundaryError, exactKeys, normalizeHolidayLabel, MAX_HOLIDAY_TEXT_BYTES, suggestionError, textBytes } from './holidayReview.js';
@@ -9,7 +10,6 @@ const messages = {
   409: 'Holiday extraction is already in progress. Please wait before trying again.',
   413: 'The pasted text is too large. Use a shorter excerpt.',
   422: 'Reconnect your AI provider key in Profile and try again.',
-  429: 'Too many holiday extraction attempts or the provider is rate limited. Please try again later.',
   502: 'Suggestions could not be safely read. Review your text and try again.',
   503: 'The AI provider is temporarily unavailable. Please try again later.',
   504: 'Holiday extraction timed out. Please try again.',
@@ -39,7 +39,7 @@ export function createHolidayExtractionApi({ fetchImpl = fetch, getSession = cur
       const requestId = response.headers?.get?.('x-request-id');
       if (!response.ok) {
         const missingConnection = response.status === 409 && payload?.message === 'Connect an AI provider in Profile before extracting holidays.';
-        const error = new ApiError(missingConnection ? 'Connect an AI provider in your Profile to import school holidays automatically.' : messages[response.status] || fallback, { status: response.status, requestId });
+        const error = new ApiError(holidayRateLimitMessage(response.status, payload) || (missingConnection ? 'Connect an AI provider in your Profile to import school holidays automatically.' : messages[response.status] || fallback), { status: response.status, requestId });
         error.reason = missingConnection ? 'connection' : '';
         const retry = response.headers?.get?.('retry-after');
         if (response.status === 429 && /^\d{1,6}$/.test(retry || '')) error.retryAfter = Number(retry);

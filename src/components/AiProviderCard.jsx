@@ -66,7 +66,7 @@ export default function AiProviderCard({ api = aiConnectionApi }) {
   return <section className="profile-card" aria-labelledby="ai-provider-title" aria-busy={busy}>
     <div><p className="profile-kicker">Personal connection</p><h2 id="ai-provider-title" className="settings-section-title">AI provider</h2>
       <p className="settings-hint">Use your own provider API key. Usage and charges belong to your provider account. Only one provider can be connected at a time.</p>
-      <p className="settings-hint">This securely stores your connection; it does not test the key or send AI requests yet.</p></div>
+      <p className="settings-hint">Your API key is stored securely. Plannix only sends requests to your selected provider when you use an AI feature, such as holiday extraction. Saving a key does not verify it.</p></div>
     {connection ? <p className="profile-detail-value">{connection.active ? 'Connected' : 'Inactive'} · {connection.providerLabel} · Key ending in ••••{connection.lastFour}</p> : null}
     {loaded && mode === 'connected' ? <div className="settings-actions">
       <button className="settings-reset" type="button" disabled={busy} onClick={() => edit('replace')}>Replace API key</button>
@@ -74,7 +74,7 @@ export default function AiProviderCard({ api = aiConnectionApi }) {
       <button className="settings-reset" type="button" disabled={busy} onClick={event => submit(event, true)}>Disconnect</button>
     </div> : null}
     {loaded && mode !== 'connected' ? <form className="profile-form profile-password-form" onSubmit={submit}>
-      <label className="settings-field"><span>Provider</span><select aria-label="Provider" value={provider} disabled={busy || mode === 'replace'} onChange={event => setProvider(event.target.value)}>
+      <label className="settings-field"><span>Provider</span><select aria-label="Provider" value={provider} disabled={busy || mode === 'replace'} onChange={event => { setApiKey(''); setProvider(event.target.value); setError(''); setReference(''); setMessage(''); }}>
         {AI_PROVIDERS.filter(p => mode !== 'switch' || p.id !== connection.provider).map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
       </select></label>
       <label className="settings-field"><span>API key</span><input aria-label="API key" type="password" value={apiKey} autoComplete="new-password" spellCheck={false}

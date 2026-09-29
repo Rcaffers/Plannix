@@ -75,6 +75,7 @@ for (const [code, status, message] of [
   const h = await setup(t, { generate: async () => { if (++count === 1) throw Object.assign(Error('PRIVATE_SECRET_FIXTURE PRIVATE_CALENDAR_FIXTURE PRIVATE_HOLIDAY_FIXTURE'), { code, cause: Error('RAW_PROVIDER_FIXTURE') }); return { holidays: [] }; } });
   const res = await h.request(); assert.equal(res.status, status); assert.ok(res.headers.get('x-request-id'));
   const body = await res.json(); assert.match(body.message, message);
+  assert.equal(body.code, code === 'AI_RATE_LIMITED' ? code : undefined);
   assert.doesNotMatch(JSON.stringify([body, h.logs]), /PRIVATE_|RAW_PROVIDER/);
   assert.equal((await h.request()).status, 200);
 });

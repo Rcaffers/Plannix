@@ -130,5 +130,9 @@ export function errorHandler(error, req, res, next) {
 
   const classification = classifyError(error);
   logRouteError('request_failed', error, req, classification);
-  sendPublicError(res, classification.message, classification.status);
+  // Only these server-owned extraction codes may accompany a public 429.
+  if (classification.status === 429 && error?.expose === true
+    && ['HOLIDAY_ATTEMPT_LIMIT', 'AI_RATE_LIMITED'].includes(error.publicCode)) {
+    res.status(429).json({ message: classification.message, code: error.publicCode });
+  } else sendPublicError(res, classification.message, classification.status);
 }

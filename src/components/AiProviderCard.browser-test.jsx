@@ -7,6 +7,8 @@ import AiProviderCard from './AiProviderCard.jsx';
 import { createAiConnectionApi } from '../utils/aiConnectionApi.js';
 import { AI_PROVIDERS } from '../../shared/aiProviders.js';
 
+// Ignore module-initialization storage capability probes; component operations below must never use storage.
+window.testStorageCalls = 0;
 const credential = 'fixture-browser-key-1234';
 const calls = [];
 let stored = null, fail = false, gate = null;
@@ -39,6 +41,21 @@ async function mount(connection = null) {
   flushSync(() => root.render(<AiProviderCard key={Math.random()} />)); await settle();
 }
 async function run() {
+  for (const source of AI_PROVIDERS) for (const destination of AI_PROVIDERS.filter(p => p.id !== source.id)) {
+    await mount(); input('select', source.id);
+    const typed = source.id === 'openai' ? 'sk-TEST_ONLY_OPENAI' : source.id === 'anthropic' ? 'sk-ant-TEST_ONLY' : 'AIza-TEST_ONLY';
+    input('input[aria-label="API key"]', typed); input('select', destination.id);
+    check(host.querySelector('input[aria-label="API key"]').value === '', `${source.id} to ${destination.id} discards typed key`);
+    click('Connect provider'); await settle();
+    check(!calls.some(call => call.method === 'POST'), 'Changed provider cannot submit discarded key');
+  }
+  await mount({ provider: 'openai', lastFour: '1234', active: true });
+  click('Switch provider'); input('input[aria-label="API key"]', credential); input('select', 'google_gemini');
+  window.confirm = () => true; click('Switch provider'); await settle();
+  check(!calls.some(call => call.method === 'PUT'), 'Switch confirmation cannot submit previous provider key');
+  click('Cancel'); click('Switch provider');
+  check(host.querySelector('input[aria-label="API key"]').value === '', 'Cancel cannot restore discarded key');
+
   for (const provider of AI_PROVIDERS) {
     await mount();
     check([...host.querySelectorAll('option')].map(el=>el.value).join(',') === AI_PROVIDERS.map(p=>p.id).join(','), 'Disconnected selector lists exactly three providers');
@@ -50,7 +67,7 @@ async function run() {
     release(); await settle(); gate=null;
     check(host.textContent.includes(provider.label) && host.textContent.includes('••••1234'), `${provider.label}: connected label and last four only`);
     noCredential();
-    click('Replace API key'); input('input[aria-label="API key"]',credential); click('Replace API key'); await settle();
+    click('Replace API key'); input('input[aria-label="API key"]',credential); check(host.querySelector('input[aria-label="API key"]').value === credential, 'Same-provider replacement retains intended input until submit'); click('Replace API key'); await settle();
     check(calls.at(-1).method==='PUT' && calls.at(-1).body.provider===provider.id, 'Same-provider key replacement uses PUT'); noCredential();
     for (const destination of AI_PROVIDERS.filter(p=>p.id!==provider.id)) {
       await mount({ provider:provider.id,lastFour:'1234',active:true });
@@ -77,6 +94,7 @@ async function run() {
   const memberships=sections.findIndex(el=>el.querySelector('#membership-title'));
   check(password < ai && ai < memberships && ai>=0, 'Actual Profile places AI card after password and before memberships');
   noCredential();
+  check(window.testStorageCalls === 0 && window.testNetworkCalls === 0, 'No credential storage or native fetch');
 }
 const originalConfirm=window.confirm;
 run().then(()=>{document.body.dataset.testResult='passed';},error=>{document.body.dataset.testResult='failed';results.push(error.stack);}).finally(()=>{

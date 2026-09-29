@@ -1,3 +1,4 @@
+import { holidayRateLimitMessage } from './holidayRateLimit.js';
 import { API_BASE_URL, ApiError, parseJsonSafe } from './api.js';
 import { currentSession } from './holidayExtractionApi.js';
 import { boundaryError, exactKeys, normalizeHolidayLabel, suggestionError } from './holidayReview.js';
@@ -19,8 +20,6 @@ const safeMessages = new Set([
   'Could not process this PDF safely. Try another document.',
   'Connect an AI provider in Profile before extracting holidays.',
   'Reconnect your AI provider key in Profile and try again.',
-  'Too many holiday extraction attempts. Please try again later.',
-  'AI provider rate limit reached. Please try again later.',
   'AI provider is temporarily unavailable. Please try again later.',
   'Holiday extraction timed out. Please try again.',
   'Could not obtain valid holiday suggestions. Please review your text and try again.',
@@ -45,7 +44,7 @@ export function createHolidayPdfExtractionApi({ fetchImpl = fetch, getSession = 
       signal?.throwIfAborted();
       const requestId = response.headers?.get?.('x-request-id');
       if (!response.ok) {
-        const message = safeMessages.has(payload?.message) ? payload.message : response.status === 413 ? 'PDF must be no larger than 10 MiB.' : response.status === 401 ? 'Sign in again to extract holidays.' : fallback;
+        const message = holidayRateLimitMessage(response.status, payload) || (safeMessages.has(payload?.message) ? payload.message : response.status === 413 ? 'PDF must be no larger than 10 MiB.' : response.status === 401 ? 'Sign in again to extract holidays.' : fallback);
         const error = new ApiError(message, { status: response.status, requestId });
         error.reason = message.startsWith('Connect an AI provider') ? 'connection' : '';
         const retry = response.headers?.get?.('retry-after');

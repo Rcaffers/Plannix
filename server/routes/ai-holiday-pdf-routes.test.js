@@ -68,7 +68,7 @@ for (const [code, status] of [['PDF_INVALID', 400], ['PDF_TOO_LARGE', 413], ['PD
 for (const otherUser of [false, true]) test(`alternating endpoints shares ${otherUser ? 'IP' : 'user'} five-attempt budget including parser failures`, async t => {
   const h = await setup(t, { rateLimit: createHolidayExtractionRateLimit(), extractPdf: async () => { throw Object.assign(Error(), { code: 'PDF_INVALID' }); } });
   for (let i = 0; i < 5; i++) assert.equal((await (i % 2 ? h.text(otherUser ? 'second' : 'confirmed') : h.pdf())).status, i % 2 ? 200 : 400);
-  const res = await h.text(); assert.equal(res.status, 429); assert.match((await res.json()).message, /Too many holiday extraction attempts/); assert.ok(res.headers.get('retry-after'));
+  const res = await h.text(); assert.equal(res.status, 429); const limited = await res.json(); assert.match(limited.message, /Too many holiday extraction attempts/); assert.equal(limited.code, 'HOLIDAY_ATTEMPT_LIMIT'); assert.ok(res.headers.get('retry-after'));
 });
 for (const phase of ['parser', 'provider']) for (const outcome of ['resolve', 'reject']) for (const end of ['disconnect', 'timeout']) test(`${end} during ${phase}, late ${outcome} keeps shared lock until settlement`, async t => {
   const gate = deferred(), started = deferred(); let signal, count = 0;
@@ -105,7 +105,7 @@ test('basic PDF failures do not consume extraction budget; provider and local ra
   for (let i = 0; i < 6; i++) assert.equal((await h.pdf({ query: '' })).status, 400);
   assert.equal((await h.pdf()).status, 200);
   const provider = await setup(t, { generate: async () => { throw Object.assign(Error('PRIVATE'), { code: 'AI_RATE_LIMITED' }); } });
-  const res = await provider.pdf(); assert.equal(res.status, 429); assert.match((await res.json()).message, /^AI provider rate limit/);
+  const res = await provider.pdf(); assert.equal(res.status, 429); const limited = await res.json(); assert.match(limited.message, /^AI provider rate limit/); assert.equal(limited.code, 'AI_RATE_LIMITED');
 });
 
 const { createStructuredJsonGenerator } = await import('../ai/generateStructuredJson.js');
