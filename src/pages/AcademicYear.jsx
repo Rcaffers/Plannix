@@ -382,7 +382,7 @@ export default function AcademicYear() {
         <h1 className="settings-title">Academic year</h1>
         <SettingsSubnav />
         <p className="settings-lead">
-          Name your academic year, record when it starts, and add school holidays. On the weekly timetable (when you move
+          Name your academic year, record when it starts, and add school holidays and closures. On the weekly timetable (when you move
           by calendar week), days that fall in a holiday range are shown as closed so lessons are not displayed for those
           dates.
         </p>
@@ -434,10 +434,10 @@ export default function AcademicYear() {
           </div>
 
           <section className="academic-holiday-section" aria-labelledby="school-holidays-heading">
-            <h2 id="school-holidays-heading" className="settings-section-title settings-section-title--sub">School holidays</h2>
+            <h2 id="school-holidays-heading" className="settings-section-title settings-section-title--sub">School holidays and closures</h2>
             <p className="settings-hint settings-hint--tight">
               Each holiday has a name and an inclusive date range. Overlapping ranges are allowed; the first matching entry
-              in the list is used. Manual entries and reviewed AI suggestions are saved as school holidays.
+              in the list is used. Include INSET, training and other non-pupil days as well as holidays. Manual entries and reviewed AI suggestions are saved together.
             </p>
 
             {holidayPanel('school')}

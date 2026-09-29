@@ -715,3 +715,7 @@ Both browser APIs reject the entire collection if any suggestion is invalid and
 return normalized labels only after validation. Errors never include the rejected
 label. React continues to render text; additions remain draft-only until Save
 academic year. No OCR, PDF persistence or additional database write is introduced.
+
+### Pupil closures in holiday extraction
+
+PDF-extracted and pasted text use the same fixed server-controlled instructions for every provider. Explicit INSET, training and other non-pupil days are school closures; single-day entries use identical start and end dates and retain meaningful numbering. Reopening dates and opening-count summaries are not closure events. A closure after school does not make that day a pupil absence: a range is derived only from clear boundaries, starting the following day and excluding reopening. No missing dates are invented. Reviewed suggestions remain in the school category and only Save academic year persists them. Synthetic, mocked tests check the prompt contract and review flow; they do not establish live model recall.

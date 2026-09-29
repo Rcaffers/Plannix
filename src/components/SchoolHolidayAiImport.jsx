@@ -87,13 +87,13 @@ export default function SchoolHolidayAiImport({ draft, onDraftChange, disabled =
   }
   const reference = safeRequestReference(error);
   return <section className="school-holiday-ai" aria-labelledby="school-holiday-ai-heading">
-    <h3 id="school-holiday-ai-heading">Import school holidays with AI</h3>
+    <h3 id="school-holiday-ai-heading">Import school holidays and closures with AI</h3>
     {loading ? <p role="status">Loading AI connection…</p> : connectionError ? <div role="alert">
       <p>Could not load your AI connection. Please try again.</p>
       {safeRequestReference(connectionError) && <p>Support reference: <code>{safeRequestReference(connectionError)}</code></p>}
       <button type="button" className="settings-reset" onClick={() => setLookup(value => value + 1)}>Retry connection</button>
-    </div> : !connection ? <p>Connect an AI provider in your Profile to import school holidays automatically. <Link to="/profile">Go to Profile</Link></p> : <>
-      <p>Connected to {connection.providerLabel}. Find suggested school holidays to review before saving.</p>
+    </div> : !connection ? <p>Connect an AI provider in your Profile to import school holidays and closures automatically. <Link to="/profile">Go to Profile</Link></p> : <>
+      <p>Connected to {connection.providerLabel}. Review suggested holidays and pupil closures, including INSET days, before saving.</p>
       <div className="settings-actions" role="group" aria-label="Holiday extraction method">
         {[['text', 'Paste text'], ['pdf', 'Upload PDF']].map(([value, label]) => <button type="button" className="settings-reset" key={value} aria-pressed={mode === value} onClick={() => { cancel(); setMode(value); setReview(null); setError(null); setAnnouncement(''); }}>{label}</button>)}
       </div>
