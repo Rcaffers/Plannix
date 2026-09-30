@@ -14,6 +14,7 @@ import { registerAiHolidayExtractionRoutes } from './routes/ai-holiday-extractio
 import { registerAiConnectionRoutes } from './routes/ai-connection-routes.js';
 import { registerAccountRoutes } from './routes/account-routes.js';
 import { registerAcademicYearRoutes } from './routes/academic-year-routes.js';
+import { registerEventRoutes } from './routes/event-routes.js';
 import { registerClassRoutes } from './routes/class-routes.js';
 import { registerContactRoutes } from './routes/contact-routes.js';
 import { registerCspReportRoutes } from './routes/csp-report-routes.js';
@@ -97,6 +98,7 @@ async function fetchUkBankHolidaysForYear(year) {
 registerContactRoutes({ app, escapeHtml, logRouteError, normalizeEmailInput });
 registerAccountRoutes({ app });
 registerAcademicYearRoutes({ app });
+registerEventRoutes({ app });
 registerClassRoutes({ app });
 registerTimetableLayoutRoutes({ app });
 registerTimetableSessionRoutes({ app });

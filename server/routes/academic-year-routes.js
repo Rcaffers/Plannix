@@ -206,6 +206,9 @@ export function registerAcademicYearRoutes({
         target_end_date: input.endDate,
         target_holidays: input.holidays,
       });
+      if (error?.code === 'P1002') {
+        throw publicError(409, 'Academic-year dates would exclude existing events. Move or remove those events before changing the dates.');
+      }
       if (error || !validUuid(data)) throw dataFailure('Could not save the academic year.');
       res.json({ ok: true, academicYearId: data });
     } catch (error) {

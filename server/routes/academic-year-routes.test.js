@@ -432,3 +432,16 @@ test('cross-category duplicates and invalid second categories reject whole reque
     }
   } finally { await harness.close(); }
 });
+
+test('an event-stranding year-boundary rejection is actionable without exposing database details', async () => {
+  const harness = await createHarness({ rpcResult: { data: null, error: { code: 'P1002', message: 'raw database detail' } } });
+  try {
+    const response = await fetch(`${harness.baseUrl}/api/academic-year`, {
+      method: 'PUT', headers: headers(), body: JSON.stringify({ organisationId, plan: validPlan() }),
+    });
+    assert.equal(response.status, 409);
+    const payload = await response.json();
+    assert.match(payload.message, /events.*Move or remove/i);
+    assert.doesNotMatch(JSON.stringify(payload), /raw database detail/);
+  } finally { await harness.close(); }
+});
