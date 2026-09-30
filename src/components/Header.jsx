@@ -404,7 +404,7 @@ export default function Header({
                   onClick={openLogin}
                   disabled={isAuthLoading}
                 >
-                  {isAuthLoading ? 'Checking...' : 'Login'}
+                  Login
                 </button>
               </>
             )}
@@ -540,7 +540,7 @@ export default function Header({
                   }}
                   disabled={isAuthLoading}
                 >
-                  {isAuthLoading ? 'Checking...' : 'Login'}
+                  Login
                 </button>
               </div>
             )}
@@ -621,11 +621,12 @@ export default function Header({
                     </button>
                   </div>
 
+                  <p className="visually-hidden" role="status">{isLoginSubmitting ? 'Logging in…' : ''}</p>
                   {loginError ? <p className="login-message error">{loginError}</p> : null}
-                  {loginSuccess ? <p className="login-message success">{loginSuccess}</p> : null}
+                  {loginSuccess ? <p className="visually-hidden" role="status">{loginSuccess}</p> : null}
 
                   <button type="submit" className="login-submit" disabled={isLoginSubmitting}>
-                    {isLoginSubmitting ? 'Logging in...' : 'Login'}
+                    Login
                   </button>
 
                   <p className="login-switch">
@@ -662,9 +663,10 @@ export default function Header({
                     onChange={(event) => setForgotEmail(event.target.value)}
                     disabled={isForgotSubmitting}
                   />
+                  <p className="visually-hidden" role="status">{isForgotSubmitting ? 'Sending reset link…' : ''}</p>
                   {forgotError ? <p className="login-message error">{forgotError}</p> : null}
                   <button type="submit" className="login-submit" disabled={isForgotSubmitting}>
-                    {isForgotSubmitting ? 'Sending…' : 'Send reset link'}
+                    Send reset link
                   </button>
                   <p className="login-switch">
                     <button
@@ -776,11 +778,12 @@ export default function Header({
                   disabled={isSignupSubmitting}
                 />
 
-                {signupError ? <p className="login-message error">{signupError}</p> : null}
-                {signupSuccess ? <p className="login-message success">{signupSuccess}</p> : null}
+                <p className="visually-hidden" role="status">{isSignupSubmitting ? 'Creating account…' : ''}</p>
+                  {signupError ? <p className="login-message error">{signupError}</p> : null}
+                {signupSuccess ? <p className={signupSuccess === signupConfirmationMessage() ? "login-message success" : "visually-hidden"} role="status">{signupSuccess}</p> : null}
 
                 <button type="submit" className="login-submit" disabled={isSignupSubmitting}>
-                  {isSignupSubmitting ? 'Creating account...' : 'Create account'}
+                  Create account
                 </button>
 
                 <p className="login-switch">

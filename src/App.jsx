@@ -124,7 +124,7 @@ export default function App() {
   const privateRoute = (element) => {
     const state = privateRouteState({ isAuthLoading, user });
     if (state === 'loading') {
-      return <main aria-busy="true"><p role="status">Checking your session…</p></main>;
+      return <main aria-busy="true"><p role="status" className="visually-hidden">Checking your session…</p></main>;
     }
     if (state === 'public') {
       return (

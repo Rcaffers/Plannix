@@ -4,7 +4,7 @@ export default function ClassPlacementPalette({ entries, selectedId, disabled, d
   return (
     <section className="class-placement-palette" aria-label="Class placement">
       <p className="class-placement-instructions">Drag a class to a lesson slot, or select it and then choose a slot.</p>
-      {disabledReason ? <p className="class-placement-instructions" role="status">{disabledReason}</p> : null}
+      {disabledReason && !['Loading classes or timetable…', 'Saving timetable changes…'].includes(disabledReason) ? <p className="class-placement-instructions" role="status" >{disabledReason}</p> : null}
       <div className="class-placement-list">
         {entries.map((entry) => {
           const { className = '', hint, ...events } = dropProps(entry.id);

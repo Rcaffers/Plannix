@@ -14,16 +14,24 @@ export function useClassPlacement({ enabled, safe, removalSafe = safe, weekId, s
   const [over, setOver] = useState(null);
   const [status, setStatusText] = useState('');
   const [statusIsError, setStatusIsError] = useState(false);
-  function setStatus(message, isError = false) { setStatusText(message); setStatusIsError(isError); }
+  function setStatus(message, isError = false) {
+    setStatusText(previous => previous === message ? previous : message);
+    setStatusIsError(previous => previous === isError ? previous : isError);
+  }
   const dragRef = useRef(null);
+  const dragSourceRef = useRef(null);
   const entries = classPlacementUsage(plannedClasses, frequencySessions);
   const selectedId = enabled && selected && weekId && selected?.weekId === weekId ? selected.classId : null;
   const activeDrag = enabled && drag && weekId && drag.weekId === weekId ? drag : null;
   const activeMove = enabled && moving?.weekId === weekId ? moving : null;
   const action = activeDrag || activeMove || (selectedId ? selected : null);
-  function endDrag() {
-    if (dragRef.current) { setSelected(null); setMoving(null); }
-    dragRef.current = null; setDrag(null); setOver(null);
+  function endDrag(event) {
+    if (event?.type === 'dragend' && (!dragRef.current || event.currentTarget !== dragSourceRef.current)) return;
+    const wasDragging = Boolean(dragRef.current);
+    if (wasDragging) { setSelected(null); setMoving(null); }
+    dragRef.current = null; dragSourceRef.current = null; setDrag(null); setOver(null);
+    if (wasDragging) setStatusText(previous => previous === 'Class selected. Choose an empty lesson slot.'
+      || previous === 'Choose an empty lesson slot to move this lesson.' ? '' : previous);
   }
   function cancel() { setMoving(null); setSelected(null); endDrag(); setStatus('Placement cancelled.'); }
   useEffect(() => { setMoving(null); setSelected(null); endDrag(); setStatus(''); }, [weekId, enabled]);
@@ -50,7 +58,12 @@ export function useClassPlacement({ enabled, safe, removalSafe = safe, weekId, s
     if (next.unchanged) return;
     if (!save(next.sessions)) { setStatus(messages.UNSAFE, true); return; }
     setMoving(null);
-    setStatus(candidate.type === 'class' ? 'Class placed. Saving changes.' : 'Lesson moved or swapped. Saving changes.');
+    const destinationLabel = destination.label || slots.find(slot => slot.day === destination.day
+      && slot.periodId === destination.periodId)?.label || 'the selected slot';
+    setStatus(candidate.type === 'class' ? `Class placed in ${destinationLabel}.`
+      : sessions.some(session => session.day === destination.day && session.periodId === destination.periodId)
+        ? `Lessons swapped at ${destinationLabel}.`
+        : `Lesson moved to ${destinationLabel}.`);
     if (candidate.type === 'class' && entries.find((entry) => entry.id === candidate.classId)?.remaining <= 1) setSelected(null);
   }
   function startDrag(event, candidate) {
@@ -58,6 +71,7 @@ export function useClassPlacement({ enabled, safe, removalSafe = safe, weekId, s
     // Keep existing instruction rows in place until dragend/drop: changing their
     // height during native dragstart can move the source out from under the mouse.
     dragRef.current = candidate; setDrag(candidate);
+    dragSourceRef.current = event.currentTarget;
     event.dataTransfer.effectAllowed = candidate.type === 'class' ? 'copy' : 'move';
     // Native metadata contains identity only; validation uses our in-memory drag.
     const metadata = JSON.stringify({
@@ -78,7 +92,7 @@ export function useClassPlacement({ enabled, safe, removalSafe = safe, weekId, s
     setSelected(null);
     const name = plannedClasses.find((entry) => entry.id === classId)?.name || 'Lesson';
     const slot = slots.find((entry) => entry.day === next.removed.day && entry.periodId === next.removed.periodId);
-    setStatus(`${name} removed from ${slot?.label || 'the timetable'}. Saving changes.`);
+    setStatus(`${name} removed from ${slot?.label || 'the timetable'}.`);
     return true;
   }
   function paletteDropProps(classId) {

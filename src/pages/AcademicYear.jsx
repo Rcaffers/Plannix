@@ -22,6 +22,7 @@ export default function AcademicYear() {
   const [holidayCountries, setHolidayCountries] = useState([]);
   const [holidayCountriesError, setHolidayCountriesError] = useState('');
   const [importStatus, setImportStatus] = useState('');
+  const [importNeedsAttention, setImportNeedsAttention] = useState(false);
   const [importError, setImportError] = useState('');
   const [manualCountryMode, setManualCountryMode] = useState(false);
   const [manualCountryInput, setManualCountryInput] = useState('');
@@ -235,10 +236,11 @@ export default function AcademicYear() {
       if (added) revealHoliday(added);
       else setFocusImportStatus(true);
       setExpanded(value => ({ ...value, public: true }));
+      setImportNeedsAttention(!added);
       setImportStatus(
         added
           ? `Imported ${next.holidays.length - previous.holidays.length} holidays for ${sourceLabel} (${range.startDate} to ${range.endDate}). Review and save.`
-          : holidays.length ? 'No new public holidays added. Matching holidays are already in the draft.' : `No public holidays found for ${sourceLabel} between ${range.startDate} and ${range.endDate}.`,
+          : holidays.length ? 'All matching public holidays are already in this academic year. No changes were made.' : `No public holidays found for ${sourceLabel} between ${range.startDate} and ${range.endDate}.`,
       );
     } catch (error) {
       if (scope !== importScope.current || controller.signal.aborted || error?.name === 'AbortError') return;
@@ -371,6 +373,7 @@ export default function AcademicYear() {
 
   return (
     <main className="settings-page academic-year-page">
+      <p className="visually-hidden" role="status">{isSaving ? 'Saving academic year…' : isImportingHolidays ? 'Importing public holidays…' : ''}</p>
       <div className="container settings-inner settings-inner--wide">
         <p className="settings-breadcrumb">
           <Link to="/">Home</Link>
@@ -397,7 +400,7 @@ export default function AcademicYear() {
           </div>
           <button type="button" className="add-row-button" onClick={handleCreate} disabled={isLoading || isSaving}>Create academic year</button>
         </div>
-        {isLoading ? <p role="status">Loading academic years…</p> : null}
+        {isLoading ? <p role="status" className="visually-hidden">Loading academic years…</p> : null}
         {error ? <p ref={saveErrorRef} tabIndex={-1} className="settings-hint settings-hint--error" role="alert">{error}</p> : null}
         {error && requestReference ? <p className="settings-hint">Support reference: <code>{requestReference}</code></p> : null}
 
@@ -460,9 +463,9 @@ export default function AcademicYear() {
                 onClick={handleUseLocation}
                 disabled={isImportingHolidays}
               >
-                {isImportingHolidays ? 'Checking location…' : 'Use my location'}
+                Use my location
               </button>
-              <button type="button" className="settings-reset" onClick={() => { invalidateImport(); setIsImportingHolidays(false); setManualCountryMode(true); }}>Choose country</button>
+              <button type="button" className="settings-reset" onClick={() => { invalidateImport(); setIsImportingHolidays(false); setImportStatus(''); setImportError(''); setManualCountryMode(true); }}>Choose country</button>
               {manualCountryMode ? (
                 <div className="settings-holiday-import-manual">
                   <label htmlFor="holiday-country-input">Country</label>
@@ -483,7 +486,7 @@ export default function AcademicYear() {
                   <button
                     type="button"
                     className="settings-reset"
-                    onClick={handleManualImport}
+                    id="public-holiday-import-button" onClick={handleManualImport}
                     disabled={isImportingHolidays}
                   >
                     Import holidays
@@ -492,7 +495,7 @@ export default function AcademicYear() {
               ) : null}
               {holidayCountriesError ? <p className="settings-hint">{holidayCountriesError}</p> : null}
               {importError ? <p className="settings-hint settings-hint--error">{importError}</p> : null}
-              {importStatus ? <p ref={importStatusRef} id="public-holiday-import-status" tabIndex={-1} role="status" className="settings-hint settings-hint--success">{importStatus}</p> : null}
+              {importStatus ? <p ref={importStatusRef} id="public-holiday-import-status" tabIndex={importNeedsAttention ? -1 : undefined} role="status" className={importNeedsAttention ? "settings-hint" : "visually-hidden"}>{importStatus}</p> : null}
             </div>
             <div className="academic-holiday-manual-action">
               <button type="button" className="add-row-button" onClick={() => addHoliday('public')} disabled={isLoading || isSaving || draft.holidays.length >= 100}>+ Add public holiday</button>
@@ -502,11 +505,11 @@ export default function AcademicYear() {
 
           <div className="settings-actions">
             <button type="submit" className="settings-save" disabled={isSaving || isLoading}>
-              {isSaving ? 'Saving…' : 'Save academic year'}
+              Save academic year
             </button>
           </div>
           {formError ? <p className="settings-hint settings-hint--error" role="alert">{formError}</p> : null}
-          {savedFlash ? <p className="settings-saved" role="status">Academic year saved.</p> : null}
+          {savedFlash ? <p className="settings-saved visually-hidden" role="status">Academic year saved.</p> : null}
         </form>
       </div>
     </main>

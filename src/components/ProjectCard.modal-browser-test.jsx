@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import '../styles/accessibility.css';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import ProjectCard from './ProjectCard.jsx';

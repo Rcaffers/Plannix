@@ -1,3 +1,5 @@
+import { assertHiddenStatuses } from './routineStatus.browser-assertions.js';
+import '../styles/accessibility.css';
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
@@ -37,7 +39,7 @@ function Harness() {
 }
 const root = createRoot(document.body.appendChild(document.createElement('div')));
 const results = [];
-function check(value, message) { if (!value) throw Error(message); results.push(message); }
+function check(value, message) { if (!value) throw Error(message); assertHiddenStatuses(); results.push(message); }
 const tick = () => new Promise(resolve => setTimeout(resolve, 100));
 const click = el => flushSync(() => el.click());
 async function width(value) { frameElement.style.width = `${value}px`; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); await tick(); }
@@ -242,6 +244,57 @@ async function run() {
     mode = 'fixed'; mount(); await tick();
     check(!document.querySelector('.main-timetable-section') && Math.abs(document.querySelector('.project-card').getBoundingClientRect().top-document.querySelector('#site-header-fixture').getBoundingClientRect().bottom) <= 1, `${size}px: no additional spacing on Input Classes`);
   }
+
+  testPageSpacing = false; allowEditing = true; mode = 'fixed'; observeSave = true; mount(); await tick(); calls = [];
+  const placementStatus = () => document.querySelector('.class-placement-status');
+  const saveStatus = () => document.querySelector('.timetable-save-status');
+  const lessonSlot = (day, row) => document.querySelectorAll('.day-col')[day].querySelectorAll('.slot')[row];
+  const completeSave = () => flushSync(() => feedbackUpdate({ saved: true }));
+  const dragLesson = (source, target) => {
+    const transfer = new DataTransfer();
+    flushSync(() => source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: transfer })));
+    flushSync(() => target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer })));
+    flushSync(() => target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer })));
+    flushSync(() => source.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: transfer })));
+  };
+  click(document.querySelector('.class-placement-chip')); click(lessonSlot(0, 1).querySelector('.lesson-card--empty'));
+  check(placementStatus().textContent.includes('Class placed') && !placementStatus().textContent.includes('Saving') && saveStatus().textContent.trim() === 'Saving…', 'Placement and persistence have separate live-region ownership while pending');
+  hiddenAnnouncement('.class-placement-status'); completeSave();
+  check(saveStatus().textContent.trim() === 'Saved' && !placementStatus().textContent.includes('Saving'), 'Placement announcement remains accurate after successful save');
+  const firstPlacementAnnouncement = placementStatus().textContent;
+  click(lessonSlot(1, 1).querySelector('.lesson-card--empty'));
+  check(placementStatus().textContent !== firstPlacementAnnouncement && placementStatus().textContent.includes('Tuesday at 10:00')
+    && saveStatus().textContent.trim() === 'Saving…', 'Rapid second placement replaces the older announcement with its own destination');
+  completeSave();
+  dragLesson(lessonSlot(0, 0).querySelector('.lesson-card--placed'), lessonSlot(1, 0));
+  check(placementStatus().textContent.includes('Lesson moved') && saveStatus().textContent.trim() === 'Saving…', 'Move announces interaction and one persistence region announces saving');
+  completeSave(); check(!placementStatus().textContent.includes('Saving') && saveStatus().textContent.trim() === 'Saved', 'Move status stays accurate after settlement');
+  dragLesson(lessonSlot(1, 0).querySelector('.lesson-card--placed'), lessonSlot(0, 1));
+  check(placementStatus().textContent.includes('Lessons swapped') && saveStatus().textContent.trim() === 'Saving…', 'Swap announces interaction without stale persistence wording');
+  completeSave();
+  dragLesson(lessonSlot(0, 1).querySelector('.lesson-card--placed'), document.querySelector('.class-placement-return'));
+  check(placementStatus().textContent.includes('removed from') && !placementStatus().textContent.includes('Saving') && saveStatus().textContent.trim() === 'Saving…', 'Return-to-palette removal keeps persistence wording in save region only');
+  flushSync(() => feedbackUpdate({ error: 'Save failed', conflict: true, unsaved: true, requestReference: 'test-reference' }));
+  check(document.querySelector('.classes-hint--error')?.getBoundingClientRect().height > 1
+    && document.querySelector('.class-placement-instructions[role="status"]')?.getBoundingClientRect().height > 1
+    && !placementStatus().textContent.includes('Saving'),
+  'Pending removal to failed save exposes error and blocked placement guidance without stale progress');
+  const recoveryButton = label => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === label);
+  const retryBefore = retryCalls, reloadBefore = reloadCalls;
+  click(recoveryButton('Retry save')); click(recoveryButton('Reload'));
+  check(retryCalls === retryBefore + 1 && reloadCalls === reloadBefore + 1, 'Failed placement recovery retains Retry and Reload actions');
+  completeSave(); check(saveStatus().textContent.trim() === 'Saved' && placementStatus().textContent.includes('removed from'), 'Removal announcement does not become stale after successful save');
+  click(document.querySelector('.class-placement-chip'));
+  check(placementStatus().textContent.includes('Class selected'), 'New selection supersedes prior removal announcement');
+  flushSync(() => feedbackUpdate({ saved: true }));
+  check(placementStatus().textContent.includes('Class selected') && saveStatus().textContent.trim() === 'Saved',
+    'Later selection survives an earlier save-status completion');
+  click([...document.querySelectorAll('.class-placement-instructions button')].find(button => button.textContent === 'Cancel placement'));
+  check(placementStatus().textContent.includes('cancelled') && !placementStatus().textContent.includes('Class selected'), 'Cancellation clears obsolete selection instruction');
+  check(saveStatus().textContent.trim() === 'Saved' && !placementStatus().textContent.includes('Saving'), 'Recovery does not reintroduce stale placement saving text');
+  click(document.querySelector('#week-b')); await tick();
+  check(!placementStatus().textContent.trim(), 'Week change clears obsolete placement announcement');
+  observeSave = false;
 
 }
 run().then(() => { parent.document.body.dataset.testResult='passed'; }, error => { parent.document.body.dataset.testResult='failed'; results.push(error.stack); }).finally(() => {

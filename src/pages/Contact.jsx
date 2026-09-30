@@ -45,6 +45,7 @@ export default function Contact({ user }) {
           <span aria-hidden> / </span>
           Contact
         </p>
+        <p className="visually-hidden" role="status">{isSending ? 'Sending message…' : ''}</p>
         <header className="contact-header">
           <p className="contact-kicker">Get in touch</p>
           <h1 className="contact-title">Contact us</h1>
@@ -54,9 +55,9 @@ export default function Contact({ user }) {
         </header>
 
         {status === 'sent' ? (
-          <div className="contact-success" role="status">
-            <p className="contact-success-title">Message sent</p>
-            <p className="contact-success-body">Thanks for reaching out. We will reply as soon as we can.</p>
+          <div className="contact-actions">
+            <p className="visually-hidden" role="status">Message sent</p>
+            <p className="visually-hidden">Thanks for reaching out. We will reply as soon as we can.</p>
             <button
               type="button"
               className="contact-send-another"
@@ -130,7 +131,7 @@ export default function Contact({ user }) {
             ) : null}
 
             <button type="submit" className="contact-submit" disabled={isSending}>
-              {isSending ? 'Sending…' : 'Submit'}
+              Submit
             </button>
           </form>
         )}

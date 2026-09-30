@@ -1,3 +1,5 @@
+import { assertHiddenStatuses } from '../components/routineStatus.browser-assertions.js';
+import '../styles/accessibility.css';
 import React, { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
@@ -17,6 +19,7 @@ let failSave = false;
 let initialHolidays = [];
 let publicGate = null;
 let publicResults = [{ name: 'Public day', date: '2026-12-25' }];
+let publicFailure = false;
 let holidays = [suggestion], status = 200, message = 'PRIVATE upstream detail', gate = null;
 const requests = [], saves = [], publicCalls = [], publicSignals = [], reloads = [];
 // The auth SDK may probe storage when imported; holiday interactions must never use it.
@@ -36,7 +39,7 @@ export const extractSchoolHolidaysFromPdf = createHolidayPdfExtractionApi({ getS
 } });
 export const fetchHolidayCountries = async () => [{ countryCode: 'GB', name: 'United Kingdom' }];
 export const resolveCountryFromCoordinates = async () => ({ countryCode: 'GB', countryName: 'United Kingdom' });
-export const fetchPublicHolidays = async ({ year }, { signal } = {}) => { publicSignals.push(signal); publicCalls.push(year); if (publicGate) await publicGate; return year === 2026 ? structuredClone(publicResults) : []; };
+export const fetchPublicHolidays = async ({ year }, { signal } = {}) => { publicSignals.push(signal); publicCalls.push(year); if (publicGate) await publicGate; if (publicFailure) throw Error('Could not import holidays.'); return year === 2026 ? structuredClone(publicResults) : []; };
 export function useAcademicYear() {
   const [year, setYear] = useState(() => ({ ...structuredClone(base), holidays: structuredClone(initialHolidays) }));
   const [saveError, setSaveError] = useState('');
@@ -48,7 +51,7 @@ export function useAcademicYear() {
 }
 const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
 const results = []; const measurements = [];
-const check = (condition, message) => { if (!condition) throw Error(message); results.push(message); };
+const check = (condition, message) => { if (!condition) throw Error(message); assertHiddenStatuses(); results.push(message); };
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 async function settle() { await tick(); await tick(); await tick(); }
 const button = label => [...host.querySelectorAll('button')].find(el => el.textContent === label);
@@ -129,7 +132,7 @@ async function run() {
     check(!host.querySelector('#school-holiday-pdf')?.value, `PDF ${action} clears file input`);
   }
   await mount(); click('Upload PDF'); selectPdf(new File(['x'], 'long-local-name-'.repeat(20) + '.pdf', { type: 'application/pdf' }));
-  for (const width of [320, 375, 390, 430, 820, 1366]) {
+  for (const width of [320, 375, 390, 430, 768, 820, 1024, 1366]) {
     window.frameElement.style.width = `${width}px`; await settle();
     const rect = host.querySelector('.school-holiday-picker').getBoundingClientRect();
     const modes = host.querySelector('.school-holiday-modes');
@@ -266,7 +269,7 @@ async function run() {
   input('#suggestion-0-label', 'Edited break'); input('#suggestion-0-startDate', '2026-10-19'); input('#suggestion-0-endDate', '2026-10-29');
   input('#academic-year-start', '2026-11-01'); check(button('Add selected holidays').disabled && host.querySelector('[aria-invalid="true"]'), 'Boundary edits visibly revalidate review');
   input('#academic-year-start', base.startDate); input('#suggestion-0-label', ''); check(button('Add selected holidays').disabled, 'Invalid edited label blocks addition'); input('#suggestion-0-label', 'Edited break');
-  click('Add selected holidays'); check(manualRows().length === 1 && saves.length === 0 && host.querySelector('[role="status"]').textContent.includes('1 holidays added'), 'Add changes draft only and announces result');
+  click('Add selected holidays'); check(manualRows().length === 1 && saves.length === 0 && host.querySelector('.school-holiday-ai .settings-hint--success[role="status"]').textContent.includes('1 holidays added'), 'Add changes draft only and announces result');
   check(!host.querySelector('#school-holidays-panel').hidden && document.activeElement.closest('#school-holidays-panel'), 'AI addition expands school list and focuses new row');
   holidays = [{ label: ' edited   break ', startDate: '2026-10-19', endDate: '2026-10-29' }, { ...suggestion, label: 'Overlapping closure' }]; await extract();
   click('Add selected holidays'); check(manualRows().length === 2 && host.textContent.includes('1 exact duplicates skipped'), 'Exact duplicate skipped; differently labelled overlap kept');
@@ -281,7 +284,7 @@ async function run() {
   check(document.activeElement.closest('#public-holidays-panel') && document.activeElement.value === 'Public day', 'Location import focuses first genuinely new public row');
   check(host.querySelectorAll('[aria-labelledby=public-holidays-heading] [id^=holiday-label-]').length === 1 && host.querySelectorAll('[aria-labelledby=school-holidays-heading] [id^=holiday-label-]').length === 3, 'School and public rows occupy separate sections');
   click('Import holidays'); await settle(); check(manualRows().length === 4, 'Public exact duplicates skipped');
-  check(document.activeElement.id === 'public-holiday-import-status', 'Duplicate-only import focuses accessible status summary');
+  check(document.activeElement.id === 'public-holiday-import-status' && !host.querySelector('#public-holiday-import-status').classList.contains('visually-hidden'), 'Duplicate-only import focuses visible no-change outcome');
   click('+ Add holiday'); check(manualRows().length === 5, 'Manual add preserved');
   const last = [...host.querySelectorAll('[aria-labelledby=school-holidays-heading] [id^=holiday-label-]')].at(-1); const id = last.id.replace('holiday-label-', '');
   input(`#${last.id}`, 'Manual closure'); input(`#holiday-start-${id}`, '2027-01-04'); input(`#holiday-end-${id}`, '2027-01-04');
@@ -324,7 +327,7 @@ async function run() {
   check(replaced.signal.aborted && host.querySelector('#suggestion-0-label').value === 'Replacement suggestion', 'Replacement extraction ignores old completion');
   check(window.testNetworkCalls === 0 && window.testStorageCalls === initialStorageCalls, 'No native network or holiday-workflow browser storage access');
   click('Choose country'); input('#holiday-country-input', 'GB'); click('Import holidays'); await settle();
-  for (const width of [320, 375, 390, 430, 820, 1366]) {
+  for (const width of [320, 375, 390, 430, 768, 820, 1024, 1366]) {
     window.frameElement.style.width = `${width}px`; await settle();
     const section = host.querySelector('.school-holiday-ai').getBoundingClientRect();
     const textarea = host.querySelector('textarea').getBoundingClientRect();
@@ -341,7 +344,29 @@ async function run() {
     measurements.push({ viewport: innerWidth, documentWidth: document.documentElement.scrollWidth, importWidth: Math.round(section.width), textareaWidth: Math.round(textarea.width) });
   }
   check([...host.querySelectorAll('.school-holiday-review input')].every(el => el.labels?.length), 'Review controls have associated unique labels');
-  click('Discard suggestions'); input('#school-holiday-text', 'Keyboard test calendar'); button('Extract holidays').focus();
+  const importOutcome = () => host.querySelector('#public-holiday-import-status');
+  const visibleOutcome = () => importOutcome() && getComputedStyle(importOutcome()).position !== 'absolute' && importOutcome().getBoundingClientRect().height > 1;
+  initialHolidays = [{ id: 'existing-public', holidayType: 'public', label: 'Public day', startDate: '2026-12-25', endDate: '2026-12-25' }];
+  await mount(); publicResults = [{ name: 'Public day', date: '2026-12-25' }];
+  click('Choose country'); input('#holiday-country-input', 'GB'); click('Import holidays'); await settle();
+  check(visibleOutcome() && document.activeElement === importOutcome() && importOutcome().textContent.includes('No changes were made.') && manualRows().length === 1, 'Duplicate-only manual import keeps draft and focuses visible outcome');
+  Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
+    getCurrentPosition(resolve) { resolve({ coords: { latitude: 51.5, longitude: -0.1 } }); },
+  } });
+  await mount(); click('Use my location'); await settle();
+  check(visibleOutcome() && document.activeElement === importOutcome() && manualRows().length === 1 && !button('Import holidays'),
+    'Duplicate-only automatic-location import focuses visible outcome without manual controls');
+  publicResults = [{ name: 'Public day', date: '2026-12-25' }, { name: 'New public day', date: '2026-12-26' }];
+  click('Use my location'); await settle();
+  check(manualRows().length === 2 && importOutcome().classList.contains('visually-hidden') && document.activeElement.value === 'New public day', 'Mixed public import adds only new holiday and hides routine success');
+  publicResults = []; click('Use my location'); await settle();
+  check(visibleOutcome() && document.activeElement === importOutcome() && importOutcome().textContent.includes('No public holidays found'), 'Empty location result stays visible and focused');
+  publicFailure = true; click('Use my location'); await settle(); publicFailure = false;
+  check(host.querySelector('.settings-holiday-import .settings-hint--error')?.getBoundingClientRect().height > 1 && !importOutcome(), 'Import failure is visible and clears old outcome');
+  publicResults = [{ name: 'Public day', date: '2026-12-25' }];
+  initialHolidays = [{ id: 'keyboard-public', holidayType: 'public', label: 'Keyboard fixture', startDate: '2026-12-25', endDate: '2026-12-25' }];
+  await mount(); click('Choose country'); input('#holiday-country-input', 'GB');
+  input('#school-holiday-text', 'Keyboard test calendar'); button('Extract holidays').focus();
 }
 run().then(() => { parent.document.body.dataset.testResult = 'passed'; }, error => { parent.document.body.dataset.testResult = 'failed'; results.push(error.stack); }).finally(() => {
   const pre = parent.document.createElement('pre'); pre.textContent = JSON.stringify({ assertions: results, measurements }, null, 2); parent.document.body.append(pre);

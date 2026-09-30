@@ -75,6 +75,7 @@ export default function Settings() {
 
   return (
     <main className="settings-page">
+      <p className="visually-hidden" role="status">{isLayoutSaving ? 'Saving timetable layout…' : ''}</p>
       <div className="container settings-inner settings-inner--wide">
         <p className="settings-breadcrumb">
           <Link to="/">Home</Link>
@@ -92,7 +93,7 @@ export default function Settings() {
         <form className="settings-timetable-form" onSubmit={handleSubmit}>
           <h2 className="settings-section-title">Timetable layout</h2>
           {!isPersisted && !isLayoutLoading ? <p className="settings-hint" role="status">This academic year has no saved layout yet. Review the defaults and save when ready.</p> : null}
-          {isLayoutLoading ? <p className="settings-hint" role="status">Loading timetable layout…</p> : null}
+          {isLayoutLoading ? <p className="settings-hint visually-hidden" role="status">Loading timetable layout…</p> : null}
 
           <div className="settings-field">
             <label htmlFor="timetable-name">Timetable name</label>
@@ -326,7 +327,7 @@ export default function Settings() {
 
           <div className="settings-actions">
             <button type="submit" className="settings-save" disabled={isLayoutSaving || isLayoutLoading || (isPersisted && !layoutDirty) || !selectedAcademicYearId}>
-              {isLayoutSaving ? 'Saving…' : 'Save timetable layout'}
+              Save timetable layout
             </button>
             <button type="button" className="settings-reset" onClick={handleResetTimetable} disabled={isLayoutSaving}>
               Reset timetable to defaults
@@ -335,7 +336,7 @@ export default function Settings() {
               Reload saved layout
             </button>
           </div>
-          {layoutSuccess ? <p className="settings-saved" role="status">{layoutSuccess}</p> : null}
+          {layoutSuccess ? <p className="settings-saved visually-hidden" role="status">{layoutSuccess}</p> : null}
           {layoutError ? <p className="settings-error" role="alert">{layoutError}</p> : null}
           {layoutError && layoutRequestReference ? <p className="settings-hint">Support reference: <code>{layoutRequestReference}</code></p> : null}
         </form>

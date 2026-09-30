@@ -19,7 +19,7 @@ export default function OrganisationControls({ memberships, membershipsLoading, 
           Manage the school organisations where you have Organisation Admin access.
         </p>
 
-        {membershipsLoading ? <p role="status">Checking your organisation access…</p> : null}
+        {membershipsLoading ? <p role="status" className="visually-hidden">Checking your organisation access…</p> : null}
         {membershipsError ? <p className="profile-error" role="alert">{membershipsError}</p> : null}
         {!membershipsLoading && !membershipsError && organisations.length === 0 ? (
           <section className="profile-card">

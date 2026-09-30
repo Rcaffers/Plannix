@@ -133,6 +133,7 @@ export default function DeleteAccountSection({
                   }}
                 />
               </div>
+              <p className="visually-hidden" role="status">{isDeletingAccount ? 'Deleting account…' : ''}</p>
               {accountError ? (
                 <div className="settings-delete-error" role="alert">
                   <p>{accountError}</p>
@@ -153,7 +154,7 @@ export default function DeleteAccountSection({
                   className="settings-reset settings-reset--danger"
                   disabled={isDeletingAccount || deletePassword.length < 8 || deletePassword.length > 128}
                 >
-                  {isDeletingAccount ? 'Deleting account…' : 'Permanently delete account'}
+                  Permanently delete account
                 </button>
               </div>
             </form>

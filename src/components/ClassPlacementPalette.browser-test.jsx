@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import '../styles/accessibility.css';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import PlacedLessonCard from './PlacedLessonCard.jsx';
@@ -178,6 +179,14 @@ try {
   mountMove(); flushSync(() => host.querySelector('#move-fallback').click());
   flushSync(() => host.querySelector('#cancel-move').click());
   check(editCalls.length === 0, 'Cancel move makes no persistence call');
+  mountMove();
+  const oldDragSource = host.querySelector('#slot-0 .lesson-card--placed');
+  fireDrag(oldDragSource, 'dragstart'); fireDrag(oldDragSource, 'dragend');
+  flushSync(() => host.querySelector('#move-fallback').click());
+  fireDrag(oldDragSource, 'dragend');
+  check(host.querySelector('[role="status"]').textContent.includes('Choose an empty lesson slot')
+    && host.querySelector('#slot-1').className.includes('placement-valid'),
+  'Delayed dragend cannot clear a newer keyboard move announcement or destination');
   window.__nativeLessonTest = {
     mount() { mountMove(); host.style.cssText = 'width:700px;margin:30px';
       for (const el of host.querySelectorAll('[id^="slot-"]')) el.style.cssText = 'display:inline-block;vertical-align:top;width:180px;height:100px;margin:12px'; },

@@ -82,6 +82,7 @@ export default function Profile({
       setIsEditingEmail(false);
       setEmailStatus({
         state: 'success',
+        actionRequired: result.confirmationPending,
         message: result.confirmationPending
           ? 'Check your inbox to confirm the new email address. Your current email remains active until confirmation.'
           : 'Your email address has been updated.',
@@ -113,7 +114,7 @@ export default function Profile({
   function formMessage(status) {
     if (!status.message) return null;
     return (
-      <p className={`profile-form-message profile-form-message--${status.state}`} role={status.state === 'error' ? 'alert' : 'status'}>
+      <p className={`profile-form-message profile-form-message--${status.state}${status.state === 'success' && !status.actionRequired ? ' visually-hidden' : ''}`} role={status.state === 'error' ? 'alert' : 'status'}>
         {status.message}
       </p>
     );
@@ -121,6 +122,7 @@ export default function Profile({
 
   return (
     <main className="settings-page">
+      <p className="visually-hidden" role="status">{[nameStatus, emailStatus, passwordStatus].some(status => status.state === 'saving') ? 'Saving profile changes…' : ''}</p>
       <div className="container settings-inner settings-inner--wide">
         <p className="settings-breadcrumb">
           <Link to="/">Home</Link>
@@ -151,7 +153,7 @@ export default function Profile({
               </div>
               <div className="settings-actions">
                 <button className="settings-save" type="submit" disabled={nameStatus.state === 'saving'}>
-                  {nameStatus.state === 'saving' ? 'Saving…' : 'Save name'}
+                  Save name
                 </button>
                 <button className="settings-reset" type="button" onClick={cancelNameEdit} disabled={nameStatus.state === 'saving'}>Cancel</button>
               </div>
@@ -179,7 +181,7 @@ export default function Profile({
               </label>
               <div className="settings-actions">
                 <button className="settings-save" type="submit" disabled={emailStatus.state === 'saving' || emailUnchanged}>
-                  {emailStatus.state === 'saving' ? 'Sending…' : 'Change email'}
+                  Change email
                 </button>
                 <button className="settings-reset" type="button" onClick={cancelEmailEdit} disabled={emailStatus.state === 'saving'}>Cancel</button>
               </div>
@@ -214,7 +216,7 @@ export default function Profile({
             </label>
             <div className="settings-actions">
               <button className="settings-save" type="submit" disabled={passwordStatus.state === 'saving'}>
-                {passwordStatus.state === 'saving' ? 'Saving…' : 'Change password'}
+                Change password
               </button>
             </div>
             {formMessage(passwordStatus)}
@@ -230,7 +232,7 @@ export default function Profile({
             <p className="settings-hint">Schools you belong to and the access assigned to you in each one.</p>
           </div>
 
-          {membershipsLoading ? <p role="status">Loading your organisations…</p> : null}
+          {membershipsLoading ? <p role="status" className="visually-hidden">Loading your organisations…</p> : null}
           {membershipsError ? <p className="profile-error" role="alert">{membershipsError}</p> : null}
           {!membershipsLoading && !membershipsError && schools.length === 0 ? (
             <p className="profile-empty">You are not currently linked to a school organisation.</p>

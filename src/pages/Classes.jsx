@@ -78,6 +78,7 @@ export default function Classes() {
 
   return (
     <main className="classes-page">
+      <p className="visually-hidden" role="status">{isSaving ? 'Saving classes…' : ''}</p>
       <div className="container classes-inner">
         <p className="classes-breadcrumb">
           <Link to="/">Home</Link>
@@ -94,7 +95,7 @@ export default function Classes() {
             <p className="classes-lead">
               Place classes into timetable slots here. Use Edit classes to change class positions. Changes save automatically; choose Finish editing when you are done.
             </p>
-            {isLoading ? <p className="classes-hint" role="status">Loading classes…</p> : null}
+
             {error ? <p className="classes-hint classes-hint--error" role="alert">{error}</p> : null}
             {!isLoading && !isLoaded && !error ? <p className="classes-hint">Select an academic year to load classes.</p> : null}
             {layout.cycle === TIMETABLE_CYCLE.TWO_WEEK ? (
@@ -146,7 +147,7 @@ export default function Classes() {
                 You can add up to 60 classes. Change weekly vs two-week cycle under Timetable settings.
               </p>
 
-              {isLoading ? <p role="status">Loading classes…</p> : null}
+              {isLoading ? <p role="status" className="visually-hidden">Loading classes…</p> : null}
               {error ? <p className="classes-hint classes-hint--error" role="alert">{error}</p> : null}
               {error && requestReference ? <p className="classes-hint">Support reference: <code>{requestReference}</code></p> : null}
               {error ? <button type="button" className="add-row-button" onClick={reload}>Reload classes</button> : null}
@@ -222,10 +223,10 @@ export default function Classes() {
 
               <div className="classes-actions">
                 <button type="submit" className="classes-save" disabled={!isLoaded || isLoading || isSaving || !dirty}>
-                  {isSaving ? 'Saving…' : 'Save classes'}
+                  Save classes
                 </button>
               </div>
-              {saved ? <p className="classes-saved" role="status">Classes saved.</p> : null}
+              {saved ? <p className="classes-saved visually-hidden" role="status">Classes saved.</p> : null}
             </form>
           </>
         )}

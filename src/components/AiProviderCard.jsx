@@ -83,7 +83,7 @@ export default function AiProviderCard({ api = aiConnectionApi }) {
         {connection ? <button type="button" className="settings-reset" disabled={busy} onClick={() => { setApiKey(''); setMode('connected'); setError(''); }}>Cancel</button> : null}
       </div>
     </form> : null}
-    <p role="status" aria-live="polite">{busy ? (loaded ? 'Saving connection…' : 'Loading connection…') : message}</p>
+    <p className="visually-hidden" role="status">{busy ? (loaded ? 'Saving connection…' : 'Loading connection…') : message}</p>
     {error ? <div><p className="profile-error" role="alert">{error}</p>{reference ? <p>Support reference: {reference}</p> : null}
       <button className="settings-reset" type="button" disabled={busy} onClick={load}>Reload connection</button></div> : null}
   </section>;

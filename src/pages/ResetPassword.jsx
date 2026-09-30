@@ -45,6 +45,7 @@ export default function ResetPassword() {
 
   return (
     <main className="reset-password-page">
+      <p className="visually-hidden" role="status">{isSubmitting ? 'Saving password…' : ''}</p>
       <div className="container reset-password-inner">
         <p className="reset-password-breadcrumb">
           <Link to="/">Home</Link>
@@ -53,9 +54,9 @@ export default function ResetPassword() {
         </p>
 
         {status === 'done' ? (
-          <div className="reset-password-card reset-password-card--success" role="status">
-            <p className="reset-password-kicker">All set</p>
-            <h1 className="reset-password-title">Password updated</h1>
+          <div className="reset-password-card reset-password-card--success">
+            <p className="visually-hidden" role="status">Password updated</p>
+            <h1 className="reset-password-title">Password reset</h1>
             <p className="reset-password-lead">
               You can log in with your new password. For security, other sessions were signed out.
             </p>
@@ -80,7 +81,7 @@ export default function ResetPassword() {
             <p className="reset-password-kicker">Account</p>
             <h1 className="reset-password-title">Choose a new password</h1>
             {status === 'checking' ? (
-              <p className="reset-password-lead" role="status">Checking your password reset link…</p>
+              <p className="reset-password-lead visually-hidden" role="status">Checking your password reset link…</p>
             ) : !isReady ? (
               <p className="reset-password-lead reset-password-lead--warn" role="alert">
                 This reset link is missing or invalid. Request a new link from the log in screen.
@@ -132,7 +133,7 @@ export default function ResetPassword() {
                 className="reset-password-primary"
                 disabled={isSubmitting || !isReady}
               >
-                {isSubmitting ? 'Saving…' : 'Save new password'}
+                Save new password
               </button>
             </form>
 

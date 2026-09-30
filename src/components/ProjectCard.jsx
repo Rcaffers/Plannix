@@ -860,11 +860,11 @@ export default function ProjectCard({
       }`}
     >
       <div className="schedule-card">
-        {classesLoading ? <p className="classes-hint" role="status">Loading classes…</p> : null}
+
         {classesError ? <p className="classes-hint classes-hint--error" role="alert">{classesError}</p> : null}
-        {sessionState.isLoading ? <p className="classes-hint" role="status">Loading timetable…</p> : null}
-        <p className="timetable-announcement timetable-save-status" role="status" aria-live="polite" aria-atomic="true">
-          {sessionState.isSaving ? 'Saving…' : sessionState.saved ? 'Saved' : ''}
+
+        <p className="timetable-announcement timetable-save-status visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+          {classesLoading || layoutLoading || sessionState.isLoading ? 'Loading timetable…' : layoutSaving || sessionState.isSaving ? 'Saving…' : sessionState.saved ? 'Saved' : ''}
         </p>
         {sessionState.error ? <p className="classes-hint classes-hint--error" role="alert">{sessionState.error}</p> : null}
         {sessionState.conflict ? <p className="classes-hint classes-hint--error">The timetable changed elsewhere. Reload before retrying.</p> : null}
@@ -982,7 +982,7 @@ export default function ProjectCard({
             Choose an empty slot to move the lesson.
             <button type="button" onClick={placement.cancel}>Cancel move</button>
           </div> : null}
-          <p className={`class-placement-status${placement.statusIsError ? ' classes-hint--error' : ' timetable-announcement'}`} role="status" aria-live="polite" aria-atomic="true">{placement.status}</p>
+          <p className={`class-placement-status${placement.statusIsError ? ' classes-hint--error' : ' timetable-announcement visually-hidden'}`} role="status" aria-live="polite" aria-atomic="true">{placement.status}</p>
         </> : null}
         <div className="schedule-dynamic" style={scheduleVars}>
           <div className={`schedule-scroll${isSingleDayTimetable ? ' schedule-scroll--single-day' : ''}`}>
@@ -1234,7 +1234,7 @@ export default function ProjectCard({
                       </p>
                     ) : null}
                     {lessonPushForwardSuccess ? (
-                      <p className="lesson-modal-note" role="status">
+                      <p className="lesson-modal-note visually-hidden" role="status">
                         {lessonPushForwardSuccess}
                       </p>
                     ) : null}

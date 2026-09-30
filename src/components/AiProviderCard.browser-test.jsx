@@ -1,3 +1,5 @@
+import { assertHiddenStatuses } from './routineStatus.browser-assertions.js';
+import '../styles/accessibility.css';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
@@ -24,7 +26,7 @@ const host = document.createElement('div'); document.body.append(host);
 const root = createRoot(host);
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 async function settle() { await tick(); await tick(); }
-const check = (condition, message) => { if (!condition) throw Error(message); results.push(message); };
+const check = (condition, message) => { if (!condition) throw Error(message); assertHiddenStatuses(); results.push(message); };
 const results = [];
 const button = label => [...host.querySelectorAll('button')].find(el => el.textContent === label);
 const click = label => flushSync(() => button(label).click());

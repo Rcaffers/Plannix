@@ -88,7 +88,7 @@ export default function SchoolHolidayAiImport({ draft, onDraftChange, disabled =
   const reference = safeRequestReference(error);
   return <section className="school-holiday-ai" aria-labelledby="school-holiday-ai-heading">
     <h3 id="school-holiday-ai-heading">Import school holidays and closures with AI</h3>
-    {loading ? <p role="status">Loading AI connection…</p> : connectionError ? <div role="alert">
+    {loading ? <p role="status" className="visually-hidden">Loading AI connection…</p> : connectionError ? <div role="alert">
       <p>Could not load your AI connection. Please try again.</p>
       {safeRequestReference(connectionError) && <p>Support reference: <code>{safeRequestReference(connectionError)}</code></p>}
       <button type="button" className="settings-reset" onClick={() => setLookup(value => value + 1)}>Retry connection</button>
@@ -120,9 +120,9 @@ export default function SchoolHolidayAiImport({ draft, onDraftChange, disabled =
         <p id="school-holiday-limit" className={`settings-hint${bytes > MAX_HOLIDAY_TEXT_BYTES ? ' settings-hint--error' : ''}`}>{text.length.toLocaleString()} characters · {bytes.toLocaleString()} / 50,000 UTF-8 bytes</p>
         </>}
         <p id="school-holiday-dates" className="settings-hint">{datesError || 'Only holidays within the academic-year dates will be suggested.'}</p>
-        <button ref={extractButton} type="button" className="settings-reset" onClick={extract} disabled={!!datesError || (mode === 'pdf' ? !!pdfFileError(file) : !text.trim() || bytes > MAX_HOLIDAY_TEXT_BYTES)}>{busy ? 'Extracting holidays…' : mode === 'pdf' ? 'Extract holidays from PDF' : 'Extract holidays'}</button>
+        <button ref={extractButton} type="button" className="settings-reset" onClick={extract} disabled={!!datesError || (mode === 'pdf' ? !!pdfFileError(file) : !text.trim() || bytes > MAX_HOLIDAY_TEXT_BYTES)}>{mode === 'pdf' ? 'Extract holidays from PDF' : 'Extract holidays'}</button>
       </fieldset>
-      {busy && <div className="settings-actions"><span role="status">Extracting suggestions…</span><button type="button" className="settings-reset" onClick={() => { cancel(); setAnnouncement('Extraction cancelled.'); requestAnimationFrame(() => { if (!operation.current && !reviewHeading.current && !errorSummary.current) focusSource(); }); }}>Cancel extraction</button></div>}
+      {busy && <div className="settings-actions"><span className="visually-hidden" role="status">Extracting suggestions…</span><button type="button" className="settings-reset" onClick={() => { cancel(); setAnnouncement('Extraction cancelled.'); requestAnimationFrame(() => { if (!operation.current && !reviewHeading.current && !errorSummary.current) focusSource(); }); }}>Cancel extraction</button></div>}
     </>}
     {error && <div id="school-holiday-error" ref={errorSummary} tabIndex={-1} role="alert" className="settings-hint--error school-holiday-error">
       <p>{error.message}</p>
@@ -154,6 +154,6 @@ export default function SchoolHolidayAiImport({ draft, onDraftChange, disabled =
         <button type="button" className="settings-reset" onClick={() => { setReview(null); setError(null); focusSource(); }}>Discard suggestions</button>
       </div>
     </section>}
-    <p role="status" className="settings-hint settings-hint--success">{announcement}</p>
+    <p role="status" className="settings-hint settings-hint--success visually-hidden">{announcement}</p>
   </section>;
 }
