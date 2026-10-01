@@ -19,6 +19,8 @@
     "test:academic-year-ai-browser": "node scripts/test-academic-year-ai-browser.js",
     "test:academic-year": "node --test src/utils/academicYear.test.js src/utils/academicYearApi.test.js",
     "test:class-placement-browser": "node scripts/test-class-placement-browser.js",
+    "test:events-browser": "node scripts/test-events-browser.js",
+    "test:events-history-browser": "node scripts/test-events-native-history-browser.js",
     "test:ai-connection": "node --test src/utils/aiConnectionApi.test.js server/routes/ai-connection-routes.test.js",
     "test:ai-provider-browser": "node scripts/test-ai-provider-browser.js",
     "test:classes": "node --test src/utils/classPersistence.test.js",

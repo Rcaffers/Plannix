@@ -1,0 +1,43 @@
+.events-page .settings-lead { margin-bottom: 20px; }
+.events-year, .events-list-heading, .events-item, .events-item-actions, .events-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.events-year { align-items: baseline; margin-bottom: 20px; color: #244b47; }
+.events-list-heading { align-items: baseline; justify-content: space-between; margin: 26px 0 10px; }
+.events-list-heading h2, .events-list-heading p { margin: 0; }
+.events-list-heading p { color: #52635f; }
+.events-list { display: grid; gap: 10px; list-style: none; padding: 0; margin: 18px 0 24px; }
+.events-item {
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(63,127,120,.24);
+  border-radius: 14px;
+  background: #fff;
+}
+.events-item-copy { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.events-item-copy span { color: #52635f; }
+.events-item-actions { align-items: center; min-width: 0; }
+.events-item-actions button { min-height: 42px; min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+.events-delete { color: #8c3030; border-color: #ccaaaa; }
+.events-notice, .events-error { padding: 12px 14px; margin: 16px 0; border-radius: 10px; background: #f5f5ed; }
+.events-error { border: 1px solid #ba7070; background: #fff1ee; }
+.events-error p { margin: 0 0 8px; }
+.events-error p:last-child { margin-bottom: 0; }
+.events-notice button { margin: 4px 10px 4px 0; }
+.events-form { margin-top: 24px; }
+.events-form .settings-field input[type='text'], .events-form .settings-field input[type='date'] { width: 100%; max-width: 100%; box-sizing: border-box; }
+.events-form textarea { box-sizing: border-box; width: 100%; max-width: 100%; padding: 10px 12px; border: 1px solid rgba(63,127,120,.26); border-radius: 12px; font: inherit; resize: vertical; }
+.events-times .settings-field { flex: 1 1 160px; }
+.events-check { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; }
+.events-check input { width: 20px; height: 20px; accent-color: #3f7f78; }
+.events-page :is(button, input, textarea):focus-visible { outline: 3px solid #22564e; outline-offset: 2px; }
+@media (max-width: 520px) {
+  .events-item-actions { width: 100%; }
+  .events-item-actions button { flex: 1 1 130px; }
+  .events-form { padding: 18px 14px; }
+  .events-year { display: grid; }
+}

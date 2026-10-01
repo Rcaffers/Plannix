@@ -15,6 +15,7 @@ import Settings from './pages/Settings';
 import Profile from './pages/Profile';
 import OrganisationControls from './pages/OrganisationControls';
 import AcademicYear from './pages/AcademicYear';
+import Events from './pages/Events';
 import Classes from './pages/Classes';
 import Timetable from './pages/Timetable';
 import TermsGate from './pages/TermsGate';
@@ -96,6 +97,7 @@ export default function App() {
     if (window.__plannixConfirmSessionDiscard?.() === false) return;
     if (window.__plannixConfirmClassDiscard?.() === false) return;
     if (window.__plannixConfirmLayoutDiscard?.() === false) return;
+    if (window.__plannixConfirmEventDiscard?.() === false) return;
     try {
       await authController.logout();
     } catch {
@@ -213,6 +215,7 @@ export default function App() {
               )}
             />
             <Route path="/settings/academic-year" element={privateRoute(<AcademicYear />)} />
+            <Route path="/settings/events" element={privateRoute(<Events />)} />
             <Route path="/classes" element={privateRoute(<Classes />)} />
             <Route path="/classes/input" element={privateRoute(<Classes />)} />
             <Route

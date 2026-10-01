@@ -1,14 +1,12 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
-import App from './App';
+import { RouterProvider } from 'react-router-dom';
+import { createPlannixRouter } from './appRouter';
 import './styles/base.css';
 import './styles/accessibility.css';
 
+const router = createPlannixRouter();
+
 createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </StrictMode>,
+  <StrictMode><RouterProvider router={router} /></StrictMode>,
 );
