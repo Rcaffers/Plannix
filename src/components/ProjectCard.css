@@ -400,8 +400,12 @@
 .schedule-event-card summary { cursor: pointer; text-decoration: underline; }
 .schedule-event-card summary:focus-visible, .schedule-events-manage:focus-visible,
 .schedule-events-error button:focus-visible { outline: 3px solid #22564e; outline-offset: 2px; }
-.schedule-events-weekend { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; padding: 12px; }
-.schedule-events-weekend-day, .schedule-events-weekend-only { display: grid; align-content: start; gap: 8px; min-width: 0; }
+.schedule-events-weekend { display: grid; gap: 0; padding: 0 12px 12px; }
+.schedule-events-weekend-day { display: grid; grid-template-columns: minmax(120px, 150px) minmax(0, 1fr); gap: 12px; min-width: 0; padding: 12px 0; border-top: 1px solid #d8e4dc; }
+.schedule-events-weekend-day > strong { overflow-wrap: anywhere; }
+.schedule-events-weekend-cards { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; min-width: 0; }
+.schedule-events-weekend-cards .schedule-event-card { flex: 0 1 220px; max-width: 100%; }
+.schedule-events-weekend-only { display: grid; align-content: start; gap: 8px; min-width: 0; }
 .schedule-events-weekend-only { padding: 12px; }
 .schedule-events-weekend-only p { margin: 0; }
 .schedule-events-manage { display: inline-block; margin: 8px 12px 12px; font-size: 0.8rem; color: #22564e; }

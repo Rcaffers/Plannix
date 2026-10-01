@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import ProjectCard from './ProjectCard.jsx';
 import Timetable from '../pages/Timetable.jsx';
+import { writeWeekendEventsPreference } from '../utils/weekendEventPreference.js';
 import '../App.css';
 
 const entries = [{ id: '7a', name: '7A', frequency: 3 }];
@@ -23,7 +24,7 @@ let state;
 export const useTimetableSessions = () => state;
 const initial = { id: 'lesson', day: 0, periodId: 'p1', classId: '7a', title: 'Fractions', notes: 'Rulers' };
 let calls = [];
-let allowEditing = true, testPageSpacing = false;
+let allowEditing = true, testPageSpacing = false, fixtureUserId = null;
 let feedbackUpdate, observeSave = false, retryCalls = 0, reloadCalls = 0;
 const scope = {}; const loadedDates = []; let mode = 'date';
 function Harness() {
@@ -40,6 +41,7 @@ function Harness() {
   return <>
     {mode === 'fixed' ? <div><button id="week-a" onClick={() => setSelectedWeek('A')}>Week A</button><button id="week-b" onClick={() => setSelectedWeek('B')}>Week B</button></div> : null}
     <ProjectCard project={{ title: 'Test' }} weekMode={mode} enableEditing={allowEditing} enableClassPlacement enableFixedPhoneSingleDay
+      weekendEventsUserId={fixtureUserId}
       fixedWeekKey={selectedWeek === 'B' ? 'cycle-2' : 'cycle-1'} fixedWeekLabel={`Week ${selectedWeek}`} />
   </>;
 }
@@ -306,6 +308,7 @@ async function run() {
   // The same ProjectCard fixture now exercises the saved Events row with a mocked,
   // abort-aware API. No authenticated or production service is contacted.
   mode = 'date'; allowEditing = false;
+  fixtureUserId = '30000000-0000-4000-8000-000000000001';
   fixtureAcademicYear = { id: '00000000-0000-4000-8000-000000000001', startDate: '2026-01-01', endDate: '2027-12-31', holidays: [] };
   const nextDate = (day, offset) => {
     const value = new Date(`${day}T12:00:00`); value.setDate(value.getDate() + offset);
@@ -334,6 +337,9 @@ async function run() {
   check([...saturdayCards].map(card => card.querySelector('strong').textContent).join('|') === 'All-day community fair|Morning event|Museum trip', 'Weekend events sort all-day first, then local time');
   check(saturdayCards[0].textContent.includes('All day') && saturdayCards[1].textContent.includes('09:00–10:00')
     && saturdayCards[2].textContent.includes('Very long location'), 'Cards show all-day, timed and location details');
+  check([...document.querySelectorAll('.schedule-events-weekend-day')].every((row, index) =>
+    row.querySelector('strong').textContent === ['Saturday', 'Sunday'][index]),
+  'Saturday and Sunday row labels contain only weekday names');
   const notes = saturdayCards[2].querySelector('summary'); notes.focus();
   check(document.activeElement === notes && !saturdayCards[2].querySelector('script'), 'Notes are keyboard accessible and rendered as text');
   notes.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); click(notes);
@@ -363,8 +369,40 @@ async function run() {
       check(Math.abs(eventRow.getBoundingClientRect().left - document.querySelector('.schedule-grid').getBoundingClientRect().left) <= 1
         && Math.abs(eventRow.getBoundingClientRect().right - document.querySelector('.schedule-grid').getBoundingClientRect().right) <= 1
         && scroll.scrollWidth <= scroll.clientWidth + 1, `${size}px: event row aligns with full-week grid without overflow`);
+      const [saturdayRow, sundayRow] = document.querySelectorAll('.schedule-events-weekend-day');
+      const cards = [...saturdayRow.querySelectorAll('.schedule-event-card')];
+      check(sundayRow.getBoundingClientRect().top >= saturdayRow.getBoundingClientRect().bottom - 1
+        && Math.abs(cards[0].getBoundingClientRect().top - cards[1].getBoundingClientRect().top) <= 1
+        && (size <= 820 ? cards[2].getBoundingClientRect().top > cards[0].getBoundingClientRect().top + 1
+          : Math.abs(cards[2].getBoundingClientRect().top - cards[0].getBoundingClientRect().top) <= 1)
+        && cards.every(card => card.getBoundingClientRect().right <= saturdayRow.getBoundingClientRect().right + 1),
+      `${size}px: stacked weekend rows contain horizontal cards that wrap within the viewport`);
     }
   }
+  check(writeWeekendEventsPreference(fixtureUserId, false), 'Weekend preference can be stored for first user');
+  await tick();
+  check(!document.querySelector('.schedule-events-weekend')
+    && document.querySelector('.schedule-events-day[aria-label="Fri events"]').textContent.includes('Half-term activity'),
+  'Hiding weekend cards leaves weekday events and lessons intact');
+  await width(430);
+  const hiddenWeekendDate = nextDate(eventRequests.at(-1).from, 5);
+  const hiddenWeekendInput = document.querySelector('.schedule-date-input');
+  flushSync(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(hiddenWeekendInput, hiddenWeekendDate);
+    hiddenWeekendInput.dispatchEvent(new Event('input', { bubbles: true })); hiddenWeekendInput.dispatchEvent(new Event('change', { bubbles: true })); });
+  await tick();
+  check(document.querySelector('.schedule-events-weekend-only')?.textContent.includes('Weekend events are hidden')
+    && !document.querySelector('.schedule-events-weekend-only .schedule-event-card') && !document.querySelector('.schedule-grid'),
+  'Phone weekend remains navigable without teaching slots while cards are hidden');
+  check(writeWeekendEventsPreference(fixtureUserId, true), 'Weekend preference can be restored');
+  await tick(); await width(820);
+  check(document.querySelectorAll('.schedule-events-weekend-day').length === 2, 'Restoring preference shows both weekend rows');
+  const firstUser = fixtureUserId;
+  fixtureUserId = '30000000-0000-4000-8000-000000000002'; mount(); await tick();
+  check(document.querySelectorAll('.schedule-events-weekend-day').length === 2, 'Second user defaults to enabled independently');
+  check(writeWeekendEventsPreference(fixtureUserId, false), 'Second user preference persists separately');
+  await tick(); check(!document.querySelector('.schedule-events-weekend'), 'Second user can hide weekend cards');
+  fixtureUserId = firstUser; mount(); await tick();
+  check(document.querySelectorAll('.schedule-events-weekend-day').length === 2, 'First user keeps their own enabled preference');
   await width(430);
   const today = document.querySelector('.schedule-date-input').value;
   const saturday = nextDate(eventRequests.at(-1).from, 5);

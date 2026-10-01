@@ -8,6 +8,7 @@ import '../styles/accessibility.css';
 
 const YEAR_A = '10000000-0000-4000-8000-000000000001';
 const YEAR_B = '10000000-0000-4000-8000-000000000002';
+const USER_A = '30000000-0000-4000-8000-000000000001';
 let nextEventNumber = 1;
 let guard = () => true;
 let yearSetter;
@@ -46,7 +47,7 @@ export const eventApi = {
 const host = document.createElement('div'); document.body.append(host);
 const root = createRoot(host);
 const router = createMemoryRouter([
-  { path: '/settings/events', element: <Events /> },
+  { path: '/settings/events', element: <Events userId={USER_A} /> },
   { path: '/settings', element: <main>Settings destination</main> },
   { path: '/profile', element: <main>Profile destination</main> },
 ], { initialEntries: ['/settings', '/settings/events', '/profile'], initialIndex: 1 });
@@ -81,6 +82,24 @@ window.eventsStartRecoveryForUnmount = async () => {
 };
 async function run() {
   await settle();
+  const weekendSwitch = host.querySelector('input[role="switch"]');
+  check(weekendSwitch?.checked && weekendSwitch.closest('label').textContent.includes('Show weekend events in timetable'),
+    'Weekend event display switch is labelled and enabled by default');
+  flushSync(() => weekendSwitch.click()); await settle();
+  check(!weekendSwitch.checked && localStorage.getItem(`plannix_show_weekend_events_v1:${USER_A}`) === 'false'
+    && !host.querySelector('.events-form'), 'Weekend switch persists independently of the event draft');
+  flushSync(() => weekendSwitch.click()); await settle();
+  check(weekendSwitch.checked && localStorage.getItem(`plannix_show_weekend_events_v1:${USER_A}`) === 'true',
+    'Weekend switch restores the saved enabled preference');
+  window.failPreferenceStorage = true;
+  flushSync(() => weekendSwitch.click()); await settle();
+  check(weekendSwitch.checked && host.querySelector('.events-weekend-setting [role="alert"]')?.getBoundingClientRect().height > 1,
+    'Unavailable browser storage leaves preference unchanged and shows a visible error');
+  window.failPreferenceStorage = false;
+  flushSync(() => weekendSwitch.click()); await settle();
+  check(!weekendSwitch.checked && !host.querySelector('.events-weekend-setting [role="alert"]'),
+    'Successful preference retry clears the storage error');
+  flushSync(() => weekendSwitch.click()); await settle();
   check(host.textContent.includes('No events yet'), 'visible empty state');
   check(host.querySelector('.visually-hidden[aria-live]') !== null, 'routine status hidden and accessible');
   check(getComputedStyle(host.querySelector('.visually-hidden[aria-live]')).position === 'absolute'
@@ -95,6 +114,14 @@ async function run() {
   check(host.textContent.includes('1 of 500 events'), 'canonical response updates count');
   click('Edit Assembly');
   check(host.querySelector('#event-title').value === 'Assembly', 'edit loads record');
+  input('#event-title', 'Unsaved switch draft');
+  const callsBeforePreferenceChange = calls.length;
+  flushSync(() => weekendSwitch.click()); await settle();
+  check(!weekendSwitch.checked && host.textContent.includes('Assembly')
+    && host.querySelector('#event-title').value === 'Unsaved switch draft'
+    && calls.length === callsBeforePreferenceChange,
+  'Hiding weekend cards does not remove saved events, alter the open draft or call the Events API');
+  flushSync(() => weekendSwitch.click()); await settle();
   input('#event-title', 'Updated assembly'); input('#event-notes', 'Line one\nLine two'); submit(); await settle();
   check(calls.find(x => x.action === 'update').revision === 1, 'edit uses loaded revision');
   check(calls.find(x => x.action === 'update').event.notes === 'Line one\nLine two', 'multiline notes retained');

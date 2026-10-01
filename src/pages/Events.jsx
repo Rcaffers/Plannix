@@ -6,6 +6,7 @@ import { eventApi } from '../utils/eventApi.js';
 import { safeRequestReference } from '../utils/requestReference.js';
 import { MAX_PERSONAL_EVENTS } from '../../shared/personalEvent.js';
 import { blankEventDraft, canAddEvent, confirmedDraftUnchanged, draftFromEvent, matchingCreatedEvents, sortPersonalEvents, validateEventDraft } from '../utils/eventPage.js';
+import { useWeekendEventsPreference } from '../hooks/useWeekendEventsPreference.js';
 import './Settings.css';
 import './Events.css';
 
@@ -13,7 +14,9 @@ const scopeOf = (id, year) => `${id || ''}:${year?.startDate || ''}:${year?.endD
 const errorDetails = (error, fallback) => ({ message: error?.message || fallback, reference: safeRequestReference(error) });
 const uncertainResult = error => ![400, 401, 403, 404, 409, 413, 422, 429].includes(error?.status);
 
-export default function Events() {
+export default function Events({ userId }) {
+  const [showWeekendEvents, setShowWeekendEvents] = useWeekendEventsPreference(userId);
+  const [preferenceError, setPreferenceError] = useState('');
   const { selectedAcademicYearId, academicYear, isLoading: yearLoading,
     error: yearError, requestReference: yearReference, registerAcademicYearChangeGuard } = useAcademicYear();
   const [events, setEvents] = useState([]);
@@ -285,6 +288,13 @@ export default function Events() {
     <h1 className="settings-title">Events</h1>
     <SettingsSubnav />
     <p className="settings-lead">Plan personal, single-day events for an academic year. Events do not close teaching slots.</p>
+    <div className="events-weekend-setting"><label className="events-weekend-preference"><input type="checkbox" role="switch"
+      checked={showWeekendEvents} onChange={event => setPreferenceError(setShowWeekendEvents(event.target.checked)
+        ? '' : 'Could not save this display preference in this browser.')} />
+      Show weekend events in timetable</label>
+      <p>Saved for your account on this browser.</p>
+      {preferenceError ? <p className="events-error" role="alert">{preferenceError}</p> : null}
+    </div>
     {!selectedAcademicYearId ? <p className="events-notice">No academic year is selected. <Link to="/settings/academic-year">Choose or create an academic year</Link> first.</p> : null}
     {selectedAcademicYearId && !yearLoading ? <section aria-label="Selected academic year" className="events-year">
       <strong>{academicYear.label}</strong><span>{academicYear.startDate || 'Start date not set'} – {academicYear.endDate || 'End date not set'}</span>

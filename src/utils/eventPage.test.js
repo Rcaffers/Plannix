@@ -61,6 +61,6 @@ test('canonical records become editable drafts and sort by date, all-day, time, 
 test('Events navigation is registered behind the existing private-route authentication gate', () => {
   const app = readFileSync(new URL('../App.jsx', import.meta.url), 'utf8');
   const nav = readFileSync(new URL('../components/SettingsSubnav.jsx', import.meta.url), 'utf8');
-  assert.match(app, /path="\/settings\/events" element=\{privateRoute\(<Events \/>\)\}/);
+  assert.match(app, /path="\/settings\/events" element=\{privateRoute\(<Events userId=\{user\?\.id\} \/>\)\}/);
   assert.match(nav, /to: '\/settings\/events', label: 'Events'/);
 });

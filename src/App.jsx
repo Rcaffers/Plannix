@@ -169,7 +169,7 @@ export default function App() {
                   <Hero user={user} />
                   {user ? (
                     <section className="section content-section" id="work">
-                      <ProjectGrid projectCardProps={{ enableEditing: false, weekMode: 'date' }} />
+                      <ProjectGrid projectCardProps={{ enableEditing: false, weekMode: 'date', weekendEventsUserId: user.id }} />
                     </section>
                   ) : (
                     <HomeHighlights />
@@ -215,12 +215,12 @@ export default function App() {
               )}
             />
             <Route path="/settings/academic-year" element={privateRoute(<AcademicYear />)} />
-            <Route path="/settings/events" element={privateRoute(<Events />)} />
+            <Route path="/settings/events" element={privateRoute(<Events userId={user?.id} />)} />
             <Route path="/classes" element={privateRoute(<Classes />)} />
             <Route path="/classes/input" element={privateRoute(<Classes />)} />
             <Route
               path="/timetable"
-              element={privateRoute(<Timetable />)}
+              element={privateRoute(<Timetable userId={user?.id} />)}
             />
           </Routes>
           <Footer user={user} />

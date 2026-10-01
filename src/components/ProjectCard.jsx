@@ -150,6 +150,7 @@ export default function ProjectCard({
   enableFixedPhoneSingleDay = false,
   fixedWeekKey = 'cycle-1',
   fixedWeekLabel = '',
+  weekendEventsUserId = null,
 }) {
   const { layout, dayLabels, rowSegments, isLoading: layoutLoading, isSaving: layoutSaving, error: layoutError } = useTimetableLayout();
   const { academicYear, selectedAcademicYearId } = useAcademicYear();
@@ -1137,7 +1138,7 @@ export default function ProjectCard({
               })}
               </div>
               </> : null}
-              {weekMode === 'date' ? <TimetableEvents academicYearId={academicYear?.id === selectedAcademicYearId ? selectedAcademicYearId : null}
+              {weekMode === 'date' ? <TimetableEvents userId={weekendEventsUserId} academicYearId={academicYear?.id === selectedAcademicYearId ? selectedAcademicYearId : null}
                 monday={formatDateKeyPart(weekStartDate)} dayIndices={dayIndicesToRender} dayLabels={displayDayLabels}
                 gridStyle={fullWeekGridStyle} singleDay={isSingleDayTimetable} selectedDay={compactDayIndex}
                 nonTeachingDayOnly={phoneNonTeachingDay} /> : null}

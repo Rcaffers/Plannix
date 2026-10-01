@@ -1,4 +1,9 @@
 .events-page .settings-lead { margin-bottom: 20px; }
+.events-weekend-setting { margin-bottom: 16px; }
+.events-weekend-setting p { margin: 0; font-size: .85rem; color: #52635f; }
+.events-weekend-setting .events-error { margin-top: 8px; color: #8c3030; }
+.events-weekend-preference { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; font-weight: 600; cursor: pointer; }
+.events-weekend-preference input { width: 20px; height: 20px; accent-color: #3f7f78; }
 .events-year, .events-list-heading, .events-item, .events-item-actions, .events-times {
   display: flex;
   flex-wrap: wrap;

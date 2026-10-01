@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { eventApi } from '../utils/eventApi.js';
 import { safeRequestReference } from '../utils/requestReference.js';
 import { eventsForDate, weekEventDates } from '../utils/timetableEvents.js';
+import { useWeekendEventsPreference } from '../hooks/useWeekendEventsPreference.js';
 
 const CALENDAR_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -14,8 +15,9 @@ function EventCard({ event }) {
   </article>;
 }
 
-export default function TimetableEvents({ academicYearId, monday, dayIndices, dayLabels,
+export default function TimetableEvents({ userId, academicYearId, monday, dayIndices, dayLabels,
   gridStyle, singleDay, selectedDay, nonTeachingDayOnly }) {
+  const [showWeekendEvents] = useWeekendEventsPreference(userId);
   const dates = weekEventDates(monday);
   const scope = academicYearId && dates.length === 7 ? `${academicYearId}:${monday}` : '';
   const [result, setResult] = useState({ scope: '', status: 'idle', events: [], error: null });
@@ -62,13 +64,13 @@ export default function TimetableEvents({ academicYearId, monday, dayIndices, da
       </div>)}
     </div> : <div className="schedule-events-weekend-only">
       <p>No school periods on {CALENDAR_DAYS[selectedDay]}.</p>
-      {cards(dates[selectedDay])}
-      {active.status === 'ready' && !eventsForDate(active.events, dates[selectedDay]).length ? <p>No saved events for this day.</p> : null}
+      {showWeekendEvents ? cards(dates[selectedDay]) : <p>Weekend events are hidden in this timetable.</p>}
+      {showWeekendEvents && active.status === 'ready' && !eventsForDate(active.events, dates[selectedDay]).length ? <p>No saved events for this day.</p> : null}
     </div>}
-    {!singleDay && extraDayIndices.length ? <div className="schedule-events-weekend">
+    {!singleDay && showWeekendEvents && extraDayIndices.length ? <div className="schedule-events-weekend">
       {extraDayIndices.map(index => <div key={index} className="schedule-events-weekend-day">
         <strong>{CALENDAR_DAYS[index]}</strong>
-        {cards(dates[index])}
+        <div className="schedule-events-weekend-cards">{cards(dates[index])}</div>
       </div>)}
     </div> : null}
     <a className="schedule-events-manage" href="/settings/events">Manage events in Settings</a>
