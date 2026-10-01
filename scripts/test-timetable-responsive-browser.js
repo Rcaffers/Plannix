@@ -15,6 +15,9 @@ try {
         ['../context/AcademicYearContext', '../context/ClassContext', '../context/TimetableLayoutContext', '../context/TimetableSessionContext'].includes(source)) {
       return path.resolve('src/components/ProjectCard.responsive-browser-test.jsx');
     }
+    if (importer?.endsWith('/TimetableEvents.jsx') && source === '../utils/eventApi.js') {
+      return path.resolve('src/components/ProjectCard.responsive-browser-test.jsx');
+    }
   } }], configFile: false, logLevel: 'error', define: { 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
     build: { outDir: directory, emptyOutDir: false, lib: {
       entry: 'src/components/ProjectCard.responsive-browser-test.jsx', formats: ['iife'], name: 'SessionProviderTest', fileName: () => 'test.js', cssFileName: 'test',
@@ -47,6 +50,7 @@ try {
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.text + ': ' + r.exceptionDetails.exception?.description);
     return r.result.value;
   };
+  await send('Emulation.setTimezoneOverride', { timezoneId: 'Europe/London' }, sessionId);
   await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }, sessionId);
   await send('Page.reload', {}, sessionId);
   await evaluate(`new Promise((resolve,reject)=>{let n=0;const id=setInterval(()=>{if(document.body.dataset.testResult){clearInterval(id);resolve(document.body.dataset.testResult)}else if(++n>200){clearInterval(id);reject(Error('Fixture did not load'))}},50)})`);

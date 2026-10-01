@@ -24,6 +24,8 @@ import {
 } from '../utils/timetablePlannedClasses';
 import ClassPlacementPalette from './ClassPlacementPalette';
 import PlacedLessonCard from './PlacedLessonCard';
+import TimetableEvents from './TimetableEvents';
+import { localCalendarDayDifference } from '../utils/timetableEvents';
 import { classPlacementUnavailableReason } from '../utils/timetableClassPlacement';
 import { useClassPlacement } from '../hooks/useClassPlacement';
 import './ProjectCard.css';
@@ -102,7 +104,7 @@ function getTodayColumnIndexForWeek({ weekStartDate, dayCount, weekMode }) {
   now.setHours(12, 0, 0, 0);
   const monday = new Date(weekStartDate);
   monday.setHours(12, 0, 0, 0);
-  const diffDays = Math.floor((now.getTime() - monday.getTime()) / 86400000);
+  const diffDays = localCalendarDayDifference(now, monday);
   if (diffDays < 0 || diffDays >= dayCount) {
     return -1;
   }
@@ -126,7 +128,7 @@ function getCompactBootstrapDayIndex({ weekStartDate, dayCount, weekMode }) {
   now.setHours(12, 0, 0, 0);
   const monday = new Date(weekStartDate);
   monday.setHours(12, 0, 0, 0);
-  const diffDays = Math.floor((now.getTime() - monday.getTime()) / 86400000);
+  const diffDays = localCalendarDayDifference(now, monday);
 
   const displayedMonday = startOfWeek(weekStartDate);
   displayedMonday.setHours(12, 0, 0, 0);
@@ -150,7 +152,7 @@ export default function ProjectCard({
   fixedWeekLabel = '',
 }) {
   const { layout, dayLabels, rowSegments, isLoading: layoutLoading, isSaving: layoutSaving, error: layoutError } = useTimetableLayout();
-  const { academicYear } = useAcademicYear();
+  const { academicYear, selectedAcademicYearId } = useAcademicYear();
   const {
     authoritativeEntries: classEntries,
     isLoading: classesLoading,
@@ -221,6 +223,7 @@ export default function ProjectCard({
   }, []);
 
   const isSingleDayTimetable = isCompactTimetable && (weekMode === 'date' || enableFixedPhoneSingleDay);
+  const navigationDayCount = weekMode === 'date' ? 7 : dayCount;
   const [compactDayIndex, setCompactDayIndex] = useState(0);
   const compactDayBootstrappedRef = useRef(false);
   const weekStartRef = useRef(weekStartDate);
@@ -246,7 +249,7 @@ export default function ProjectCard({
 
     const finish = (idx) => {
       if (compactDayBootstrappedRef.current) return;
-      const maxIdx = Math.max(0, dayCountRef.current - 1);
+      const maxIdx = Math.max(0, (weekMode === 'date' ? 7 : dayCountRef.current) - 1);
       setCompactDayIndex(Math.min(maxIdx, Math.max(0, idx)));
       compactDayBootstrappedRef.current = true;
     };
@@ -261,8 +264,8 @@ export default function ProjectCard({
   }, [isSingleDayTimetable, todayColumnIndex, weekMode]);
 
   useEffect(() => {
-    setCompactDayIndex((i) => (i >= dayCount ? Math.max(0, dayCount - 1) : i));
-  }, [dayCount]);
+    setCompactDayIndex((i) => (i >= navigationDayCount ? Math.max(0, navigationDayCount - 1) : i));
+  }, [navigationDayCount]);
 
   const visibleCalendarDay = useMemo(() => {
     if (weekMode !== 'date') {
@@ -286,10 +289,12 @@ export default function ProjectCard({
 
   const dayIndicesToRender = useMemo(() => {
     if (isSingleDayTimetable) {
-      return [compactDayIndex];
+      return compactDayIndex < dayCount ? [compactDayIndex] : [];
     }
     return displayDayLabels.map((_, i) => i);
-  }, [isSingleDayTimetable, compactDayIndex, displayDayLabels]);
+  }, [isSingleDayTimetable, compactDayIndex, dayCount, displayDayLabels]);
+
+  const phoneNonTeachingDay = isSingleDayTimetable && weekMode === 'date' && compactDayIndex >= dayCount;
 
   const gridDayCount = isSingleDayTimetable ? 1 : dayCount;
 
@@ -489,10 +494,10 @@ export default function ProjectCard({
     const nextIndex = compactDayIndex + delta;
     if (nextIndex < 0) {
       moveWeek(-1);
-      setCompactDayIndex(dayCount - 1);
+      setCompactDayIndex(navigationDayCount - 1);
       return;
     }
-    if (nextIndex >= dayCount) {
+    if (nextIndex >= navigationDayCount) {
       moveWeek(1);
       setCompactDayIndex(0);
       return;
@@ -529,11 +534,11 @@ export default function ProjectCard({
     }
     const mondayNoon = new Date(monday);
     mondayNoon.setHours(12, 0, 0, 0);
-    const diffDays = Math.floor((pickedNoon.getTime() - mondayNoon.getTime()) / 86400000);
+    const diffDays = localCalendarDayDifference(pickedNoon, mondayNoon);
     setWeekStartDate(monday);
     let idx = diffDays;
     if (idx < 0) idx = 0;
-    if (idx >= dayCount) idx = dayCount - 1;
+    if (idx >= navigationDayCount) idx = navigationDayCount - 1;
     setCompactDayIndex(idx);
     compactDayBootstrappedRef.current = true;
   }
@@ -989,6 +994,7 @@ export default function ProjectCard({
             <div
               className={`schedule-scroll-track${isSingleDayTimetable ? ' schedule-scroll-track--single-day' : ''}`}
             >
+              {!phoneNonTeachingDay ? <>
               <div className={scheduleHeadClass} style={fullWeekGridStyle ?? undefined}>
                 <span className="time-head">Time</span>
                 {dayIndicesToRender.map((dayIndex) => {
@@ -1130,6 +1136,11 @@ export default function ProjectCard({
                 );
               })}
               </div>
+              </> : null}
+              {weekMode === 'date' ? <TimetableEvents academicYearId={academicYear?.id === selectedAcademicYearId ? selectedAcademicYearId : null}
+                monday={formatDateKeyPart(weekStartDate)} dayIndices={dayIndicesToRender} dayLabels={displayDayLabels}
+                gridStyle={fullWeekGridStyle} singleDay={isSingleDayTimetable} selectedDay={compactDayIndex}
+                nonTeachingDayOnly={phoneNonTeachingDay} /> : null}
             </div>
           </div>
         </div>

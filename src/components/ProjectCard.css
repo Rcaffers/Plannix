@@ -377,6 +377,38 @@
   min-height: max(320px, calc(var(--timetable-periods, 5) * 56px));
 }
 
+.schedule-events { min-width: 0; border-top: 2px solid #d8e4dc; background: #f8fbf8; }
+.schedule-events-row {
+  display: grid;
+  grid-template-columns: 80px repeat(var(--timetable-days, 5), minmax(100px, 1fr));
+  min-width: calc(80px + var(--timetable-days, 5) * 100px);
+  width: 100%;
+  box-sizing: border-box;
+}
+.schedule-events-row--single-day { grid-template-columns: 72px minmax(0, 1fr); min-width: 0; }
+.schedule-events-time, .schedule-events-day { min-width: 0; padding: 10px 8px; border-right: 1px solid #d8e4dc; }
+.schedule-events-time { font-size: 0.72rem; font-weight: 700; text-align: center; overflow-wrap: anywhere; }
+.schedule-events-day { display: grid; align-content: start; gap: 8px; }
+.schedule-event-card {
+  display: grid; gap: 4px; min-width: 0; padding: 10px; border: 1px solid #b7d1bf;
+  border-radius: 10px; background: #fff; font-size: 0.76rem; line-height: 1.4;
+  overflow-wrap: anywhere; word-break: normal;
+}
+.schedule-event-card > strong, .schedule-event-card > span, .schedule-event-card details,
+.schedule-event-card summary, .schedule-event-card p { min-width: 0; overflow-wrap: anywhere; }
+.schedule-event-card details p { margin: 6px 0 0; white-space: pre-wrap; }
+.schedule-event-card summary { cursor: pointer; text-decoration: underline; }
+.schedule-event-card summary:focus-visible, .schedule-events-manage:focus-visible,
+.schedule-events-error button:focus-visible { outline: 3px solid #22564e; outline-offset: 2px; }
+.schedule-events-weekend { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; padding: 12px; }
+.schedule-events-weekend-day, .schedule-events-weekend-only { display: grid; align-content: start; gap: 8px; min-width: 0; }
+.schedule-events-weekend-only { padding: 12px; }
+.schedule-events-weekend-only p { margin: 0; }
+.schedule-events-manage { display: inline-block; margin: 8px 12px 12px; font-size: 0.8rem; color: #22564e; }
+.schedule-events-error { padding: 12px; border: 1px solid #ba7070; background: #fff1ee; }
+.schedule-events-error p { margin: 0 0 6px; }
+.schedule-events-error button { min-height: 40px; }
+
 .time-col {
   display: grid;
   grid-template-rows: repeat(var(--timetable-periods, 5), 1fr);

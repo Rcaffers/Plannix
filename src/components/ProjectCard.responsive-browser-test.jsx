@@ -10,7 +10,13 @@ import '../App.css';
 const entries = [{ id: '7a', name: '7A', frequency: 3 }];
 const periods = [{ id: 'p1', type: 'teaching', number: 1 }, { id: 'p2', type: 'teaching', number: 2 }];
 const rowSegments = periods.map((p, i) => ({ kind: 'lesson', rowIndex: i, timeLabel: i ? '10:00' : '09:00', rangeLabel: i ? '10:00 – 11:00' : '09:00 – 10:00' }));
-export const useAcademicYear = () => ({ academicYear: null });
+let fixtureAcademicYear = null;
+export const useAcademicYear = () => ({ academicYear: fixtureAcademicYear, selectedAcademicYearId: fixtureAcademicYear?.id });
+let eventRequests = [], eventResponder = () => Promise.resolve({ events: [] });
+export const eventApi = { list(yearId, options) {
+  eventRequests.push({ yearId, ...options });
+  return eventResponder(yearId, options);
+} };
 export const useClasses = () => ({ authoritativeEntries: entries });
 export const useTimetableLayout = () => ({ layout: { cycle: mode === 'fixed' ? 'two-week' : 'weekly' }, dayLabels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], rowSegments });
 let state;
@@ -102,6 +108,7 @@ function singleDay(label) {
     timeError, dayError, headingWidth: heading.width, gridWidth: grid.width });
 }
 async function run() {
+  check(Intl.DateTimeFormat().resolvedOptions().timeZone === 'Europe/London', 'Rendered browser uses Europe/London timezone');
   mount(); await tick();
   check(innerWidth === 430 && document.querySelectorAll('.day-col').length === 1, '430px single-day mode');
   check(document.querySelector('[aria-label="Previous day"]') && document.querySelector('[aria-label="Next day"]') && document.querySelector('.schedule-date-input').value, 'Phone retains day navigation, date selector and bootstrap');
@@ -295,6 +302,151 @@ async function run() {
   click(document.querySelector('#week-b')); await tick();
   check(!placementStatus().textContent.trim(), 'Week change clears obsolete placement announcement');
   observeSave = false;
+
+  // The same ProjectCard fixture now exercises the saved Events row with a mocked,
+  // abort-aware API. No authenticated or production service is contacted.
+  mode = 'date'; allowEditing = false;
+  fixtureAcademicYear = { id: '00000000-0000-4000-8000-000000000001', startDate: '2026-01-01', endDate: '2027-12-31', holidays: [] };
+  const nextDate = (day, offset) => {
+    const value = new Date(`${day}T12:00:00`); value.setDate(value.getDate() + offset);
+    return `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}`;
+  };
+  const event = (id, date, title, startTime = null, endTime = null, location = '', notes = '') =>
+    ({ id, date, title, startTime, endTime, location, notes });
+  let responseMode = 'ready', pendingResolve, pendingReject;
+  eventResponder = (_year, request) => {
+    if (responseMode === 'pending') return new Promise((resolve, reject) => { pendingResolve = resolve; pendingReject = reject; });
+    if (responseMode === 'error') return Promise.reject({ requestId: '00000000-0000-4000-8000-000000000099' });
+    return Promise.resolve({ events: [
+      event('holiday', nextDate(request.from, 4), 'Half-term activity'),
+      event('saturday-late', nextDate(request.from, 5), 'Museum trip', '14:00', '16:00', 'Very long location '.repeat(25), '<script>Plain notes</script>'),
+      event('saturday-all', nextDate(request.from, 5), 'All-day community fair'),
+      event('saturday-early', nextDate(request.from, 5), 'Morning event', '09:00', '10:00'),
+      event('sunday', nextDate(request.from, 6), 'Sunday event'),
+    ] });
+  };
+  eventRequests = []; mount(); await tick();
+  check(eventRequests.length === 1 && eventRequests[0].yearId === fixtureAcademicYear.id
+    && nextDate(eventRequests[0].from, 6) === eventRequests[0].to, 'Dated timetable requests one authenticated week range, Monday through Sunday');
+  check(document.querySelector('.schedule-events-day[aria-label="Fri events"]').textContent.includes('Half-term activity'), 'Events display on holiday dates');
+  check(!document.querySelector('.schedule-events-day[aria-label="Fri events"]').querySelector('.lesson-card'), 'Holiday event is separate from lesson slots');
+  const saturdayCards = [...document.querySelectorAll('.schedule-events-weekend-day')][0].querySelectorAll('.schedule-event-card');
+  check([...saturdayCards].map(card => card.querySelector('strong').textContent).join('|') === 'All-day community fair|Morning event|Museum trip', 'Weekend events sort all-day first, then local time');
+  check(saturdayCards[0].textContent.includes('All day') && saturdayCards[1].textContent.includes('09:00–10:00')
+    && saturdayCards[2].textContent.includes('Very long location'), 'Cards show all-day, timed and location details');
+  const notes = saturdayCards[2].querySelector('summary'); notes.focus();
+  check(document.activeElement === notes && !saturdayCards[2].querySelector('script'), 'Notes are keyboard accessible and rendered as text');
+  notes.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); click(notes);
+  check(saturdayCards[2].querySelector('details').open && saturdayCards[2].textContent.includes('<script>Plain notes</script>'), 'Notes can be revealed without HTML execution');
+  check(document.querySelector('.schedule-events-manage').getAttribute('href') === '/settings/events', 'Manage Events link opens Settings Events');
+  document.querySelector('.schedule-events-manage').focus();
+  check(document.activeElement === document.querySelector('.schedule-events-manage'), 'Manage Events link accepts keyboard focus');
+  for (const size of [320, 375, 390, 430, 768, 820, 1024, 1366]) {
+    await width(size);
+    const scroll = document.querySelector('.schedule-scroll');
+    const eventRow = document.querySelector('.schedule-events-row');
+    const scheduleGrid = document.querySelector('.schedule-grid');
+    const headings = [...document.querySelectorAll('.schedule-head > *')];
+    const eventCells = [...eventRow.children];
+    const columnError = Math.max(...eventCells.map((cell, index) => {
+      const heading = headings[index].getBoundingClientRect(), event = cell.getBoundingClientRect();
+      return Math.max(Math.abs(heading.left - event.left), Math.abs(heading.right - event.right));
+    }));
+    check(eventRow.getBoundingClientRect().top >= scheduleGrid.getBoundingClientRect().bottom - 1
+      && columnError <= 1, `${size}px: event cells follow final period and align with weekday headings`);
+    check(document.documentElement.scrollWidth <= innerWidth + 1, `${size}px: event text does not cause page overflow`);
+    if (size < 768) {
+      check(Math.abs(eventRow.getBoundingClientRect().left - document.querySelector('.schedule-grid').getBoundingClientRect().left) <= 1
+        && Math.abs(eventRow.getBoundingClientRect().right - document.querySelector('.schedule-grid').getBoundingClientRect().right) <= 1,
+      `${size}px: event row aligns with single-day lesson grid`);
+    } else {
+      check(Math.abs(eventRow.getBoundingClientRect().left - document.querySelector('.schedule-grid').getBoundingClientRect().left) <= 1
+        && Math.abs(eventRow.getBoundingClientRect().right - document.querySelector('.schedule-grid').getBoundingClientRect().right) <= 1
+        && scroll.scrollWidth <= scroll.clientWidth + 1, `${size}px: event row aligns with full-week grid without overflow`);
+    }
+  }
+  await width(430);
+  const today = document.querySelector('.schedule-date-input').value;
+  const saturday = nextDate(eventRequests.at(-1).from, 5);
+  const input = document.querySelector('.schedule-date-input');
+  flushSync(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, saturday); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); });
+  await tick();
+  check(document.querySelector('.schedule-day-label').textContent.includes('Saturday')
+    && !document.querySelector('.schedule-grid') && document.querySelector('.schedule-events-weekend-only').textContent.includes('Museum trip'),
+  'Phone date picker reaches Saturday and shows its events without teaching slots');
+  click(document.querySelector('[aria-label="Next day"]'));
+  check(document.querySelector('.schedule-day-label').textContent.includes('Sunday') && document.querySelector('.schedule-events-weekend-only').textContent.includes('Sunday event'),
+    'Phone next-day navigation reaches Sunday');
+  click(document.querySelector('[aria-label="Next day"]')); await tick();
+  check(document.querySelector('.schedule-day-label').textContent.includes('Monday') && eventRequests.at(-1).from !== eventRequests[0].from,
+    'Phone navigation rolls from Sunday into next week');
+  check(!document.querySelector('.class-placement-palette'), 'Dated Events view does not add Input Classes palette');
+  check(today !== document.querySelector('.schedule-date-input').value, 'Weekend navigation changes the selected date');
+
+  await width(820);
+  responseMode = 'pending'; click(document.querySelector('[aria-label="Go to next week"]')); await tick();
+  const staleResolve = pendingResolve, staleRequest = eventRequests.at(-1);
+  check(!document.querySelector('.schedule-events').textContent.includes('Museum trip')
+    && getComputedStyle(document.querySelector('.schedule-events [role="status"]')).position === 'absolute',
+  'Pending week clears previous events immediately and hides routine loading status');
+  responseMode = 'error'; click(document.querySelector('[aria-label="Go to next week"]')); await tick();
+  check(staleRequest.signal.aborted && document.querySelector('.schedule-events-error')?.textContent.includes('Could not load events')
+    && document.querySelector('.schedule-events-error')?.textContent.includes('Support reference'), 'Scope change aborts old request and displays safe visible error');
+  staleResolve({ events: [event('stale', staleRequest.from, 'Stale event')] }); await tick();
+  check(!document.body.textContent.includes('Stale event') && document.querySelector('.schedule-events-error'), 'Late success cannot replace newer-scope error');
+  document.querySelector('.schedule-events-error button').focus();
+  check(document.activeElement === document.querySelector('.schedule-events-error button'), 'Visible Retry button accepts keyboard focus');
+  responseMode = 'ready'; click(document.querySelector('.schedule-events-error button')); await tick();
+  check(!document.querySelector('.schedule-events-error') && document.querySelector('.schedule-events-row')
+    && getComputedStyle(document.querySelector('.schedule-events [role="status"]')).position === 'absolute',
+  'Retry recovers events and routine status remains visually hidden');
+  responseMode = 'pending'; click(document.querySelector('[aria-label="Go to next week"]')); await tick();
+  const oldYearReject = pendingReject, oldYearRequest = eventRequests.at(-1);
+  fixtureAcademicYear = { ...fixtureAcademicYear, id: '00000000-0000-4000-8000-000000000002' };
+  responseMode = 'ready'; flushSync(() => root.render(<Harness key={Math.random()} />)); await tick();
+  check(oldYearRequest.signal.aborted && eventRequests.at(-1).yearId === fixtureAcademicYear.id
+    && !document.body.textContent.includes('Could not load events'), 'Year change aborts old scope and loads the selected year');
+  oldYearReject(new Error('synthetic old-year error')); await tick();
+  check(!document.body.textContent.includes('Could not load events'), 'Late old-year failure cannot replace new-year events');
+  responseMode = 'pending'; click(document.querySelector('[aria-label="Go to next week"]')); await tick();
+  const lateReject = pendingReject, abandoned = eventRequests.at(-1);
+  mode = 'fixed'; mount(); await tick();
+  lateReject(new Error('synthetic late error')); await tick();
+  check(abandoned.signal.aborted && !document.querySelector('.schedule-events'), 'Unmount aborts event request and Input Classes renders no dated events');
+  mode = 'date'; fixtureAcademicYear = {
+    id: '00000000-0000-4000-8000-000000000003', startDate: '2027-03-28', endDate: '2027-10-31', holidays: [],
+  };
+  responseMode = 'ready'; eventRequests = []; await width(430); mount(); await tick();
+  const chooseLocalDate = value => {
+    const field = document.querySelector('.schedule-date-input');
+    flushSync(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(field, value);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      field.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  };
+  chooseLocalDate('2027-03-28'); await tick();
+  check(document.querySelector('.schedule-date-input').value === '2027-03-28'
+    && document.querySelector('.schedule-day-label').textContent.includes('Sunday')
+    && document.querySelector('.schedule-events-weekend-only').textContent.includes('Sunday event')
+    && eventRequests.at(-1).from === '2027-03-22',
+  'Spring DST Sunday at academic-year start selects index 6 and the correct week/event');
+  click(document.querySelector('[aria-label="Previous day"]'));
+  check(document.querySelector('.schedule-date-input').value === '2027-03-27'
+    && document.querySelector('.schedule-events-weekend-only').textContent.includes('Museum trip')
+    && !document.querySelector('.schedule-events-weekend-only').textContent.includes('Sunday event'),
+  'Spring DST Saturday and Sunday events remain distinct');
+  chooseLocalDate('2027-10-31'); await tick();
+  check(document.querySelector('.schedule-date-input').value === '2027-10-31'
+    && document.querySelector('.schedule-day-label').textContent.includes('Sunday')
+    && document.querySelector('.schedule-events-weekend-only').textContent.includes('Sunday event')
+    && eventRequests.at(-1).from === '2027-10-25',
+  'Autumn DST Sunday at academic-year end selects index 6 and the correct week/event');
+  click(document.querySelector('[aria-label="Previous day"]'));
+  check(document.querySelector('.schedule-date-input').value === '2027-10-30'
+    && document.querySelector('.schedule-events-weekend-only').textContent.includes('Museum trip'),
+  'Autumn DST Saturday stays distinct from Sunday');
+  fixtureAcademicYear = null;
 
 }
 run().then(() => { parent.document.body.dataset.testResult='passed'; }, error => { parent.document.body.dataset.testResult='failed'; results.push(error.stack); }).finally(() => {
