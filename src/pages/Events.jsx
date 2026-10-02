@@ -289,7 +289,7 @@ export default function Events({ userId }) {
   }
 
   return <main className="settings-page events-page"><div className="container settings-inner--wide">
-    <p className="settings-breadcrumb"><Link to="/settings">Settings</Link><span aria-hidden> / </span>Events</p>
+    <p className="settings-breadcrumb"><Link to="/">Home</Link><span aria-hidden> / </span><Link to="/settings">Settings</Link><span aria-hidden> / </span>Events</p>
     <h1 className="settings-title">Events</h1>
     <SettingsSubnav />
     <p className="settings-lead">Plan personal, single-day events for an academic year. Events do not close teaching slots.</p>

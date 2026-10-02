@@ -92,6 +92,12 @@ window.eventsStartRecoveryForUnmount = async () => {
 async function run() {
   await settle();
   const cards = [...host.querySelectorAll('.events-page .settings-timetable-form')];
+  const breadcrumb = host.querySelector('.settings-breadcrumb');
+  check(breadcrumb?.textContent.trim() === 'Home / Settings / Events'
+    && breadcrumb.querySelector('a[href="/"]')?.textContent === 'Home'
+    && breadcrumb.querySelector('a[href="/settings"]')?.textContent === 'Settings'
+    && breadcrumb.querySelectorAll('a').length === 2,
+  'Events breadcrumb matches the linked settings-page hierarchy');
   const sections = [...host.querySelectorAll('.events-settings-card > .events-card-section')];
   check(cards.length === 1 && sections.length === 3
     && sections[0].contains(host.querySelector('.events-weekend-setting'))
@@ -238,7 +244,7 @@ async function run() {
   window.confirm = () => false;
   check(guard() === false, 'academic-year guard protects draft');
   const navigation = new MouseEvent('click', { bubbles: true, cancelable: true });
-  host.querySelector('.settings-breadcrumb a').dispatchEvent(navigation);
+  host.querySelector('.settings-breadcrumb a[href="/settings"]').dispatchEvent(navigation);
   await settle();
   check(navigation.defaultPrevented && router.state.location.pathname === '/settings/events'
     && host.querySelector('#event-title').value === 'Unsaved', 'route link cannot discard dirty event draft');
@@ -409,6 +415,25 @@ async function run() {
     'Events AI extraction stays in Events as an unsaved preview without destination selection');
   check(host.querySelector('.import-preview-year')?.textContent.trim() === 'Academic year: 2027/28',
     'Events AI section shows only the selected academic-year label');
+  const aiYear = host.querySelector('.events-import-section .import-preview-year');
+  const aiYearStyle = getComputedStyle(aiYear);
+  const hintStyle = getComputedStyle(host.querySelector('.events-import-section .import-preview-panel > .settings-hint'));
+  check(aiYear.classList.contains('settings-hint')
+    && aiYearStyle.backgroundColor === 'rgba(0, 0, 0, 0)'
+    && aiYearStyle.paddingLeft === '0px' && aiYearStyle.marginTop === '0px'
+    && aiYearStyle.marginBottom === '16px'
+    && aiYearStyle.color === hintStyle.color
+    && aiYearStyle.fontSize === hintStyle.fontSize && aiYearStyle.lineHeight === hintStyle.lineHeight
+    && Number(getComputedStyle(aiYear.querySelector('strong')).fontWeight) > Number(aiYearStyle.fontWeight),
+  'Events AI year label uses the School Holiday hint typography and bold year without a badge');
+  const aiPanel = host.querySelector('.events-import-section .import-preview-panel');
+  const aiProvider = aiPanel.querySelector(':scope > .settings-hint:not(.import-preview-year)');
+  const aiLegend = aiPanel.querySelector('.import-preview-controls legend');
+  const aiChoices = aiPanel.querySelector('.import-preview-choices');
+  const gap = (first, second) => Math.round(second.getBoundingClientRect().top - first.getBoundingClientRect().bottom);
+  check(gap(aiYear, aiProvider) >= 14 && gap(aiProvider, aiLegend) >= 20
+    && gap(aiLegend, aiChoices) >= 12,
+  'Events AI year, provider, Import source and input controls have the holiday-section vertical rhythm');
   let previewPrompts = 0; window.confirm = () => { previewPrompts++; return false; };
   await router.navigate('/settings'); await settle();
   check(router.state.location.pathname === '/settings/events' && previewPrompts === 1,

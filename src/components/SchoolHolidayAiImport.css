@@ -1,7 +1,6 @@
 .academic-holiday-section { display: grid; gap: 16px; min-width: 0; }
 .academic-holiday-section + .academic-holiday-section { border-top: 1px solid var(--stroke, #d5ded8); padding-top: 24px; }
 .school-holiday-ai { border-top: 1px solid var(--stroke, #d5ded8); padding-top: 24px; min-width: 0; }
-.academic-holiday-section > .school-holiday-ai + .import-preview-panel { border-top: 1px solid var(--stroke, #d5ded8); padding-top: 24px; margin-top: 0; }
 .school-holiday-ai h3, .school-holiday-ai h4, .school-holiday-ai h5 { margin: 0 0 12px; }
 .school-holiday-ai h4 { font-size: 1rem; }
 .school-holiday-ai h5 { font-size: .95rem; }

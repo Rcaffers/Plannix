@@ -10,10 +10,8 @@ try {
   await build({ configFile: false, logLevel: 'error', define: { 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
     plugins: [{ name: 'academic-year-ai-mocks', enforce: 'pre', resolveId(source, importer) {
       if (importer?.endsWith('/AcademicYear.jsx') && ['../context/AcademicYearContext', '../utils/api'].includes(source)) return path.resolve('src/pages/AcademicYear.ai-browser-test.jsx');
-      if (importer?.endsWith('/ImportPreviewPanel.jsx') && ['../context/AcademicYearContext.jsx', '../utils/aiConnectionApi.js',
-        '../utils/importPreviewApi.js'].includes(source)) return path.resolve('src/pages/AcademicYear.ai-browser-test.jsx');
       if (importer?.endsWith('/SchoolHolidayAiImport.jsx') && ['../utils/aiConnectionApi.js', '../utils/holidayPdfExtractionApi.js',
-        '../utils/holidayExtractionApi.js'].includes(source)) return path.resolve('src/pages/AcademicYear.ai-browser-test.jsx');
+        '../utils/holidayExtractionApi.js', '../utils/importPreviewApi.js'].includes(source)) return path.resolve('src/pages/AcademicYear.ai-browser-test.jsx');
     } }], build: { outDir: directory, emptyOutDir: false, lib: {
       entry: 'src/pages/AcademicYear.ai-browser-test.jsx', formats: ['iife'], name: 'AcademicYearAiTest', fileName: () => 'test.js', cssFileName: 'test',
     } } });
@@ -50,12 +48,14 @@ try {
     assert.ok(measured.result.value.scroll <= width + 1, `${width}px overflows: ${JSON.stringify(measured.result.value)}`);
   }
   console.log(JSON.stringify(widths));
-  await send('Runtime.evaluate', { expression: `(()=>{const node=document.querySelector('#import-preview-text-holidays');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(node,'Synthetic calendar');node.dispatchEvent(new Event('input',{bubbles:true}));[...document.querySelectorAll('button')].find(button=>button.textContent==='Extract preview').focus()})()` }, sessionId);
+  await send('Runtime.evaluate', { expression: `new Promise(resolve=>{[...document.querySelectorAll('button')].find(button=>button.textContent==='Paste text').click();requestAnimationFrame(resolve)})`, awaitPromise: true }, sessionId);
+  const keyboardReady = await send('Runtime.evaluate', { expression: `new Promise(resolve=>{const node=document.querySelector('#school-holiday-text');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(node,'Synthetic calendar');node.dispatchEvent(new Event('input',{bubbles:true}));requestAnimationFrame(()=>{const button=[...document.querySelectorAll('button')].find(button=>button.textContent==='Extract holidays');button.focus();resolve({disabled:button.disabled,focused:document.activeElement===button})})})`, awaitPromise: true, returnByValue: true }, sessionId);
+  assert.deepEqual(keyboardReady.result.value, { disabled: false, focused: true }, 'Pasted-text extraction is keyboard ready');
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 }, sessionId);
   await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }, sessionId);
   const keyboard = await send('Runtime.evaluate', { expression: `new Promise(resolve=>setTimeout(()=>resolve(document.activeElement.id),100))`, awaitPromise: true, returnByValue: true }, sessionId);
-  assert.equal(keyboard.result.value, 'import-preview-heading', 'Native Enter starts extraction and focuses the editable preview');
-  console.log('Native keyboard extraction and preview focus passed.');
+  assert.equal(keyboard.result.value, 'school-holiday-review-heading', 'Native Enter starts extraction and focuses the holiday review');
+  console.log('Native keyboard extraction and review focus passed.');
   const signedOut = await send('Runtime.evaluate', { expression: 'window.verifyAcademicYearSignOut()', awaitPromise: true, returnByValue: true }, sessionId);
   assert.deepEqual(signedOut.result.value, { allowed: true, prompts: 1, previewGuardRemoved: true,
     yearGuardRemoved: true, unloadBlocked: false }, 'accepted sign-out asks once and removes combined draft/preview guards');

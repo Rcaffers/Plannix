@@ -128,7 +128,7 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
     <h3>{destination === 'events' ? 'Import events with AI' : 'Preview calendar documents with AI'}</h3>
     <p>Paste calendar text or upload a document to review possible {destination === 'events' ? 'events' : 'school holidays and closures'}. <strong>Preview only — not saved.</strong></p>
     {!ready ? <p className="import-preview-warning">Select a saved academic year with start and end dates in <Link to="/settings/academic-year">Academic Year</Link> before extracting.</p>
-      : <p className="import-preview-year">Academic year: <strong>{academicYear.label}</strong></p>}
+      : <p className={`import-preview-year${destination === 'events' ? ' settings-hint' : ''}`}>Academic year: <strong>{academicYear.label}</strong></p>}
     {providerLoading ? <p className="visually-hidden" role="status">Loading AI connection…</p>
       : currentProviderError ? <div className="import-preview-error" role="alert"><p>Could not load your AI connection.</p>
         {safeRequestReference(currentProviderError) ? <p>Support reference: <code>{safeRequestReference(currentProviderError)}</code></p> : null}
