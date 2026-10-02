@@ -127,10 +127,10 @@ export function createTimetableSessionApi({ fetchImpl = fetch, getSession = defa
   const query = (value, extras = {}) => new URLSearchParams({ ...scope(value), ...extras });
   const body = (value, extras = {}) => ({ ...scope(value), ...extras });
   return {
-    loadRecurring(value) { return request(`/api/timetable/sessions/recurring?${query(value)}`, { method: 'GET' }, 'Could not load timetable sessions.', mapRecurring); },
+    loadRecurring(value, { signal } = {}) { return request(`/api/timetable/sessions/recurring?${query(value)}`, { method: 'GET', signal }, 'Could not load timetable sessions.', mapRecurring); },
     saveRecurring(value) { return request('/api/timetable/sessions/recurring', { method: 'PUT', headers: JSON_POST_HEADERS,
       body: JSON.stringify(body(value, { weekId: uuid(value.weekId, 'Week'), expectedRevision: revision(value.expectedRevision), sessions: requestSessions(value.sessions) })) }, 'Could not save timetable sessions.', (payload) => mapSaved(payload)); },
-    loadDate(value) { return request(`/api/timetable/sessions/date?${query(value, { weekStartDate: monday(value.weekStartDate) })}`, { method: 'GET' }, 'Could not load timetable sessions.', mapDated); },
+    loadDate(value, { signal } = {}) { return request(`/api/timetable/sessions/date?${query(value, { weekStartDate: monday(value.weekStartDate) })}`, { method: 'GET', signal }, 'Could not load timetable sessions.', mapDated); },
     saveDate(value) { return request('/api/timetable/sessions/date', { method: 'PUT', headers: JSON_POST_HEADERS,
       body: JSON.stringify(body(value, { weekStartDate: monday(value.weekStartDate), expectedRevision: revision(value.expectedRevision), sessions: requestSessions(value.sessions) })) }, 'Could not save timetable sessions.', (payload) => mapSaved(payload, true)); },
     removeDate(value) { const q = query(value, { weekStartDate: monday(value.weekStartDate), expectedRevision: String(revision(value.expectedRevision)) });
@@ -152,9 +152,9 @@ export function createTimetableSessionApi({ fetchImpl = fetch, getSession = defa
 }
 
 const timetableSessionApi = createTimetableSessionApi();
-export const fetchRecurringTimetableSessions = (scope) => timetableSessionApi.loadRecurring(scope);
+export const fetchRecurringTimetableSessions = (scope, options) => timetableSessionApi.loadRecurring(scope, options);
 export const saveRecurringTimetableSessions = (input) => timetableSessionApi.saveRecurring(input);
-export const fetchDatedTimetableSessions = (input) => timetableSessionApi.loadDate(input);
+export const fetchDatedTimetableSessions = (input, options) => timetableSessionApi.loadDate(input, options);
 export const saveDatedTimetableSessions = (input) => timetableSessionApi.saveDate(input);
 export const removeDatedTimetableOverride = (input) => timetableSessionApi.removeDate(input);
 export const saveTimetableSessionBatch = (input) => timetableSessionApi.saveBatch(input);

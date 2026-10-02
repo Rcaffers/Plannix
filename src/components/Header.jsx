@@ -373,6 +373,8 @@ export default function Header({
                     >
                       Planner settings
                     </Link>
+                    <Link className="nav-user-dropdown-item" role="menuitem" to="/reports"
+                      onClick={() => setIsUserMenuOpen(false)}>Reports</Link>
                     <button
                       type="button"
                       className="nav-user-dropdown-item nav-user-dropdown-item-button"
@@ -506,6 +508,9 @@ export default function Header({
                     </div>
                   ) : null}
                 </div>
+                <NavLink to="/reports"
+                  className={({ isActive }) => `mobile-nav-link${isActive ? ' mobile-nav-link--active' : ''}`}
+                  onClick={closeMobileNav}>Reports</NavLink>
                 <button
                   type="button"
                   className="mobile-nav-link mobile-nav-link--sub mobile-nav-link--button"

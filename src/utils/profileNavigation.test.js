@@ -41,6 +41,9 @@ test('navigation shows organisation controls conditionally while preserving plan
   assert.match(header, /Personal profile/);
   assert.match(header, /Organisation controls/);
   assert.match(header, /Planner settings/);
+  assert.match(header, /to="\/reports"/);
+  const app = await fs.readFile(new URL('../App.jsx', import.meta.url), 'utf8');
+  assert.match(app, /path="\/reports" element=\{privateRoute\(<Reports user=\{user\} \/>\)\}/);
 });
 
 test('name and email default to independent read-only displays with explicit edit actions', async () => {

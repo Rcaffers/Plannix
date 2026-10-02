@@ -16,6 +16,7 @@ import Profile from './pages/Profile';
 import OrganisationControls from './pages/OrganisationControls';
 import AcademicYear from './pages/AcademicYear';
 import Events from './pages/Events';
+import Reports from './pages/Reports';
 import Classes from './pages/Classes';
 import Timetable from './pages/Timetable';
 import TermsGate from './pages/TermsGate';
@@ -218,6 +219,7 @@ export default function App() {
             />
             <Route path="/settings/academic-year" element={privateRoute(<AcademicYear userId={user?.id} />)} />
             <Route path="/settings/events" element={privateRoute(<Events userId={user?.id} />)} />
+            <Route path="/reports" element={privateRoute(<Reports user={user} />)} />
             <Route path="/classes" element={privateRoute(<Classes />)} />
             <Route path="/classes/input" element={privateRoute(<Classes />)} />
             <Route

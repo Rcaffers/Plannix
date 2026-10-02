@@ -48,6 +48,19 @@ test('dated inheritance retains no fake collection or session identifiers', asyn
   assert.equal(result.requestId, requestId);
 });
 
+test('read-only recurring and dated loads forward caller cancellation', async () => {
+  const controller = new AbortController();
+  const signals = [];
+  const api = createTimetableSessionApi({ getSession: async () => ({ access_token: 'synthetic' }),
+    fetchImpl: async (url, options) => { signals.push(options.signal); return response(url.includes('/recurring?') ? recurring : {
+      revision: 2, weekStartDate: '2026-09-14', repeatingWeekId: ids[3], source: 'recurring', overrideExists: false,
+      collectionId: null, sessions: [],
+    }); } });
+  await api.loadRecurring(scope, { signal: controller.signal });
+  await api.loadDate({ ...scope, weekStartDate: '2026-09-14' }, { signal: controller.signal });
+  assert.deepEqual(signals, [controller.signal, controller.signal]);
+});
+
 test('empty overrides, authoritative generated IDs, and revisions map exactly', async () => {
   const api = createTimetableSessionApi({ getSession: async () => ({ access_token: 'x' }), fetchImpl: async () => response({
     revision: 9, collectionId: ids[7], repeatingWeekId: ids[3], sessions: [],

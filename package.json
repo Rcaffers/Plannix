@@ -20,6 +20,7 @@
     "test:academic-year": "node --test src/utils/academicYear.test.js src/utils/academicYearApi.test.js",
     "test:class-placement-browser": "node scripts/test-class-placement-browser.js",
     "test:events-browser": "node scripts/test-events-browser.js",
+    "test:reports-browser": "node scripts/test-reports-browser.js",
     "test:events-history-browser": "node scripts/test-events-native-history-browser.js",
     "test:import-preview-browser": "node scripts/test-import-preview-browser.js",
     "test:ai-connection": "node --test src/utils/aiConnectionApi.test.js server/routes/ai-connection-routes.test.js",
