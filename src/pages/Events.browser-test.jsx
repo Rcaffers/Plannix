@@ -430,6 +430,15 @@ async function run() {
   const aiProvider = aiPanel.querySelector(':scope > .settings-hint:not(.import-preview-year)');
   const aiLegend = aiPanel.querySelector('.import-preview-controls legend');
   const aiChoices = aiPanel.querySelector('.import-preview-choices');
+  const modeButtons = [...aiChoices.querySelectorAll('button')];
+  check(modeButtons.length === 5 && !aiChoices.querySelector('input[type="radio"]')
+    && modeButtons.every(node => node.classList.contains('settings-reset') && node.type === 'button')
+    && modeButtons.filter(node => node.getAttribute('aria-pressed') === 'true').map(node => node.textContent).join() === 'Paste text',
+  'Events source choices match Holiday AI buttons with a single accessible selected state');
+  check(getComputedStyle(modeButtons[0]).backgroundColor === 'rgb(220, 236, 226)'
+    && getComputedStyle(modeButtons[0]).minHeight === '44px'
+    && getComputedStyle(modeButtons[1]).backgroundColor !== getComputedStyle(modeButtons[0]).backgroundColor,
+  'selected Events source uses the Holiday AI tint and touch-sized button styling');
   const gap = (first, second) => Math.round(second.getBoundingClientRect().top - first.getBoundingClientRect().bottom);
   check(gap(aiYear, aiProvider) >= 14 && gap(aiProvider, aiLegend) >= 20
     && gap(aiLegend, aiChoices) >= 12,

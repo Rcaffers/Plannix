@@ -56,8 +56,17 @@ try {
   }
   console.log(JSON.stringify(measurements));
   await send('Emulation.setDeviceMetricsOverride', { width: 430, height: 900, deviceScaleFactor: 1, mobile: false }, sessionId);
-  await send('Runtime.evaluate', { expression: `([...document.querySelectorAll('button')].find(button=>button.textContent==='Add event')).focus()` }, sessionId);
   const key = async (type, name, code, text) => send('Input.dispatchKeyEvent', { type, key: name, code, windowsVirtualKeyCode: 13, ...(text ? { text } : {}) }, sessionId);
+  await send('Runtime.evaluate', { expression: `([...document.querySelectorAll('.events-import-section .import-preview-choices button')].find(button=>button.textContent==='Upload PDF')).focus()` }, sessionId);
+  await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
+  const pdfMode = await send('Runtime.evaluate', { expression: `Boolean(document.querySelector('.events-import-section .import-preview-choices button[aria-pressed="true"]')?.textContent==='Upload PDF' && document.querySelector('#import-preview-file-events'))`, returnByValue: true }, sessionId);
+  assert.equal(pdfMode.result.value, true, 'Native Enter selects Upload PDF and shows its input');
+  await send('Runtime.evaluate', { expression: `([...document.querySelectorAll('.events-import-section .import-preview-choices button')].find(button=>button.textContent==='Paste text')).focus()` }, sessionId);
+  await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
+  const textMode = await send('Runtime.evaluate', { expression: `Boolean(document.querySelector('.events-import-section .import-preview-choices button[aria-pressed="true"]')?.textContent==='Paste text' && document.querySelector('#import-preview-text-events'))`, returnByValue: true }, sessionId);
+  assert.equal(textMode.result.value, true, 'Native Enter restores Paste text and its input');
+  console.log('Native keyboard Events import-source switching passed.');
+  await send('Runtime.evaluate', { expression: `([...document.querySelectorAll('button')].find(button=>button.textContent==='Add event')).focus()` }, sessionId);
   await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
   const focused = await send('Runtime.evaluate', { expression: `new Promise(resolve=>requestAnimationFrame(()=>resolve(document.activeElement.id)))`, awaitPromise: true, returnByValue: true }, sessionId);
   assert.equal(focused.result.value, 'event-title', 'Native Enter opens Add event and focuses title');

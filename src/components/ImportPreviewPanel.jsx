@@ -137,9 +137,12 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
           : <p className="settings-hint">Connected to {currentProvider.providerLabel}. Your source will be sent to this provider for extraction. Do not include pupil or staff personal information.</p>}
     <fieldset className="import-preview-controls" disabled={!ready || busy || disabled}>
       <legend>Import source</legend>
-      <p className="import-preview-method-label">Source</p><div className="import-preview-choices" role="group" aria-label="Import source">
+      {destination === 'events' ? null : <p className="import-preview-method-label">Source</p>}
+      <div className={`import-preview-choices${destination === 'events' ? ' import-preview-choices--buttons' : ''}`} role="group" aria-label="Import source">
         {[['text', 'Paste text'], ['pdf', 'Upload PDF'], ['image', 'Upload image'], ['xlsx', 'Upload Excel'], ['csv', 'Upload CSV']].map(([value, label]) =>
-          <label key={value}><input type="radio" name={`import-method-${destination}`} value={value} checked={mode === value} onChange={() => changeMode(value)} />{label}</label>)}
+          destination === 'events'
+            ? <button type="button" className="settings-reset" key={value} aria-pressed={mode === value} onClick={() => changeMode(value)}>{label}</button>
+            : <label key={value}><input type="radio" name={`import-method-${destination}`} value={value} checked={mode === value} onChange={() => changeMode(value)} />{label}</label>)}
       </div>
       {mode === 'text' ? <div className="settings-field"><label htmlFor={`import-preview-text-${destination}`}>Calendar text</label><textarea id={`import-preview-text-${destination}`} rows={7} value={text} onChange={event => setText(event.target.value)} /></div>
         : <div className="settings-field"><span>{mode === 'pdf' ? 'School calendar PDF' : mode === 'image' ? 'Calendar image (PNG or JPEG)' : mode === 'xlsx' ? 'Calendar Excel (.xlsx)' : 'Calendar CSV'}</span>

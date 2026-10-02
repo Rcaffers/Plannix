@@ -37,7 +37,11 @@ const click = label => { const button = [...host.querySelectorAll('button')].fin
 const input = (selector, value) => { const node = host.querySelector(selector); if (!node) throw Error(`Missing ${selector}`);
   flushSync(() => { const proto = node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, 'value').set.call(node, value); node.dispatchEvent(new Event('input', { bubbles: true })); }); };
-const mode = value => flushSync(() => host.querySelector(`input[value="${value}"]`).click());
+const mode = value => flushSync(() => {
+  const control = [...host.querySelectorAll('.import-preview-choices button')].find(node => node.textContent ===
+    ({ text: 'Paste text', pdf: 'Upload PDF', image: 'Upload image', xlsx: 'Upload Excel', csv: 'Upload CSV' })[value]);
+  (control || host.querySelector(`input[value="${value}"]`)).click();
+});
 const choose = (name, type) => { const node = host.querySelector('input[type="file"]'); const transfer = new DataTransfer();
   const file = new File(['fixture'], name, { type }); transfer.items.add(file);
   Object.defineProperty(node, 'files', { configurable: true, value: transfer.files });
@@ -56,13 +60,27 @@ async function run() {
   check(host.querySelector('.import-preview-year')?.textContent.trim() === 'Academic year: 2026/27',
     'event preview shows the selected year label without boundaries');
   check(host.textContent.includes('Import events with AI') && !host.querySelector('[name="import-destination"]'), 'event destination comes from section');
+  const eventModes = () => [...host.querySelectorAll('.import-preview-choices button')];
+  check(eventModes().length === 5 && eventModes().every(node => node.type === 'button')
+    && !host.querySelector('.import-preview-choices input[type="radio"]')
+    && eventModes().filter(node => node.getAttribute('aria-pressed') === 'true').map(node => node.textContent).join() === 'Paste text',
+  'Events import uses five accessible mode buttons with pasted text selected');
   input('#import-preview-text-events', 'Assembly and Trip'); click('Extract preview'); await settle();
   check(host.querySelectorAll('.import-preview-entry').length === 2 && host.textContent.includes('Confirm the ambiguous source date'), 'event preview flags ambiguity');
   check(host.textContent.includes('Possible duplicate') && host.textContent.includes('Choose All day or enter valid paired times'), 'duplicate and missing times visible');
+  window.confirm = () => false; mode('pdf'); await settle();
+  check(host.querySelectorAll('.import-preview-entry').length === 2
+    && eventModes().find(node => node.textContent === 'Paste text').getAttribute('aria-pressed') === 'true'
+    && !host.querySelector('#import-preview-file-events'), 'rejecting a mode change retains the unsaved preview and source');
+  window.confirm = () => true;
   click('Discard preview'); await settle();
   for (const [kind, name, type] of [['pdf', 'calendar.pdf', 'application/pdf'], ['image', 'calendar.png', 'image/png'],
     ['xlsx', 'calendar.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'], ['csv', 'calendar.csv', 'text/csv']]) {
     mode(kind); const file = choose(name, type); click('Extract preview'); await settle();
+    check(eventModes().filter(node => node.getAttribute('aria-pressed') === 'true').length === 1
+      && eventModes().find(node => node.getAttribute('aria-pressed') === 'true').textContent ===
+      ({ pdf: 'Upload PDF', image: 'Upload image', xlsx: 'Upload Excel', csv: 'Upload CSV' })[kind],
+    `${kind} button is the only selected import source`);
     check(calls.at(-1).input.file === file && calls.at(-1).input.mode === kind && host.textContent.includes('selected') && !host.textContent.includes(name), `${kind} file is transient`);
     click('Discard preview'); await settle();
   }
