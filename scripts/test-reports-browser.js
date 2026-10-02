@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 const directory = await mkdtemp(path.join(tmpdir(), 'plannix-reports-browser-'));
 let chrome, socket;
@@ -106,7 +107,60 @@ try {
       && value.yellow?.count >= 4 && value.yellow.fit && value.yellow.style,
       `${width}px Reports card overflows: ${JSON.stringify(value)}`);
   }
-  console.log(JSON.stringify(measurements));
+  console.log(JSON.stringify(measurements.map(({ viewport, scroll, filters, lessons }) => ({
+    viewport, scroll, fromWidth: filters.from.width, toWidth: filters.to.width,
+    shortTile: lessons.short.display, longTitleFragments: lessons.long.titleLines,
+  }))));
+  const printLayout = await send('Runtime.evaluate', { expression: `(() => {
+    const host = document.querySelector('.reports-page').parentElement;
+    host.classList.add('page-shell');
+    const nav = document.createElement('header'); nav.className = 'site-header'; nav.textContent = 'Navigation excluded from print'; host.append(nav);
+    const footer = document.createElement('footer'); footer.className = 'site-footer'; footer.textContent = 'Footer excluded from print'; host.append(footer);
+    const results = document.querySelector('.reports-results');
+    const template = results.querySelector('.reports-entry:has(.reports-lesson)');
+    for (let index = 0; index < 40; index += 1) {
+      const copy = template.cloneNode(true);
+      copy.querySelector('.session-lesson-title').textContent = 'Print continuation entry ' + index;
+      if (index === 39) copy.querySelector('.session-lesson-notes').textContent = 'Long printed note '.repeat(1200) + ' END-OF-LONG-NOTE';
+      results.append(copy);
+    }
+    return true;
+  })()`, returnByValue: true }, sessionId);
+  assert.equal(printLayout.result.value, true);
+  await send('Emulation.setEmulatedMedia', { media: 'print' }, sessionId);
+  const printStyles = (await send('Runtime.evaluate', { expression: `(() => ({
+    nav: getComputedStyle(document.querySelector('.site-header')).display,
+    footer: getComputedStyle(document.querySelector('.site-footer')).display,
+    filters: getComputedStyle(document.querySelector('.reports-filters')).display,
+    actions: getComputedStyle(document.querySelector('.reports-actions')).display,
+    heading: getComputedStyle(document.querySelector('.reports-print-header')).display,
+    results: getComputedStyle(document.querySelector('.reports-results')).display
+  }))()`, returnByValue: true }, sessionId)).result.value;
+  assert.deepEqual(printStyles, { nav: 'none', footer: 'none', filters: 'none', actions: 'none', heading: 'block', results: 'block' });
+  const printed = await send('Page.printToPDF', { printBackground: false, preferCSSPageSize: true }, sessionId);
+  const pdfBytes = Buffer.from(printed.data, 'base64');
+  await writeFile(path.join(directory, 'report.pdf'), pdfBytes);
+  const pdfTask = getDocument({ data: new Uint8Array(pdfBytes), useSystemFonts: true });
+  const pdf = await pdfTask.promise;
+  assert.ok(pdf.numPages > 1, 'long report prints across multiple A4 pages');
+  const firstPage = await pdf.getPage(1);
+  assert.ok(Math.abs(firstPage.view[2] - 595) < 2 && Math.abs(firstPage.view[3] - 842) < 2,
+    `Class Monitor print page must be A4: ${firstPage.view}`);
+  const printedText = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    printedText.push((await page.getTextContent()).items.map(item => item.str).join(' '));
+  }
+  await pdfTask.destroy();
+  const allPrintedText = printedText.join(' ');
+  assert.match(allPrintedText, /Class Monitor/);
+  assert.match(allPrintedText, /7A/);
+  assert.match(allPrintedText, /2026\/27/);
+  assert.match(allPrintedText, /earlier versions of the layout and pattern are not archived/);
+  assert.match(allPrintedText, /END-OF-LONG-NOTE/);
+  assert.doesNotMatch(allPrintedText, /Navigation excluded from print|Footer excluded from print|Export Excel/);
+  console.log(`${printedText.length} A4 print pages inspected; long-note ending and print-only content passed.`);
+  await send('Emulation.setEmulatedMedia', { media: 'screen' }, sessionId);
   const unmounted = await send('Runtime.evaluate', { expression: 'window.reportsPendingUnmountForTest()', awaitPromise: true, returnByValue: true }, sessionId);
   assert.equal(unmounted.result.value, true, 'Unmount aborts pending report reads and ignores late results');
   console.log('Pending report unmount cancellation passed.');

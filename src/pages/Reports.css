@@ -7,6 +7,9 @@
 .reports-filters :is(input, select) { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
 .reports-class-filter select { min-height: 44px; }
 .reports-date-filter input[type='date'] { min-height: 44px; }
+.reports-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.reports-actions button { min-height: 44px; }
+.reports-print-header { display: none; }
 .reports-error { margin: 0; padding: 12px 14px; border: 1px solid #ba7070; border-radius: 10px; background: #fff1ee; color: #842d2d; overflow-wrap: anywhere; }
 .reports-error p { margin: 0 0 8px; }
 .reports-error p:last-child { margin-bottom: 0; }
@@ -45,4 +48,27 @@
 @media (max-width: 389px) {
   .reports-filters { grid-template-columns: minmax(0, 1fr); }
   .reports-date-filter { grid-template-columns: 44px minmax(0, 1fr); align-items: center; }
+}
+@page class-monitor { size: A4; margin: 14mm; }
+@media print {
+  body:has(.reports-page) > :not(#root) { display: none !important; }
+  .page-shell:has(.reports-page) > :not(.reports-page) { display: none !important; }
+  .reports-page { page: class-monitor; padding: 0; color: #111; }
+  .reports-page .settings-inner { width: auto; max-width: none; padding: 0; }
+  .reports-page .settings-breadcrumb, .reports-page .settings-title, .reports-page .reports-tabs,
+  .reports-page .reports-card > :not(.reports-print-header):not(.reports-results) { display: none !important; }
+  .reports-page .reports-card { display: block; padding: 0; border: 0; border-radius: 0; box-shadow: none; background: none; }
+  .reports-page .reports-print-header { display: block; margin-bottom: 12mm; }
+  .reports-print-header h1 { margin: 0 0 5mm; font-size: 18pt; }
+  .reports-print-header p { margin: 0 0 3mm; font-size: 10pt; line-height: 1.4; }
+  .reports-page .reports-results { display: block; }
+  .reports-page .reports-entry, .reports-page .reports-holiday {
+    margin: 0 0 4mm; border: 1px solid #777; background: white; color: #111;
+    break-inside: avoid-page; page-break-inside: avoid; overflow: visible;
+  }
+  .reports-page .reports-lesson, .reports-page .reports-lesson--past {
+    border: 0; padding: 0; background: white; color: #111; overflow: visible;
+  }
+  .reports-page .reports-lesson :is(.session-class, .session-lesson-title, .session-lesson-notes) { color: #111; }
+  .reports-page .reports-lesson .session-lesson-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
 }

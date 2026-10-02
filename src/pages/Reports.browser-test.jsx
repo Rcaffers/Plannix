@@ -20,6 +20,15 @@ const LONG_TITLE = 'A detailed lesson title covering several concepts and an exc
 const reportClock = () => new Date('2026-11-02T12:00:00Z');
 let setYear, gate, failNext = false, revisionMismatch = false;
 const requests = [];
+window.reportDownloads = [];
+window.reportPrintCalls = 0;
+window.print = () => { window.reportPrintCalls += 1; };
+URL.createObjectURL = blob => { window.reportDownloads.push({ size: blob.size, type: blob.type }); return 'blob:reports-fixture'; };
+URL.revokeObjectURL = () => {};
+HTMLAnchorElement.prototype.click = function () {
+  if (this.download) window.reportDownloads.at(-1).filename = this.download;
+  else throw Error('Unexpected browser navigation in Reports fixture');
+};
 const years = {
   [YEAR_A]: { id: YEAR_A, label: '2026/27', startDate: '2026-09-01', endDate: '2027-08-31', holidays: [
     { label: 'INSET Day', closureType: 'closure', startDate: '2026-09-01', endDate: '2026-09-01' },
@@ -73,7 +82,7 @@ export async function fetchDatedTimetableSessions(scope, { signal }) {
       ] : [] };
 }
 
-const host = document.createElement('div'); document.body.append(host);
+const host = document.createElement('div'); host.id = 'root'; document.body.append(host);
 const router = createMemoryRouter([{ path: '/reports', element: <Reports user={{ id: USER, organisationId: ORGANISATION }} clock={reportClock} /> },
   { path: '/', element: <p>Home</p> }], { initialEntries: ['/reports'] });
 const root = createRoot(host); flushSync(() => root.render(<RouterProvider router={router} />));
@@ -104,7 +113,19 @@ async function run() {
   check(host.querySelector('.reports-tabs button[aria-pressed="true"]')?.textContent === 'Class Monitor'
     && host.querySelector('#report-from').value === '2026-09-01'
     && host.querySelector('#report-to').value === '2027-08-31', 'selected report and year-wide defaults');
+  const exportButton = () => [...host.querySelectorAll('.reports-actions button')].find(node => node.textContent === 'Export Excel');
+  const printButton = () => [...host.querySelectorAll('.reports-actions button')].find(node => node.textContent === 'Print');
+  check(exportButton()?.disabled && printButton()?.disabled, 'export and print require a successfully loaded current report');
   input('#report-class', CLASS_A); await settle();
+  const beforeExportRequests = requests.length;
+  flushSync(() => exportButton().click());
+  flushSync(() => printButton().click());
+  check(!exportButton().disabled && !printButton().disabled
+    && window.reportDownloads.length === 1 && window.reportDownloads[0].size > 0
+    && window.reportDownloads[0].type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    && window.reportDownloads[0].filename === 'class-monitor-7A-2026-09-01-to-2027-08-31.xlsx'
+    && window.reportPrintCalls === 1 && requests.length === beforeExportRequests,
+  'ready report exports XLSX and prints without requesting or writing another dataset');
   check(host.textContent.includes('Lesson not held — INSET Day')
     && host.textContent.includes('School holiday or closure — Half term')
     && host.textContent.includes('Public day') && !host.textContent.includes('Lesson not held — Public day')
@@ -154,6 +175,7 @@ async function run() {
   revisionMismatch = true; input('#report-to', '2026-09-03'); await settle();
   check(host.querySelector('.reports-error button')?.textContent === 'Retry report' && !host.querySelector('.reports-results'),
     'mixed recurring and dated revisions are rejected instead of combined');
+  check(exportButton().disabled && printButton().disabled, 'failed report disables export and print');
   revisionMismatch = false; flushSync(() => host.querySelector('.reports-error button').click()); await settle();
   failNext = true; input('#report-to', '2026-09-04'); await settle();
   check(host.querySelector('.reports-error button')?.textContent === 'Retry report'
@@ -163,6 +185,7 @@ async function run() {
   check(host.querySelector('.reports-results') && !host.querySelector('.reports-error'), 'Retry loads a complete report');
   let release; gate = new Promise(resolve => { release = resolve; });
   input('#report-to', '2026-09-05'); await settle();
+  check(exportButton().disabled && printButton().disabled, 'pending filter scope disables export and print');
   const oldSignal = requests.at(-1).signal;
   gate = null; input('#report-class', CLASS_B); await settle(); release(); await settle();
   check(oldSignal.aborted && !host.textContent.includes('Lesson not held — INSET Day')
@@ -175,13 +198,15 @@ async function run() {
   gate = null; rejectLate(Error('Late private failure')); await settle();
   check(host.querySelector('#report-class').value === '' && host.querySelector('#report-from').value === '2027-09-01'
     && host.querySelector('#report-to').value === '2028-08-31' && !host.querySelector('.reports-results')
-    && !host.querySelector('.reports-error') && lateErrorSignal.aborted,
+    && !host.querySelector('.reports-error') && lateErrorSignal.aborted
+    && exportButton().disabled && printButton().disabled,
   'year change resets class and dates, aborts requests and ignores late errors');
   flushSync(() => setYear(YEAR_LONG)); await settle();
   const beforeOversize = requests.length;
   input('#report-class', CLASS_A); await settle();
   check(host.querySelector('[role="alert"]')?.textContent.includes('shorter From/To range')
-    && !host.querySelector('.reports-results') && requests.length === beforeOversize,
+    && !host.querySelector('.reports-results') && requests.length === beforeOversize
+    && exportButton().disabled && printButton().disabled,
   'oversized selected-year range is visible and sends no timetable requests');
   input('#report-to', '2027-10-31'); await settle();
   check(requests.slice(beforeOversize).filter(item => item.type === 'date').length === 60

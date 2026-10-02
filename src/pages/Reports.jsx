@@ -7,6 +7,7 @@ import { useTimetableSessions } from '../context/TimetableSessionContext.jsx';
 import { fetchDatedTimetableSessions, fetchRecurringTimetableSessions } from '../utils/timetableSessionApi.js';
 import { safeRequestReference } from '../utils/requestReference.js';
 import { buildClassMonitor, isPastClassMonitorRow, londonCalendarToday, reportDateError, reportMondays } from '../utils/classMonitor.js';
+import { buildClassMonitorWorkbook, classMonitorFilename } from '../utils/classMonitorWorkbook.js';
 import '../components/ProjectCard.css';
 import './Settings.css';
 import './Reports.css';
@@ -16,6 +17,7 @@ const dateLabel = ymd => {
   return new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
     .format(new Date(year, month - 1, day, 12));
 };
+const REPORT_LIMITATIONS = 'Read-only lessons from the saved dated timetable. This report uses the current period times and repeating pattern; earlier versions of the layout and pattern are not archived. School records do not yet store whether they are holidays or closures, so unclassified ranges are not counted as missed lessons.';
 
 async function loadDatedWeeks(scope, mondays, signal) {
   const weeks = new Array(mondays.length);
@@ -42,6 +44,7 @@ export default function Reports({ user, clock = systemClock }) {
   const [dates, setDates] = useState({ yearId: null, from: '', to: '' });
   const [retry, setRetry] = useState(0);
   const [result, setResult] = useState({ scope: '', status: 'idle', rows: [], error: null });
+  const [exportError, setExportError] = useState({ scope: '', message: '' });
   const [today, setToday] = useState(() => londonCalendarToday(clock()));
   const generation = useRef(0);
   const yearId = selectedAcademicYearId;
@@ -57,6 +60,8 @@ export default function Reports({ user, clock = systemClock }) {
     ? `${user.id}:${user.organisationId}:${yearId}:${layout.timetableId}:${layout.revision}:${sessions.revision}:${classes.revision}:${classId}:${from}:${to}:${JSON.stringify(academicYear.holidays)}` : '';
   const active = result.scope === scope ? result : { scope, status: scope ? 'loading' : 'idle', rows: [], error: null };
   const selectedClass = savedClasses.find(entry => entry.id === classId);
+  const canUseReport = Boolean(scope && selectedClass && active.status === 'ready' && !dateError
+    && !yearError && !classes.error && !layout.error && !classes.isLoading && !layout.isLoading);
   const patternScope = useMemo(() => ({ organisationId: user?.organisationId, academicYearId: yearId,
     timetableId: layout.timetableId }), [user?.organisationId, yearId, layout.timetableId]);
 
@@ -71,6 +76,7 @@ export default function Reports({ user, clock = systemClock }) {
     setDates({ yearId, from: academicYear?.id === yearId ? academicYear.startDate : '',
       to: academicYear?.id === yearId ? academicYear.endDate : '' });
     setResult({ scope: '', status: 'idle', rows: [], error: null });
+    setExportError({ scope: '', message: '' });
   }, [yearId, academicYear?.startDate, academicYear?.endDate]);
 
   useEffect(() => {
@@ -98,6 +104,25 @@ export default function Reports({ user, clock = systemClock }) {
     return () => { generation.current += 1; controller.abort(); };
   }, [scope, retry]);
 
+  const exportExcel = () => {
+    if (!canUseReport) return;
+    setExportError({ scope: '', message: '' });
+    try {
+      const bytes = buildClassMonitorWorkbook({ rows: active.rows, className: selectedClass.name,
+        academicYear: academicYear.label, from, to, limitations: REPORT_LIMITATIONS });
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = classMonitorFilename(selectedClass.name, from, to);
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch {
+      setExportError({ scope, message: 'Could not create the Excel file. Please try again.' });
+    }
+  };
+
   return <main className="settings-page reports-page"><div className="container settings-inner settings-inner--wide">
     <p className="settings-breadcrumb"><Link to="/">Home</Link><span aria-hidden> / </span>Reports</p>
     <h1 className="settings-title">Reports</h1>
@@ -106,7 +131,7 @@ export default function Reports({ user, clock = systemClock }) {
     </div>
     <div className="settings-timetable-form reports-card">
       <h2 className="settings-section-title">Class Monitor</h2>
-      <p className="settings-hint">Read-only lessons from the saved dated timetable. This report uses the current period times and repeating pattern; earlier versions of the layout and pattern are not archived. School records do not yet store whether they are holidays or closures, so unclassified ranges are not counted as missed lessons.</p>
+      <p className="settings-hint">{REPORT_LIMITATIONS}</p>
       {!yearId ? <p role="status">Select an academic year in <Link to="/settings/academic-year">Settings</Link> to view a report.</p> : null}
       {yearError ? <div className="reports-error" role="alert"><p>{yearError}</p>{yearReference ? <p>Support reference: <code>{yearReference}</code></p> : null}</div> : null}
       {classes.error ? <div className="reports-error" role="alert"><p>{classes.error}</p>{classes.requestReference ? <p>Support reference: <code>{classes.requestReference}</code></p> : null}<button type="button" className="settings-reset" onClick={classes.reload}>Retry classes</button></div> : null}
@@ -131,6 +156,16 @@ export default function Reports({ user, clock = systemClock }) {
       {active.status === 'error' ? <div className="reports-error" role="alert"><p>Could not load Class Monitor. The selected dates and class are unchanged.</p>
         {active.error ? <p>Support reference: <code>{active.error}</code></p> : null}
         <button type="button" className="settings-reset" onClick={() => setRetry(value => value + 1)}>Retry report</button></div> : null}
+      <div className="reports-actions">
+        <button type="button" className="settings-reset" disabled={!canUseReport} onClick={exportExcel}>Export Excel</button>
+        <button type="button" className="settings-reset" disabled={!canUseReport} onClick={() => { if (canUseReport) window.print(); }}>Print</button>
+      </div>
+      {exportError.scope === scope && exportError.message ? <p className="reports-error" role="alert">{exportError.message}</p> : null}
+      {canUseReport ? <div className="reports-print-header"><h1>Class Monitor</h1>
+        <p><strong>Class:</strong> {selectedClass.name} · <strong>Academic year:</strong> {academicYear.label}</p>
+        <p><strong>From:</strong> {dateLabel(from)} · <strong>To:</strong> {dateLabel(to)}</p>
+        <p>{REPORT_LIMITATIONS}</p>
+      </div> : null}
       {active.status === 'ready' ? <section className="reports-results" aria-label={`Class Monitor for ${selectedClass?.name || 'class'}`}>
         {!active.rows.length ? <p>No scheduled lessons or school closures for this class in the selected dates.</p> : null}
         {active.rows.map((row, index) => ['holiday', 'school-unknown'].includes(row.type)
