@@ -1,10 +1,12 @@
 import { GENERATION_MODELS, AI_LIMITS } from '../generationConfig.js';
 import { requestProviderJson } from '../providerTransport.js';
-export function generateOpenAi({ apiKey, systemPrompt, userContent, jsonSchema, schemaName, validate }, transport) {
+export function generateOpenAi({ apiKey, systemPrompt, userContent, jsonSchema, schemaName, validate, image }, transport) {
   return requestProviderJson({ endpoint: 'https://api.openai.com/v1/responses', apiKey, validate,
     headers: { Authorization: `Bearer ${apiKey}` },
     body: { model: GENERATION_MODELS.openai, store: false, max_output_tokens: AI_LIMITS.outputTokens,
-      input: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
+      input: [{ role: 'system', content: systemPrompt }, { role: 'user', content: image
+        ? [{ type: 'input_text', text: userContent }, { type: 'input_image', image_url: `data:${image.mimeType};base64,${Buffer.from(image.data).toString('base64')}` }]
+        : userContent }],
       text: { format: { type: 'json_schema', name: schemaName, schema: jsonSchema, strict: true } } },
     extract: response => {
       if (response.object !== 'response' || response.status !== 'completed' || response.error || response.incomplete_details

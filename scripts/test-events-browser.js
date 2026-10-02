@@ -11,6 +11,7 @@ try {
   await build({ configFile: false, logLevel: 'error', define: { 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
     plugins: [{ name: 'events-test-mocks', enforce: 'pre', resolveId(source, importer) {
       if (importer?.endsWith('/Events.jsx') && ['../context/AcademicYearContext', '../utils/eventApi.js'].includes(source)) return path.resolve('src/pages/Events.browser-test.jsx');
+      if (importer?.endsWith('/ImportPreviewPanel.jsx') && ['../context/AcademicYearContext.jsx', '../utils/aiConnectionApi.js', '../utils/importPreviewApi.js'].includes(source)) return path.resolve('src/pages/Events.browser-test.jsx');
     } }], build: { outDir: directory, emptyOutDir: false, lib: {
       entry: 'src/pages/Events.browser-test.jsx', formats: ['iife'], name: 'EventsTest', fileName: () => 'test.js', cssFileName: 'test',
     } } });
@@ -41,10 +42,17 @@ try {
   const measurements = [];
   for (const width of [320, 375, 390, 430, 768, 820, 1024, 1366]) {
     await send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false }, sessionId);
-    const measured = await send('Runtime.evaluate', { expression: `(()=>{const page=document.querySelector('.events-page');const host=page.parentElement;host.style.width='';host.style.removeProperty('--container');host.querySelector('.classes-subnav').style.display='';return {viewport:innerWidth,scroll:document.documentElement.scrollWidth,nav:getComputedStyle(host.querySelector('.classes-subnav')).display}})()`, returnByValue: true }, sessionId);
+    const measured = await send('Runtime.evaluate', { expression: `(()=>{const page=document.querySelector('.events-page');const host=page.parentElement;host.style.width='';host.style.removeProperty('--container');host.querySelector('.classes-subnav').style.display='';const rect=node=>{const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom}};const card=page.querySelector('.events-settings-card');const sections=[...card.querySelectorAll(':scope > .events-card-section')].map(node=>({...rect(node),divider:getComputedStyle(node).borderTopWidth}));return {viewport:innerWidth,scroll:document.documentElement.scrollWidth,nav:getComputedStyle(host.querySelector('.classes-subnav')).display,card:rect(card),sections,nestedCards:card.querySelectorAll('.settings-timetable-form').length}})()`, returnByValue: true }, sessionId);
     assert.ok(measured.result?.value, JSON.stringify(measured.exceptionDetails || measured));
     measurements.push(measured.result.value);
     assert.ok(measured.result.value.scroll <= width + 1, `${width}px viewport overflows to ${measured.result.value.scroll}px`);
+    const { card, sections, nestedCards } = measured.result.value;
+    assert.ok(card.left >= -1 && card.right <= width + 1, `${width}px outer card fits viewport`);
+    assert.equal(nestedCards, 0, `${width}px has no nested settings cards`);
+    assert.equal(sections.length, 3, `${width}px renders display, Events and AI sections inside one card`);
+    assert.ok(sections.every(section => section.left >= card.left && section.right <= card.right), `${width}px sections fit the card`);
+    assert.ok(sections.slice(1).every((section, index) => section.top >= sections[index].bottom + 12 && section.divider === '1px'),
+      `${width}px sections retain spacing and subtle dividers`);
   }
   console.log(JSON.stringify(measurements));
   await send('Emulation.setDeviceMetricsOverride', { width: 430, height: 900, deviceScaleFactor: 1, mobile: false }, sessionId);
@@ -68,6 +76,10 @@ try {
     const detail = await send('Runtime.evaluate', { expression: `({title:document.querySelector('#event-title')?.value,date:document.querySelector('#event-date')?.value,error:document.querySelector('.events-error')?.textContent})`, returnByValue: true }, sessionId);
     throw Error(`Native Save failed: ${JSON.stringify(detail.result.value)}`);
   }
+  await send('Runtime.evaluate', { expression: `document.querySelector('#events-list-toggle').focus()` }, sessionId);
+  await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
+  const expanded = await send('Runtime.evaluate', { expression: `document.querySelector('#events-list-toggle').getAttribute('aria-expanded')==='true' && !document.querySelector('#events-list-panel').hidden`, returnByValue: true }, sessionId);
+  assert.equal(expanded.result.value, true, 'Native Enter expands saved Events list');
   await send('Runtime.evaluate', { expression: `([...document.querySelectorAll('button')].find(button=>button.textContent==='Edit Keyboard event')).focus()` }, sessionId);
   await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
   const edited = await send('Runtime.evaluate', { expression: `new Promise(resolve=>requestAnimationFrame(()=>resolve(document.activeElement.id==='event-title')))`, awaitPromise: true, returnByValue: true }, sessionId);

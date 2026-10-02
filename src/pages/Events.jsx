@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useBlocker } from 'react-router-dom';
 import SettingsSubnav from '../components/SettingsSubnav';
+import ImportPreviewPanel from '../components/ImportPreviewPanel.jsx';
 import { useAcademicYear } from '../context/AcademicYearContext';
 import { eventApi } from '../utils/eventApi.js';
 import { safeRequestReference } from '../utils/requestReference.js';
@@ -21,6 +22,7 @@ export default function Events({ userId }) {
     error: yearError, requestReference: yearReference, registerAcademicYearChangeGuard } = useAcademicYear();
   const [events, setEvents] = useState([]);
   const [listStatus, setListStatus] = useState('idle');
+  const [listExpanded, setListExpanded] = useState(false);
   const [pending, setPending] = useState(false);
   const [destructiveReloading, setDestructiveReloading] = useState(false);
   const [editor, setEditor] = useState(null);
@@ -49,6 +51,8 @@ export default function Events({ userId }) {
   const dirty = Boolean(editor && JSON.stringify(editor.draft) !== JSON.stringify(editor.baseline));
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  const previewDirtyRef = useRef(false);
+  const onPreviewDirtyChange = useCallback(value => { previewDirtyRef.current = value; }, []);
   const ready = Boolean(selectedAcademicYearId && academicYear?.id === selectedAcademicYearId
     && academicYear.startDate && academicYear.endDate && !yearLoading);
   const loading = listStatus === 'loading';
@@ -58,10 +62,10 @@ export default function Events({ userId }) {
     else headingRef.current?.focus();
   });
 
-  const approveLeave = useCallback(() => !pendingRef.current && !destructiveReloadRef.current && (!dirtyRef.current
+  const approveLeave = useCallback(() => !pendingRef.current && !destructiveReloadRef.current && (!(dirtyRef.current || previewDirtyRef.current)
     || window.confirm('Discard unsaved event changes?')), []);
   const blocker = useBlocker(({ currentLocation, nextLocation }) =>
-    (pendingRef.current || destructiveReloadRef.current || dirtyRef.current)
+    (pendingRef.current || destructiveReloadRef.current || dirtyRef.current || previewDirtyRef.current)
     && (currentLocation.pathname !== nextLocation.pathname
       || currentLocation.search !== nextLocation.search || currentLocation.hash !== nextLocation.hash));
   useEffect(() => {
@@ -71,7 +75,7 @@ export default function Events({ userId }) {
   }, [blocker.state, approveLeave]);
   useEffect(() => registerAcademicYearChangeGuard(approveLeave), [approveLeave, registerAcademicYearChangeGuard]);
   useEffect(() => {
-    const warn = event => { if (dirtyRef.current || pendingRef.current || destructiveReloadRef.current) { event.preventDefault(); event.returnValue = ''; } };
+    const warn = event => { if (dirtyRef.current || previewDirtyRef.current || pendingRef.current || destructiveReloadRef.current) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', warn);
     window.__plannixConfirmEventDiscard = approveLeave;
     return () => {
@@ -128,7 +132,7 @@ export default function Events({ userId }) {
     destructiveReloadGeneration.current += 1;
     destructiveReloadRef.current = false; setDestructiveReloading(false);
     draftVersion.current += 1;
-    setEvents([]); setListStatus('idle'); setEditor(null); setConflict(false); setRecovery(null); setError(null); setNotice(''); setAnnouncement('');
+    setEvents([]); setListStatus('idle'); setListExpanded(false); setEditor(null); setConflict(false); setRecovery(null); setError(null); setNotice(''); setAnnouncement('');
     if (ready) void load();
     return () => {
       scopeRef.current = '';
@@ -141,7 +145,8 @@ export default function Events({ userId }) {
   }, [scopeKey, ready, load]);
 
   function openEditor(event = null) {
-    if (pendingRef.current || destructiveReloadRef.current || !listReady || conflict || recovery || (editor && !approveLeave())) return;
+    if (pendingRef.current || destructiveReloadRef.current || !listReady || conflict || recovery
+      || (editor && dirtyRef.current && !window.confirm('Discard unsaved event changes?'))) return;
     setError(null); setNotice(''); setConflict(false);
     const draft = event ? draftFromEvent(event) : blankEventDraft();
     draftVersion.current += 1;
@@ -288,13 +293,19 @@ export default function Events({ userId }) {
     <h1 className="settings-title">Events</h1>
     <SettingsSubnav />
     <p className="settings-lead">Plan personal, single-day events for an academic year. Events do not close teaching slots.</p>
-    <div className="events-weekend-setting"><label className="events-weekend-preference"><input type="checkbox" role="switch"
+    <div className="settings-timetable-form events-settings-card">
+    <section className="events-card-section events-display-section" aria-labelledby="events-display-heading">
+      <h2 id="events-display-heading" className="settings-section-title">Timetable display</h2>
+      <div className="events-weekend-setting"><label className="events-weekend-preference"><input type="checkbox" role="switch"
       checked={showWeekendEvents} onChange={event => setPreferenceError(setShowWeekendEvents(event.target.checked)
         ? '' : 'Could not save this display preference in this browser.')} />
       Show weekend events in timetable</label>
       <p>Saved for your account on this browser.</p>
       {preferenceError ? <p className="events-error" role="alert">{preferenceError}</p> : null}
-    </div>
+      </div>
+    </section>
+    <section className="events-card-section events-list-section" aria-labelledby="events-list-heading">
+    <h2 id="events-list-heading" ref={headingRef} tabIndex={-1} className="settings-section-title">Events</h2>
     {!selectedAcademicYearId ? <p className="events-notice">No academic year is selected. <Link to="/settings/academic-year">Choose or create an academic year</Link> first.</p> : null}
     {selectedAcademicYearId && !yearLoading ? <section aria-label="Selected academic year" className="events-year">
       <strong>{academicYear.label}</strong><span>{academicYear.startDate || 'Start date not set'} – {academicYear.endDate || 'End date not set'}</span>
@@ -327,9 +338,16 @@ export default function Events({ userId }) {
     </div> : null}
     {notice ? <p className="events-notice" ref={noticeRef} tabIndex={-1}>{notice}</p> : null}
     {ready ? <>
-      <div className="events-list-heading"><h2 ref={headingRef} tabIndex={-1}>Events</h2><p>{listReady ? `${events.length} of ${MAX_PERSONAL_EVENTS} events` : 'Event count unavailable'}</p></div>
+      <div className="events-list-heading"><p>{listReady ? `${events.length} of ${MAX_PERSONAL_EVENTS} events` : 'Event count unavailable'}</p>
+        {listReady ? <button id="events-list-toggle" type="button" className="settings-reset"
+          aria-expanded={listExpanded} aria-controls="events-list-panel"
+          aria-label={`${listExpanded ? 'Hide' : 'Show'} events (${events.length})`}
+          onClick={() => setListExpanded(value => !value)}>
+          {listExpanded ? 'Hide events' : `Show events (${events.length})`}
+        </button> : null}</div>
       <button ref={addRef} type="button" className="add-row-button" onClick={() => openEditor()} disabled={pending || destructiveReloading || !listReady || conflict || recovery || !canAddEvent(events)}>Add event</button>
-      {listReady && !events.length && !error ? <p className="events-notice">No events yet. Add an event for this academic year.</p> : null}
+      {listReady ? <div id="events-list-panel" hidden={!listExpanded} aria-labelledby="events-list-toggle">
+      {!events.length && !error ? <p className="events-notice">No events yet. Add an event for this academic year.</p> : null}
       {events.length ? <ul className="events-list" aria-label="Events in selected academic year">{events.map(item =>
         <li className="events-item" key={item.id}>
           <div className="events-item-copy"><strong>{item.title}</strong><span>{item.date} · {item.startTime === null ? 'All day' : `${item.startTime}–${item.endTime}`}</span>
@@ -338,8 +356,9 @@ export default function Events({ userId }) {
             <button type="button" className="settings-reset events-delete" onClick={() => remove(item)} disabled={pending || destructiveReloading || !listReady || conflict || recovery}>Delete {item.title}</button></div>
         </li>)}
       </ul> : null}
-      {editor ? <form className="settings-timetable-form events-form" onSubmit={save} noValidate aria-labelledby="events-form-heading">
-        <h2 id="events-form-heading" className="settings-section-title">{editor.id ? 'Edit event' : 'Add event'}</h2>
+      </div> : null}
+      {editor ? <form className="events-form" onSubmit={save} noValidate aria-labelledby="events-form-heading">
+        <h3 id="events-form-heading" className="settings-section-title">{editor.id ? 'Edit event' : 'Add event'}</h3>
         <div className="settings-field"><label htmlFor="event-title">Title</label><input id="event-title" ref={titleRef} type="text" value={editor.draft.title} maxLength={200} onChange={e => patch('title', e.target.value)} disabled={pending || destructiveReloading} required /></div>
         <div className="settings-field"><label htmlFor="event-date">Date</label><input id="event-date" type="date" min={academicYear.startDate} max={academicYear.endDate} value={editor.draft.date} onChange={e => patch('date', e.target.value)} disabled={pending || destructiveReloading} required /></div>
         <label className="events-check"><input type="checkbox" checked={editor.draft.allDay} onChange={e => patch('allDay', e.target.checked)} disabled={pending || destructiveReloading} />All day</label>
@@ -351,5 +370,12 @@ export default function Events({ userId }) {
           <button type="submit" className="settings-save" disabled={pending || destructiveReloading || conflict || recovery || !listReady}>Save event</button></div>
       </form> : null}
     </> : null}
+    </section>
+    {ready ? <section className="events-card-section events-import-section" aria-labelledby="events-import-heading">
+      <h2 id="events-import-heading" className="settings-section-title">Import from a calendar</h2>
+      <ImportPreviewPanel userId={userId} destination="events" existing={events} recordsReady={listReady}
+        disabled={pending || destructiveReloading} onDirtyChange={onPreviewDirtyChange} />
+    </section> : null}
+    </div>
   </div></main>;
 }

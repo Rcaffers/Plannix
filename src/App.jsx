@@ -98,6 +98,8 @@ export default function App() {
     if (window.__plannixConfirmClassDiscard?.() === false) return;
     if (window.__plannixConfirmLayoutDiscard?.() === false) return;
     if (window.__plannixConfirmEventDiscard?.() === false) return;
+    if (window.__plannixConfirmAcademicYearDiscard?.() === false) return;
+    if (window.__plannixConfirmImportPreviewDiscard?.() === false) return;
     try {
       await authController.logout();
     } catch {
@@ -214,7 +216,7 @@ export default function App() {
                 />,
               )}
             />
-            <Route path="/settings/academic-year" element={privateRoute(<AcademicYear />)} />
+            <Route path="/settings/academic-year" element={privateRoute(<AcademicYear userId={user?.id} />)} />
             <Route path="/settings/events" element={privateRoute(<Events userId={user?.id} />)} />
             <Route path="/classes" element={privateRoute(<Classes />)} />
             <Route path="/classes/input" element={privateRoute(<Classes />)} />

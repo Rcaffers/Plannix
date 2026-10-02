@@ -1,9 +1,11 @@
 import { GENERATION_MODELS, AI_LIMITS } from '../generationConfig.js';
 import { requestProviderJson } from '../providerTransport.js';
-export function generateGemini({ apiKey, systemPrompt, userContent, jsonSchema, validate }, transport) {
+export function generateGemini({ apiKey, systemPrompt, userContent, jsonSchema, validate, image }, transport) {
   return requestProviderJson({ endpoint: 'https://generativelanguage.googleapis.com/v1beta/interactions', apiKey, validate,
     headers: { 'x-goog-api-key': apiKey },
-    body: { model: GENERATION_MODELS.google_gemini, input: userContent,
+    body: { model: GENERATION_MODELS.google_gemini, input: image
+      ? [{ type: 'text', text: userContent }, { type: 'image', mime_type: image.mimeType, data: Buffer.from(image.data).toString('base64') }]
+      : userContent,
       system_instruction: systemPrompt, store: false, stream: false,
       generation_config: { max_output_tokens: AI_LIMITS.outputTokens, thinking_summaries: 'none' },
       response_format: { type: 'text', mime_type: 'application/json', schema: jsonSchema } },

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import SchoolHolidayAiImport from '../components/SchoolHolidayAiImport';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useBlocker } from 'react-router-dom';
+import ImportPreviewPanel from '../components/ImportPreviewPanel.jsx';
+import SchoolHolidayAiImport from '../components/SchoolHolidayAiImport.jsx';
 import { suggestionError } from '../utils/holidayReview.js';
 import SettingsSubnav from '../components/SettingsSubnav';
 import { useAcademicYear } from '../context/AcademicYearContext';
@@ -12,7 +13,7 @@ import {
 } from '../utils/api';
 import './Settings.css';
 
-export default function AcademicYear() {
+export default function AcademicYear({ userId }) {
   const {
     academicYears, selectedAcademicYearId, academicYear, isLoading, isSaving, error, requestReference,
     selectAcademicYear, createAcademicYear, saveAcademicYear,
@@ -34,6 +35,7 @@ export default function AcademicYear() {
   const [focusHoliday, setFocusHoliday] = useState(null);
   const saveErrorRef = useRef(null);
   const latestDraft = useRef(draft);
+  const previewDirtyRef = useRef(false);
   latestDraft.current = draft;
   const importScope = useRef(0);
   const importController = useRef(null);
@@ -83,6 +85,23 @@ export default function AcademicYear() {
   }, []);
 
   const hasUnsavedChanges = JSON.stringify(normalizeAcademicYear(draft)) !== JSON.stringify(academicYear);
+  const draftDirtyRef = useRef(hasUnsavedChanges);
+  draftDirtyRef.current = hasUnsavedChanges;
+  const approveDiscard = useCallback(() => !(draftDirtyRef.current || previewDirtyRef.current)
+    || window.confirm('Discard unsaved academic-year changes or import preview?'), []);
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    (draftDirtyRef.current || previewDirtyRef.current) && (currentLocation.pathname !== nextLocation.pathname
+      || currentLocation.search !== nextLocation.search || currentLocation.hash !== nextLocation.hash));
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    if (approveDiscard()) blocker.proceed(); else blocker.reset();
+  }, [blocker.state, approveDiscard]);
+  useEffect(() => {
+    const warn = event => { if (draftDirtyRef.current || previewDirtyRef.current) { event.preventDefault(); event.returnValue = ''; } };
+    window.addEventListener('beforeunload', warn);
+    window.__plannixConfirmAcademicYearDiscard = approveDiscard;
+    return () => { window.removeEventListener('beforeunload', warn); delete window.__plannixConfirmAcademicYearDiscard; };
+  }, [approveDiscard]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -104,10 +123,6 @@ export default function AcademicYear() {
       setExpanded({ school: true, public: true });
       requestAnimationFrame(() => saveErrorRef.current?.focus());
     }
-  }
-
-  function approveDiscard() {
-    return !hasUnsavedChanges || window.confirm('Discard unsaved academic-year changes?');
   }
 
   async function handleYearChange(event) {
@@ -135,7 +150,7 @@ export default function AcademicYear() {
   }
 
   function acceptAiDraft(next) {
-    const added = next.holidays.find(h => !draft.holidays.some(existing => existing.id === h.id));
+    const added = next.holidays.find(holiday => !draft.holidays.some(existing => existing.id === holiday.id));
     setDraft(next);
     if (added) revealHoliday(added);
   }
@@ -440,7 +455,7 @@ export default function AcademicYear() {
             <h2 id="school-holidays-heading" className="settings-section-title settings-section-title--sub">School holidays and closures</h2>
             <p className="settings-hint settings-hint--tight">
               Each holiday has a name and an inclusive date range. Overlapping ranges are allowed; the first matching entry
-              in the list is used. Include INSET, training and other non-pupil days as well as holidays. Manual entries and reviewed AI suggestions are saved together.
+              in the list is used. Include INSET, training and other non-pupil days as well as holidays. Add reviewed AI suggestions to the draft, then save the academic year. The separate document preview does not change the draft.
             </p>
 
             {holidayPanel('school')}
@@ -451,7 +466,11 @@ export default function AcademicYear() {
               </button>
             </div>
 
-            <SchoolHolidayAiImport key={`${selectedAcademicYearId || 'new'}-${reviewScope}`} draft={draft} onDraftChange={acceptAiDraft} disabled={isLoading || isSaving} />
+            <SchoolHolidayAiImport key={`review-${selectedAcademicYearId || 'new'}-${reviewScope}`} draft={draft} yearLabel={academicYear?.label}
+              onDraftChange={acceptAiDraft} disabled={isLoading || isSaving} />
+            <ImportPreviewPanel key={`preview-${selectedAcademicYearId || 'new'}-${reviewScope}`} userId={userId} destination="holidays"
+              existing={draft.holidays} disabled={isLoading || isSaving}
+              onDirtyChange={value => { previewDirtyRef.current = value; }} />
           </section>
           <section className="academic-holiday-section" aria-labelledby="public-holidays-heading">
             <h2 id="public-holidays-heading" className="settings-section-title">Public holidays</h2>

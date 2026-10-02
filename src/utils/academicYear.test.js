@@ -52,7 +52,7 @@ test('context and UI include stale-response, explicit-save, switching and cleanu
   assert.match(context, /saving\.current/);
   assert.match(context, /await loadYear\(result\.academicYearId/);
   assert.doesNotMatch(context, /catch\(\(\) => \{\}\)/);
-  assert.match(page, /window\.confirm\('Discard unsaved academic-year changes\?'\)/);
+  assert.match(page, /window\.confirm\('Discard unsaved academic-year changes or import preview\?'\)/);
   assert.match(page, /disabled=\{isSaving \|\| isLoading\}/);
   assert.match(page, /academic-year-end/);
   assert.match(page, /Create academic year/);

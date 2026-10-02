@@ -64,6 +64,26 @@ function harness(provider, fetchResponse = () => jsonResponse(envelope(provider)
   });
   return { run, lookups, requests };
 }
+for (const provider of AI_PROVIDERS.map(item => item.id)) test(`${provider}: bounded inline image uses documented provider contract`, async () => {
+  const h = harness(provider);
+  const image = { mimeType: 'image/png', data: Buffer.from('synthetic-image-fixture') };
+  assert.deepEqual(await h.run({ ...input, image }), expected);
+  const body = JSON.parse(h.requests[0].options.body);
+  if (provider === 'openai') {
+    assert.equal(body.input[1].content[0].type, 'input_text');
+    assert.equal(body.input[1].content[1].type, 'input_image');
+    assert.match(body.input[1].content[1].image_url, /^data:image\/png;base64,/);
+  } else if (provider === 'anthropic') {
+    assert.equal(body.messages[0].content[1].type, 'image');
+    assert.equal(body.messages[0].content[1].source.media_type, 'image/png');
+    assert.equal(body.messages[0].content[1].source.type, 'base64');
+  } else {
+    assert.equal(body.input[1].type, 'image');
+    assert.equal(body.input[1].mime_type, 'image/png');
+  }
+  assert.equal(h.lookups.length, 1);
+  await safeFailure(h.run, 'AI_CONFIGURATION_ERROR', false, { ...input, image: { mimeType: 'image/svg+xml', data: image.data } });
+});
 async function safeFailure(run, code, retryable, value = input) {
   const logs = []; const originals = {};
   for (const method of ['log','info','warn','error','debug']) { originals[method] = console[method]; console[method] = (...args) => logs.push(args); }
@@ -182,7 +202,7 @@ test('schemas are not cached across calls', async () => {
   const h = harness('openai'); assert.deepEqual(await h.run(input), expected);
   await safeFailure(h.run, 'AI_INVALID_RESPONSE', false, { ...input, jsonSchema: { ...input.jsonSchema, properties: { count: { type: 'string' } } } });
 });
-test('browser and shared sources do not import server AI code; only authenticated holiday extraction imports generation', async () => {
+test('browser and shared sources do not import server AI code; only authenticated extraction routes import generation', async () => {
   async function files(dir) {
     const entries = await readdir(dir, { withFileTypes: true });
     return (await Promise.all(entries.map(e => e.isDirectory() ? files(path.join(dir,e.name)) : path.join(dir,e.name)))).flat();
@@ -193,8 +213,8 @@ test('browser and shared sources do not import server AI code; only authenticate
   }
   for (const file of ['server/app.js', ...await files('server/routes')].filter(file => file.endsWith('.js') && !file.endsWith('.test.js'))) {
     const source = await readFile(file, 'utf8');
-    if (file === 'server/routes/ai-holiday-extraction-routes.js') {
-      assert.match(source, /app.post\('\/api\/ai\/holidays\/extract', requireAuth/);
+    if (['server/routes/ai-holiday-extraction-routes.js', 'server/routes/ai-import-preview-routes.js'].includes(file)) {
+      assert.match(source, /app.post\('\/api\/ai\/(?:holidays|import-preview)\/extract', requireAuth/);
       assert.doesNotMatch(source, /ai\/(?:credential|adapters)/);
     } else assert.doesNotMatch(source, /(?:generateStructuredJson|ai\/credential|ai\/adapters)/, file);
   }

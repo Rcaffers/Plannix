@@ -18,6 +18,9 @@ try {
       if (importer?.endsWith('/Events.jsx') && ['../context/AcademicYearContext', '../utils/eventApi.js'].includes(source)) {
         return path.resolve('src/pages/Events.history-browser-test.jsx');
       }
+      if (importer?.endsWith('/ImportPreviewPanel.jsx') && ['../context/AcademicYearContext.jsx', '../utils/aiConnectionApi.js', '../utils/importPreviewApi.js'].includes(source)) {
+        return path.resolve('src/pages/Events.history-browser-test.jsx');
+      }
       return null;
     } }], build: { outDir: directory, emptyOutDir: false, lib: {
       entry: 'src/pages/Events.history-browser-test.jsx', formats: ['iife'], name: 'EventsHistoryTest',

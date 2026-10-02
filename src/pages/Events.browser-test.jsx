@@ -5,13 +5,18 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import Events from './Events.jsx';
 import '../styles/base.css';
 import '../styles/accessibility.css';
+export { importSourceError } from '../utils/importPreviewApi.js';
+export const aiConnectionApi = { load: async () => ({ active: true, providerLabel: 'OpenAI' }) };
+export const extractImportPreview = async () => ({ destination: 'events', entries: [] });
 
 const YEAR_A = '10000000-0000-4000-8000-000000000001';
 const YEAR_B = '10000000-0000-4000-8000-000000000002';
 const USER_A = '30000000-0000-4000-8000-000000000001';
 let nextEventNumber = 1;
 let guard = () => true;
-let yearSetter;
+let selectedYear = YEAR_A;
+const yearListeners = new Set();
+const yearSetter = value => { selectedYear = value; for (const listener of yearListeners) listener(value); };
 const records = new Map([[YEAR_A, []], [YEAR_B, []]]);
 const calls = [];
 let nextFailure = null;
@@ -21,8 +26,8 @@ let mutationGate = null;
 let missingBoundary = false;
 const register = fn => { guard = fn; return () => { guard = () => true; }; };
 export function useAcademicYear() {
-  const [id, setId] = useState(YEAR_A);
-  yearSetter = setId;
+  const [id, setId] = useState(selectedYear);
+  React.useEffect(() => { yearListeners.add(setId); return () => yearListeners.delete(setId); }, []);
   return { academicYears: [{ id: YEAR_A }, { id: YEAR_B }], selectedAcademicYearId: id,
     academicYear: { id, label: id === YEAR_A ? '2026/27' : '2027/28',
       startDate: missingBoundary && id === YEAR_A ? '' : id === YEAR_A ? '2026-09-01' : '2027-09-01',
@@ -64,7 +69,11 @@ const settle = async () => { await tick(); await tick(); await tick(); };
 const check = (condition, label) => { if (!condition) throw Error(label); results.push(label); };
 const results = [];
 const button = label => [...host.querySelectorAll('button')].find(el => el.textContent === label);
-function click(label) { const target = button(label); if (!target) throw Error(`Missing button: ${label}`); flushSync(() => target.click()); }
+function click(label) { const target = button(label); if (!target) throw Error(`Missing button: ${label}`);
+  if (target.closest('[hidden]')) { const toggle = host.querySelector('#events-list-toggle');
+    if (!toggle || toggle.getAttribute('aria-expanded') !== 'false') throw Error(`Hidden button: ${label}`);
+    flushSync(() => toggle.click()); }
+  flushSync(() => target.click()); }
 function input(id, value) {
   const node = host.querySelector(id);
   flushSync(() => { const proto = node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -82,6 +91,18 @@ window.eventsStartRecoveryForUnmount = async () => {
 };
 async function run() {
   await settle();
+  const cards = [...host.querySelectorAll('.events-page .settings-timetable-form')];
+  const sections = [...host.querySelectorAll('.events-settings-card > .events-card-section')];
+  check(cards.length === 1 && sections.length === 3
+    && sections[0].contains(host.querySelector('.events-weekend-setting'))
+    && sections[1].contains(host.querySelector('.events-list-heading'))
+    && sections[2].contains(host.querySelector('.import-preview-panel')),
+  'display preference, event list and AI preview share one settings card');
+  check(getComputedStyle(cards[0]).backgroundImage.includes('gradient')
+    && sections.slice(1).every(section => getComputedStyle(section).borderTopWidth === '1px')
+    && !cards[0].querySelector('.settings-timetable-form')
+    && getComputedStyle(sections[2].querySelector('.import-preview-controls')).borderTopWidth === '0px',
+  'shared card keeps the settings tint and subtle section dividers without nested cards');
   const weekendSwitch = host.querySelector('input[role="switch"]');
   check(weekendSwitch?.checked && weekendSwitch.closest('label').textContent.includes('Show weekend events in timetable'),
     'Weekend event display switch is labelled and enabled by default');
@@ -100,7 +121,13 @@ async function run() {
   check(!weekendSwitch.checked && !host.querySelector('.events-weekend-setting [role="alert"]'),
     'Successful preference retry clears the storage error');
   flushSync(() => weekendSwitch.click()); await settle();
-  check(host.textContent.includes('No events yet'), 'visible empty state');
+  check(button('Show events (0)')?.getAttribute('aria-expanded') === 'false'
+    && button('Show events (0)').getAttribute('aria-controls') === 'events-list-panel'
+    && host.querySelector('#events-list-panel')?.hidden, 'loaded Events list starts collapsed with an accessible count');
+  click('Show events (0)');
+  check(!host.querySelector('#events-list-panel').hidden && host.textContent.includes('No events yet'), 'expanding reveals the empty state');
+  click('Hide events');
+  check(host.querySelector('#events-list-panel').hidden, 'collapsing leaves event data and editor controls available');
   check(host.querySelector('.visually-hidden[aria-live]') !== null, 'routine status hidden and accessible');
   check(getComputedStyle(host.querySelector('.visually-hidden[aria-live]')).position === 'absolute'
     && host.querySelector('.visually-hidden[aria-live]').getBoundingClientRect().height <= 1, 'routine status occupies no layout strip');
@@ -108,12 +135,22 @@ async function run() {
     'only one event-list progress announcement exists');
   click('Add event'); await new Promise(resolve => requestAnimationFrame(resolve));
   check(document.activeElement.id === 'event-title', 'add focuses title');
+  check(host.querySelector('.events-list-section > .events-form') && !host.querySelector('.events-form.settings-timetable-form'),
+    'manual editor stays inside the Events card without a nested card');
   input('#event-title', 'Assembly'); input('#event-date', '2026-10-01'); submit(); await settle();
   check(calls.filter(x => x.action === 'create').length === 1, 'one all-day create');
   check(calls.find(x => x.action === 'create').event.startTime === null, 'all-day request has no times');
   check(host.textContent.includes('1 of 500 events'), 'canonical response updates count');
+  check(button('Show events (1)') && host.querySelector('#events-list-panel').hidden, 'new saved event remains hidden until Show events is chosen');
+  click('Show events (1)');
+  check(!host.querySelector('#events-list-panel').hidden && button('Edit Assembly'), 'expanded list exposes saved event actions');
   click('Edit Assembly');
   check(host.querySelector('#event-title').value === 'Assembly', 'edit loads record');
+  click('Hide events');
+  check(host.querySelector('#events-list-panel').hidden && host.querySelector('#event-title').value === 'Assembly'
+    && host.querySelector('.events-weekend-setting') && host.querySelector('.import-preview-panel'),
+  'collapsing saved rows leaves the open editor, weekend preference and AI preview available');
+  click('Show events (1)');
   input('#event-title', 'Unsaved switch draft');
   const callsBeforePreferenceChange = calls.length;
   flushSync(() => weekendSwitch.click()); await settle();
@@ -209,6 +246,7 @@ async function run() {
   check(guard() === true, 'academic-year guard permits confirmed discard');
   flushSync(() => yearSetter(YEAR_B)); await settle();
   check(host.textContent.includes('2027/28') && !host.querySelector('.events-form'), 'year scope resets editor');
+  check(host.querySelector('#events-list-toggle')?.getAttribute('aria-expanded') === 'false', 'year change resets Events list visibility');
   records.set(YEAR_B, Array.from({ length: 500 }, (_, index) => ({ id: `cap-${index}`, academicYearId: YEAR_B,
     title: `Event ${index}`, date: '2027-10-01', startTime: null, endTime: null, location: null, notes: null, revision: 1 })));
   flushSync(() => yearSetter(YEAR_A)); await settle(); flushSync(() => yearSetter(YEAR_B)); await settle();
@@ -222,6 +260,7 @@ async function run() {
   flushSync(() => yearSetter(YEAR_B)); await settle();
   check(oldSignal.aborted, 'year switch aborts previous list request');
   check(button('Add event').disabled && host.textContent.includes('Event count unavailable'), 'new year is not ready before complete list response');
+  check(!host.querySelector('#events-list-toggle') && !host.querySelector('#events-list-panel'), 'pending list has no misleading count or toggle');
   check([...host.querySelectorAll('[role="status"]')].filter(node => node.textContent.includes('Loading events')).length === 1,
     'pending list has one loading announcement');
   listGate = null; releaseList(); await settle();
@@ -293,6 +332,7 @@ async function run() {
   flushSync(() => yearSetter(YEAR_A)); await settle();
   check(host.querySelector('.events-error')?.textContent.includes('Support reference:') && button('Retry'), 'load error and support reference remain visible');
   check(button('Add event').disabled && !host.textContent.includes('0 of 500 events') && !host.textContent.includes('No events yet'), 'failed list blocks creation and does not claim zero events');
+  check(!host.querySelector('#events-list-toggle') && !host.querySelector('#events-list-panel'), 'failed list has no event count or collapsed result');
   click('Retry'); await settle();
   check(!host.querySelector('.events-error') && host.textContent.includes('1 of 500 events') && !button('Add event').disabled, 'list retry restores complete canonical count and creation');
   flushSync(() => yearSetter(YEAR_B)); await settle();
@@ -364,6 +404,18 @@ async function run() {
   check(host.textContent.includes('2026/27') && !host.textContent.includes('Stale recovery draft') && !button('Retry create'),
     'late recovery result cannot update a different year');
   flushSync(() => yearSetter(YEAR_B)); await settle();
+  input('#import-preview-text-events', 'Synthetic calendar entry'); click('Extract preview'); await settle();
+  check(Boolean(host.querySelector('.import-preview-results')) && !host.querySelector('[name="import-destination"]'),
+    'Events AI extraction stays in Events as an unsaved preview without destination selection');
+  check(host.querySelector('.import-preview-year')?.textContent.trim() === 'Academic year: 2027/28',
+    'Events AI section shows only the selected academic-year label');
+  let previewPrompts = 0; window.confirm = () => { previewPrompts++; return false; };
+  await router.navigate('/settings'); await settle();
+  check(router.state.location.pathname === '/settings/events' && previewPrompts === 1,
+    'Events route blocker protects preview edits with one prompt');
+  window.confirm = () => true; click('Discard preview'); await settle();
+  check(!host.querySelector('.import-preview-results') && Boolean(button('Add event')),
+    'discarding import preview leaves manual event creation intact');
   document.body.dataset.testResult = 'passed';
   document.body.append(Object.assign(document.createElement('pre'), { textContent: `${results.length} Events browser assertions passed` }));
 }

@@ -7,7 +7,7 @@ import { boundaryError, MAX_HOLIDAY_TEXT_BYTES, mergeReviewedHolidays, suggestio
 import { safeRequestReference } from '../utils/requestReference.js';
 import './SchoolHolidayAiImport.css';
 
-export default function SchoolHolidayAiImport({ draft, onDraftChange, disabled = false }) {
+export default function SchoolHolidayAiImport({ draft, yearLabel, onDraftChange, disabled = false }) {
   const [connection, setConnection] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connectionError, setConnectionError] = useState(null);
@@ -88,6 +88,7 @@ export default function SchoolHolidayAiImport({ draft, onDraftChange, disabled =
   const reference = safeRequestReference(error);
   return <section className="school-holiday-ai" aria-labelledby="school-holiday-ai-heading">
     <h3 id="school-holiday-ai-heading">Import school holidays and closures with AI</h3>
+    {yearLabel ? <p className="settings-hint">Academic year: <strong>{yearLabel}</strong></p> : null}
     {loading ? <p role="status" className="visually-hidden">Loading AI connection…</p> : connectionError ? <div role="alert">
       <p>Could not load your AI connection. Please try again.</p>
       {safeRequestReference(connectionError) && <p>Support reference: <code>{safeRequestReference(connectionError)}</code></p>}

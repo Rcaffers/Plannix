@@ -138,11 +138,13 @@
 
 .settings-year-picker {
   display: flex;
+  flex-wrap: wrap;
   align-items: end;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 22px;
 }
+.settings-year-picker > .settings-field { min-width: min(100%, 220px); flex: 1 1 220px; }
 
 .settings-field--inline {
   gap: 6px;

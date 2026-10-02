@@ -11,4 +11,5 @@ export const AI_LIMITS = Object.freeze({
   schemaBytes: 32_000,
   responseBytes: 1_048_576,
   outputTokens: 4096,
+  imageBytes: 4 * 1024 * 1024,
 });

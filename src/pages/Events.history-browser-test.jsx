@@ -4,6 +4,9 @@ import { Link, RouterProvider } from 'react-router-dom';
 import { createPlannixRouter } from '../appRouter.jsx';
 import '../styles/base.css';
 import '../styles/accessibility.css';
+export { importSourceError } from '../utils/importPreviewApi.js';
+export const aiConnectionApi = { load: async () => ({ active: true, providerLabel: 'OpenAI' }) };
+export const extractImportPreview = async () => ({ destination: 'events', entries: [] });
 
 const YEAR = '10000000-0000-4000-8000-000000000001';
 const mockUser = { id: '20000000-0000-4000-8000-000000000001', organisationId: '30000000-0000-4000-8000-000000000001', name: 'Test user' };

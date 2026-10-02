@@ -132,7 +132,7 @@ export function errorHandler(error, req, res, next) {
   logRouteError('request_failed', error, req, classification);
   // Only these server-owned extraction codes may accompany a public 429.
   if (classification.status === 429 && error?.expose === true
-    && ['HOLIDAY_ATTEMPT_LIMIT', 'AI_RATE_LIMITED'].includes(error.publicCode)) {
+    && ['HOLIDAY_ATTEMPT_LIMIT', 'IMPORT_PREVIEW_ATTEMPT_LIMIT', 'AI_RATE_LIMITED'].includes(error.publicCode)) {
     res.status(429).json({ message: classification.message, code: error.publicCode });
   } else sendPublicError(res, classification.message, classification.status);
 }

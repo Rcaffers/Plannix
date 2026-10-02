@@ -21,6 +21,7 @@
     "test:class-placement-browser": "node scripts/test-class-placement-browser.js",
     "test:events-browser": "node scripts/test-events-browser.js",
     "test:events-history-browser": "node scripts/test-events-native-history-browser.js",
+    "test:import-preview-browser": "node scripts/test-import-preview-browser.js",
     "test:ai-connection": "node --test src/utils/aiConnectionApi.test.js server/routes/ai-connection-routes.test.js",
     "test:ai-provider-browser": "node scripts/test-ai-provider-browser.js",
     "test:classes": "node --test src/utils/classPersistence.test.js",
@@ -38,12 +39,14 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "fflate": "0.8.3",
     "gitleaks": "^1.0.0",
     "helmet": "^8.3.0",
     "pdfjs-dist": "6.3.289",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.14.2",
+    "read-excel-file": "^9.3.10",
     "resend": "^6.12.3"
   },
   "devDependencies": {

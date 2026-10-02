@@ -58,9 +58,17 @@ function checkCommonSchema(schema, depth = 0, budget = { properties: 0, nullable
 export function prepareGeneration(input) {
   try {
     if (!input || typeof input !== 'object' || Array.isArray(input)
-      || Object.keys(input).length !== fields.length || Object.keys(input).some(key => !fields.includes(key))
+      || Object.keys(input).length !== fields.length + (Object.hasOwn(input, 'image') ? 1 : 0)
+      || Object.keys(input).some(key => ![...fields, 'image'].includes(key))
       || typeof input.userId !== 'string' || !uuid.test(input.userId)
       || typeof input.schemaName !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(input.schemaName)) throw Error();
+    if (Object.hasOwn(input, 'image')) {
+      const image = input.image;
+      if (!image || Object.keys(image).sort().join(',') !== 'data,mimeType'
+        || !['image/png', 'image/jpeg'].includes(image.mimeType)
+        || !(image.data instanceof Uint8Array) || !image.data.byteLength
+        || image.data.byteLength > AI_LIMITS.imageBytes) throw Error();
+    }
     for (const [field, limit] of [['systemPrompt', AI_LIMITS.systemPromptBytes], ['userContent', AI_LIMITS.userContentBytes]]) {
       if (typeof input[field] !== 'string' || !input[field].trim() || Buffer.byteLength(input[field], 'utf8') > limit) throw Error();
     }
