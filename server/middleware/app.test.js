@@ -170,7 +170,7 @@ const checkObservabilityScript = `
     "style-src 'self';style-src-elem 'self';style-src-attr 'unsafe-inline';img-src 'self';" +
     "font-src 'none';connect-src 'self' https://project.supabase.test;frame-src 'none';" +
     "object-src 'none';base-uri 'none';form-action 'self';frame-ancestors 'none';" +
-    "worker-src 'none';manifest-src 'none';report-uri /api/csp-report;report-to csp-endpoint";
+    "worker-src 'self';manifest-src 'self';report-uri /api/csp-report;report-to csp-endpoint";
   function assertHardenedHeaders(response, label) {
     if (!isUuid(response.headers.get('x-request-id'))) {
       throw new Error(label + ' response is missing a valid X-Request-ID');

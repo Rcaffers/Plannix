@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Route, Routes, useNavigate } from 'react-router-dom';
 import './App.css';
 import Header from './components/Header';
@@ -16,6 +16,8 @@ import Profile from './pages/Profile';
 import OrganisationControls from './pages/OrganisationControls';
 import AcademicYear from './pages/AcademicYear';
 import Events from './pages/Events';
+import Notifications from './pages/Notifications';
+import { beginPushSignOut, disableCurrentDevice, reconcilePushAccount } from './utils/pushNotifications';
 import Reports from './pages/Reports';
 import Classes from './pages/Classes';
 import Timetable from './pages/Timetable';
@@ -32,6 +34,17 @@ import { TimetableSessionProvider } from './context/TimetableSessionContext';
 import { loadOrganisationMemberships } from './utils/organisationMemberships';
 
 const authController = createSupabaseAuthController();
+const PUSH_CLEANUP_DEADLINE_MS = 8000;
+
+function beforeDeadline(work, deadline) {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) return Promise.reject(new Error('Notification cleanup timed out.'));
+  let timer;
+  return Promise.race([
+    Promise.resolve().then(work),
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Notification cleanup timed out.')), remaining); }),
+  ]).finally(() => clearTimeout(timer));
+}
 
 export default function App() {
   const navigate = useNavigate();
@@ -40,16 +53,22 @@ export default function App() {
   const [memberships, setMemberships] = useState([]);
   const [membershipsLoading, setMembershipsLoading] = useState(false);
   const [membershipsError, setMembershipsError] = useState('');
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
+  const [logoutCanSkipCleanup, setLogoutCanSkipCleanup] = useState(false);
+  const logoutBusyRef = useRef(false);
+  const logoutFailedAccountRef = useRef(null);
+  const userIdRef = useRef(null);
   useEffect(() => {
     let isMounted = true;
 
     const cleanup = authController.subscribe({
-      onUser: (nextUser) => { if (isMounted) { setUser(nextUser); setIsAuthLoading(false); } },
-      onSignedOut: () => { if (isMounted) { setUser(null); setIsAuthLoading(false); } },
-      onError: () => { if (isMounted) { setUser(null); setIsAuthLoading(false); } },
+      onUser: (nextUser) => { if (isMounted) { if (userIdRef.current !== nextUser?.id) { logoutFailedAccountRef.current = null; setLogoutError(''); setLogoutCanSkipCleanup(false); } userIdRef.current = nextUser?.id || null; setUser(nextUser); setIsAuthLoading(false); } },
+      onSignedOut: () => { if (isMounted) { logoutFailedAccountRef.current = null; setLogoutCanSkipCleanup(false); userIdRef.current = null; setUser(null); setIsAuthLoading(false); } },
+      onError: () => { if (isMounted) { userIdRef.current = null; setUser(null); setIsAuthLoading(false); } },
     });
     authController.restoreSession().then((nextUser) => {
-      if (isMounted) setUser(nextUser);
+      if (isMounted) { userIdRef.current = nextUser?.id || null; setUser(nextUser); }
     }).finally(() => {
       if (isMounted) setIsAuthLoading(false);
     });
@@ -58,6 +77,11 @@ export default function App() {
       cleanup();
     };
   }, []);
+
+  useEffect(() => {
+    if (isAuthLoading) return;
+    if (user?.id) void reconcilePushAccount().catch(() => {});
+  }, [isAuthLoading, user?.id]);
 
   useEffect(() => {
     let active = true;
@@ -89,28 +113,84 @@ export default function App() {
 
   const handleLogin = async ({ email, password }) => {
     const loggedInUser = await authController.login({ email, password });
+    setLogoutError('');
+    setLogoutCanSkipCleanup(false);
+    logoutFailedAccountRef.current = null;
+    userIdRef.current = loggedInUser?.id || null;
     setUser(loggedInUser);
     navigate('/timetable');
     return loggedInUser;
   };
 
-  const handleLogout = async () => {
+  const confirmDraftDiscard = () => {
     if (window.__plannixConfirmSessionDiscard?.() === false) return;
     if (window.__plannixConfirmClassDiscard?.() === false) return;
     if (window.__plannixConfirmLayoutDiscard?.() === false) return;
     if (window.__plannixConfirmEventDiscard?.() === false) return;
     if (window.__plannixConfirmAcademicYearDiscard?.() === false) return;
     if (window.__plannixConfirmImportPreviewDiscard?.() === false) return;
+    return true;
+  };
+
+  const handleLogout = async () => {
+    if (logoutBusyRef.current || confirmDraftDiscard() !== true) return;
+    const accountId = user?.id;
+    if (!accountId) return;
+    logoutBusyRef.current = true;
+    const deadline = Date.now() + PUSH_CLEANUP_DEADLINE_MS;
+    setLogoutBusy(true);
+    setLogoutError('');
+    setLogoutCanSkipCleanup(false);
+    logoutFailedAccountRef.current = null;
+    let gate;
     try {
-      await authController.logout();
+      gate = beginPushSignOut();
+      await beforeDeadline(() => gate.waitForRegistrations(Math.max(1, deadline - Date.now())), deadline);
+      await beforeDeadline(() => disableCurrentDevice({ expectedUserId: accountId,
+        isCurrent: () => userIdRef.current === accountId }), deadline);
     } catch {
-      // Local access is cleared even when the remote sign-out request fails.
-    } finally {
-      setUser(null);
+      if (userIdRef.current === accountId) {
+        setLogoutError('Notification cleanup could not be confirmed.');
+        setLogoutCanSkipCleanup(true);
+        logoutFailedAccountRef.current = accountId;
+      } else {
+        setLogoutError('Your account changed during notification cleanup. Sign out again from the current account.');
+        setLogoutCanSkipCleanup(false);
+        logoutFailedAccountRef.current = null;
+      }
+      gate?.release();
+      logoutBusyRef.current = false;
+      setLogoutBusy(false);
+      return;
     }
+    if (userIdRef.current !== accountId) {
+      setLogoutError('Your account changed during notification cleanup. Sign out again from the current account.');
+      setLogoutCanSkipCleanup(false);
+      logoutFailedAccountRef.current = null;
+      gate?.release();
+      logoutBusyRef.current = false;
+      setLogoutBusy(false);
+      return;
+    }
+    try { await authController.logout(); }
+    catch { /* Committed baseline clears local access even when remote logout fails. */ }
+    finally { gate?.release(); logoutFailedAccountRef.current = null; setLogoutCanSkipCleanup(false); userIdRef.current = null; setUser(null); logoutBusyRef.current = false; setLogoutBusy(false); }
+  };
+
+  const handleLogoutAnyway = async () => {
+    if (logoutBusyRef.current || !logoutCanSkipCleanup || logoutFailedAccountRef.current !== user?.id) return;
+    if (confirmDraftDiscard() !== true) return;
+    if (window.confirm('Notification cleanup could not be confirmed. Notifications may remain enabled on this device. Sign out anyway?') !== true) return;
+    if (logoutFailedAccountRef.current !== userIdRef.current) return;
+    logoutBusyRef.current = true;
+    setLogoutBusy(true);
+    try { await authController.logout(); }
+    catch { /* Preserve committed local sign-out behaviour. */ }
+    finally { logoutFailedAccountRef.current = null; setLogoutCanSkipCleanup(false); userIdRef.current = null; setUser(null); logoutBusyRef.current = false; setLogoutBusy(false); }
   };
 
   const clearAuthenticatedUser = () => {
+    userIdRef.current = null;
     setUser(null);
   };
 
@@ -162,6 +242,10 @@ export default function App() {
             isAuthLoading={isAuthLoading}
             onLogin={handleLogin}
             onLogout={handleLogout}
+            onLogoutAnyway={handleLogoutAnyway}
+            logoutBusy={logoutBusy}
+            logoutError={logoutError}
+            logoutCanSkipCleanup={logoutCanSkipCleanup}
             onSignup={handleSignup}
           />
           <Routes>
@@ -219,6 +303,7 @@ export default function App() {
             />
             <Route path="/settings/academic-year" element={privateRoute(<AcademicYear userId={user?.id} />)} />
             <Route path="/settings/events" element={privateRoute(<Events userId={user?.id} />)} />
+            <Route path="/settings/notifications" element={privateRoute(<Notifications userId={user?.id} />)} />
             <Route path="/reports" element={privateRoute(<Reports user={user} />)} />
             <Route path="/classes" element={privateRoute(<Classes />)} />
             <Route path="/classes/input" element={privateRoute(<Classes />)} />

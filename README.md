@@ -32,7 +32,8 @@ Configure the server with `.env` (see your hosting provider for secrets). Common
 
 - `SUPABASE_URL` — Supabase project URL used by the server
 - `SUPABASE_PUBLISHABLE_KEY` — public key used by request-scoped, RLS-protected data clients
-- `SUPABASE_SECRET_KEY` — server-only key used solely for supported administrative operations such as account deletion
+- `SUPABASE_SECRET_KEY` — server-only key used for supported administrative operations, including account deletion and service-role-only push subscription RPCs
+- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` — server Web Push configuration; see [Web Push setup](docs/web-push.md)
 - `FRONTEND_ORIGIN` — browser origin(s) for CORS (comma-separated in production)
 - `TRUST_PROXY_HOPS` — typically `1` behind a reverse proxy (e.g. DigitalOcean App Platform)
 - `RESEND_API_KEY`, `CONTACT_TO_EMAIL`, and optionally `CONTACT_FROM_EMAIL` — contact delivery

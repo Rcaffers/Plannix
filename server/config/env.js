@@ -35,6 +35,9 @@ export const env = Object.freeze({
   supabaseUrl: String(process.env.SUPABASE_URL || '').trim(),
   supabasePublishableKey: String(process.env.SUPABASE_PUBLISHABLE_KEY || '').trim(),
   supabaseSecretKey: String(process.env.SUPABASE_SECRET_KEY || '').trim(),
+  vapidPublicKey: String(process.env.VAPID_PUBLIC_KEY || '').trim(),
+  vapidPrivateKey: String(process.env.VAPID_PRIVATE_KEY || '').trim(),
+  vapidSubject: String(process.env.VAPID_SUBJECT || '').trim(),
   distDirectory: path.join(serverDirectory, '..', '..', 'dist'),
 });
 

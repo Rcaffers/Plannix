@@ -22,6 +22,7 @@ import { registerCspReportRoutes } from './routes/csp-report-routes.js';
 import { registerHolidayRoutes } from './routes/holiday-routes.js';
 import { registerTimetableLayoutRoutes } from './routes/timetable-layout-routes.js';
 import { registerTimetableSessionRoutes } from './routes/timetable-session-routes.js';
+import { registerPushRoutes } from './routes/push-routes.js';
 
 export const app = express();
 const productionCsp = env.nodeEnv === 'production' ? createProductionCspConfig(env) : null;
@@ -53,6 +54,7 @@ app.get('/health', (_req, res) => {
 registerAiConnectionRoutes({ app });
 registerAiHolidayExtractionRoutes({ app });
 registerAiImportPreviewRoutes({ app });
+registerPushRoutes({ app });
 app.use(express.json({ limit: '100kb' }));
 
 function normalizeEmailInput(value) {

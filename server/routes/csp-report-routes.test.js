@@ -82,8 +82,8 @@ test('production CSP configuration is exact, enforced, and uses exact HTTPS orig
       imgSrc: ["'self'"], fontSrc: ["'none'"],
       connectSrc: ["'self'", 'https://project.supabase.test'],
       frameSrc: ["'none'"], objectSrc: ["'none'"], baseUri: ["'none'"],
-      formAction: ["'self'"], frameAncestors: ["'none'"], workerSrc: ["'none'"],
-      manifestSrc: ["'none'"], reportUri: ['/api/csp-report'], reportTo: ['csp-endpoint'],
+      formAction: ["'self'"], frameAncestors: ["'none'"], workerSrc: ["'self'"],
+      manifestSrc: ["'self'"], reportUri: ['/api/csp-report'], reportTo: ['csp-endpoint'],
     },
   });
   assert.equal(

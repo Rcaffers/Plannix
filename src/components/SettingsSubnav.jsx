@@ -4,6 +4,7 @@ export const SETTINGS_SUBNAV_ITEMS = [
   { to: '/settings', end: true, label: 'Timetable settings' },
   { to: '/settings/academic-year', label: 'Academic year' },
   { to: '/settings/events', label: 'Events' },
+  { to: '/settings/notifications', label: 'Notifications' },
   { to: '/classes', end: true, label: 'Classes' },
   { to: '/classes/input', label: 'Input classes' },
 ];

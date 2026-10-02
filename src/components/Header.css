@@ -7,6 +7,29 @@
   backdrop-filter: blur(8px);
 }
 
+.header-logout-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid #b46a59;
+  border-radius: 10px;
+  color: #78372d;
+  background: #fff3ef;
+}
+
+.header-logout-error button {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 8px 14px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.header-logout-error button:focus-visible { outline: 3px solid #1c6655; outline-offset: 2px; }
+
 .nav-shell {
   display: flex;
   align-items: center;

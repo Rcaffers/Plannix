@@ -71,7 +71,7 @@ try {
       }
     }
   }
-  const waitFor = async expression => evaluate(`new Promise((resolve,reject)=>{let n=0;const id=setInterval(()=>{if(${expression}){clearInterval(id);resolve(true)}else if(++n>100){clearInterval(id);reject(Error('History condition timed out'))}},30)})`);
+  const waitFor = async (expression, attempts = 100) => evaluate(`new Promise((resolve,reject)=>{let n=0;const id=setInterval(()=>{if(${expression}){clearInterval(id);resolve(true)}else if(++n>${attempts}){clearInterval(id);reject(Error('History condition timed out'))}},30)})`);
   const click = label => evaluate(`([...document.querySelectorAll('a,button')].find(node=>node.textContent.trim()===${JSON.stringify(label)})).click()`);
   const setTitle = value => evaluate(`(()=>{const node=document.querySelector('#event-title');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(node,${JSON.stringify(value)});node.dispatchEvent(new Event('input',{bubbles:true}))})()`);
   const state = () => evaluate('({url:location.pathname,title:document.querySelector("#event-title")?.value||null,prompts:window.confirmCalls||0,events:!!document.querySelector(".events-page")})');
@@ -119,12 +119,79 @@ try {
   assert.equal((await state()).title, 'Sign-out draft', 'rejected year change preserves draft with one prompt');
   await click('Sign out'); await waitFor('window.confirmCalls===8');
   assert.equal((await state()).events, true, 'rejected sign-out preserves protected editor');
-  await evaluate('window.allowNavigation=true'); await click('Sign out');
+  assert.equal(await evaluate('window.pushGateCalls || 0'), 0, 'rejected draft confirmation starts no push cleanup');
+  await evaluate('window.allowNavigation=true;window.failPushCleanup=true;window.deferPushCleanup=true'); await click('Sign out');
+  await waitFor('typeof window.releasePushCleanup==="function"');
+  const cleanupCalls = await evaluate('window.pushCleanupCalls');
+  await click('Sign out');
+  assert.equal(await evaluate('window.pushCleanupCalls'), cleanupCalls, 'repeat sign-out cannot start another cleanup');
+  await evaluate('window.releasePushCleanup()');
+  await waitFor('!!document.querySelector(".header-logout-error")');
+  assert.equal((await state()).events, true, 'failed cleanup keeps the signed-in editor and draft');
+  assert.equal((await state()).title, 'Sign-out draft', 'failed cleanup preserves draft fields');
+  assert.equal((await state()).prompts, 9, 'failed cleanup prompts once');
+  await evaluate('window.failPushCleanup=false;window.deferPushCleanup=false'); await click('Retry sign out');
   await waitFor('!document.querySelector(".events-page")');
-  assert.equal((await state()).prompts, 9, 'accepted sign-out prompts once');
+  assert.equal((await state()).prompts, 10, 'retry confirms draft discard once');
   assert.equal(await evaluate('(()=>{const e=new Event("beforeunload",{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented})()'), false,
     'Events unload guard is removed after sign-out');
   assert.equal(await evaluate('!!document.querySelector("#event-title")'), false, 'protected Events editor is gated after sign-out');
+  assert.equal(await evaluate('window.pushCleanupCalls > 0'), true, 'sign-out attempts push cleanup');
+  await evaluate('window.switchMockAccount()');
+  await waitFor('!!document.querySelector("header button")');
+  await click('Events route');
+  await waitFor('document.querySelector(".events-page button")');
+  await click('Add event'); await setTitle('Pending cleanup draft');
+  await evaluate('window.deferPushCleanup=true');
+  await click('Sign out');
+  await waitFor('typeof window.releasePushCleanup==="function"');
+  await evaluate('window.switchMockAccount();window.releasePushCleanup()');
+  await waitFor('!!document.querySelector(".header-logout-error")');
+  assert.deepEqual(await evaluate('({browser:window.newDeviceBrowserSubscribed,server:window.newDeviceServerRegistered})'),
+    { browser: true, server: true }, 'account switch during cleanup preserves the newer device');
+  assert.equal(await evaluate('window.mockCurrentAuthUser()'), '20000000-0000-4000-8000-000000000001',
+    'old cleanup does not log out the newer account');
+  assert.equal(await evaluate('!!document.querySelector("header button")'), true,
+    'old account cleanup leaves the newer account signed in');
+  await click('Events route');
+  await waitFor('document.querySelector(".events-page button")');
+  await click('Add event'); await setTitle('Cleanup deadline draft');
+  await evaluate('window.deferPushCleanup=true');
+  const authCallsBeforeTimeout = await evaluate('window.authLogoutCalls || 0');
+  await click('Sign out');
+  await waitFor('typeof window.releasePushCleanup==="function"');
+  await waitFor('!!document.querySelector(".header-logout-error")', 340);
+  assert.equal((await state()).title, 'Cleanup deadline draft', 'cleanup deadline preserves the draft');
+  assert.equal(await evaluate('window.authLogoutCalls || 0'), authCallsBeforeTimeout,
+    'cleanup timeout never invokes Supabase logout');
+  await evaluate('window.deferPushCleanup=false;window.releasePushCleanup();window.deferAuthLogout=true');
+  await click('Retry sign out');
+  await waitFor('typeof window.releaseAuthLogout==="function"');
+  assert.equal(await evaluate('window.pushGateHeld'), true,
+    'new push registrations remain blocked until the baseline SDK logout settles');
+  await evaluate('window.releaseAuthLogout()');
+  await waitFor('window.mockCurrentAuthUser()===null');
+  assert.equal(await evaluate('window.pushGateHeld'), false, 'push guard releases after logout settlement');
+  assert.equal(await evaluate('window.authLogoutCalls || 0'), authCallsBeforeTimeout + 1,
+    'retry performs one baseline Supabase logout after confirmed cleanup');
+  await evaluate('window.deferAuthLogout=false;window.switchMockAccount();window.failPushCleanup=true');
+  await click('Events route');
+  await waitFor('document.querySelector(".events-page button")');
+  await click('Add event'); await setTitle('Explicit sign-out draft');
+  await click('Sign out');
+  await waitFor('!!document.querySelector(".header-logout-error")');
+  assert.equal(await evaluate('document.querySelector(".header-logout-error").textContent.includes("Notification cleanup could not be confirmed.")'), true);
+  assert.equal(await evaluate('document.querySelector(".header-logout-error").textContent.includes("Notifications may remain enabled")'), true);
+  const beforeAnywayCleanup = await evaluate('window.pushCleanupCalls');
+  await evaluate('window.confirm=(message)=>{window.confirmCalls++;return !message.includes("Sign out anyway")};');
+  await click('Sign out anyway');
+  assert.equal((await state()).title, 'Explicit sign-out draft', 'rejected explicit choice retains draft');
+  assert.equal(await evaluate('window.mockCurrentAuthUser()!==null'), true, 'rejected explicit choice retains session');
+  await evaluate('window.confirm=()=>{window.confirmCalls++;return true}');
+  await click('Sign out anyway');
+  await waitFor('window.mockCurrentAuthUser()===null');
+  assert.equal(await evaluate('window.pushCleanupCalls'), beforeAnywayCleanup,
+    'explicit sign out does not claim notification cleanup succeeded or repeat it');
   console.log('Native Chrome Back/Forward, anchor, unload, sign-out and protected-route checks passed.');
 } finally {
   socket?.close();

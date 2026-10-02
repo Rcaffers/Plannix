@@ -21,6 +21,10 @@ export default function Header({
   isAuthLoading,
   onLogin,
   onLogout,
+  onLogoutAnyway,
+  logoutBusy = false,
+  logoutError = '',
+  logoutCanSkipCleanup = false,
   onSignup,
 }) {
   const location = useLocation();
@@ -383,9 +387,9 @@ export default function Header({
                         setIsUserMenuOpen(false);
                         handleLogout();
                       }}
-                      disabled={isAuthLoading}
+                      disabled={isAuthLoading || logoutBusy}
                     >
-                      Log out
+                      {logoutBusy ? 'Signing out…' : 'Log out'}
                     </button>
                   </div>
                 ) : null}
@@ -518,9 +522,9 @@ export default function Header({
                     closeMobileNav();
                     handleLogout();
                   }}
-                  disabled={isAuthLoading}
+                  disabled={isAuthLoading || logoutBusy}
                 >
-                  Log out
+                  {logoutBusy ? 'Signing out…' : 'Log out'}
                 </button>
               </div>
             ) : (
@@ -552,6 +556,12 @@ export default function Header({
           </div>
         </div>
       </header>
+      {user && logoutError ? <div className="container header-logout-error" role="alert">
+        <span>{logoutError}</span>
+        <button type="button" onClick={handleLogout} disabled={logoutBusy}>Retry sign out</button>
+        {logoutCanSkipCleanup ? <><span>Notifications may remain enabled on this device.</span>
+          <button type="button" onClick={onLogoutAnyway} disabled={logoutBusy}>Sign out anyway</button></> : null}
+      </div> : null}
 
       {isLoginOpen ? (
         <div className="login-modal-backdrop" onClick={closeLogin}>

@@ -37,6 +37,7 @@
 
 .classes-subnav {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin: 0 0 18px;
 }
@@ -355,6 +356,11 @@
   gap: 12px;
   margin-top: 6px;
 }
+
+.notification-state { display: grid; gap: 6px; }
+.notification-state p { margin: 0; overflow-wrap: anywhere; }
+.notification-actions button { min-height: 44px; }
+.settings-error { color: #8f4d46; overflow-wrap: anywhere; }
 
 .settings-save {
   padding: 10px 20px;
