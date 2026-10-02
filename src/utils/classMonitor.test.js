@@ -97,6 +97,32 @@ test('configured period order wins over input order, and overlapping closures do
   ]);
 });
 
+test('only configured teaching periods receive sequential report numbers across registration, break and lunch', () => {
+  const configured = [
+    { id: 'lunch', type: 'lunch', order: 5, startTime: '12:00', endTime: '12:30' },
+    { id: 'third', type: 'teaching', number: 1, order: 6, startTime: '12:30', endTime: '13:30' },
+    { id: 'registration', type: 'registration', order: 0, startTime: '08:30', endTime: '09:00' },
+    { id: 'second', type: 'teaching', number: 2, order: 4, startTime: '11:00', endTime: '12:00' },
+    { id: 'break', type: 'break', order: 2, startTime: '10:00', endTime: '10:30' },
+    { id: 'first', type: 'teaching', number: 3, order: 1, startTime: '09:00', endTime: '10:00' },
+  ];
+  const recurring = ['third', 'second', 'first'].map(id => ({ ...session(id, id), periodId: id }));
+  const rows = buildClassMonitor({ year: { ...year, holidays: [
+    { label: 'Training', closureType: 'closure', startDate: '2027-01-11', endDate: '2027-01-11' },
+  ] }, from: '2027-01-04', to: '2027-01-11', classId, periods: configured,
+  recurringWeeks: [{ weekId: 'week-a', sessions: recurring }], datedWeeks: [
+    { weekStartDate: '2027-01-04', repeatingWeekId: 'week-a', sessions: recurring },
+    { weekStartDate: '2027-01-11', repeatingWeekId: 'week-a', sessions: [] },
+  ] });
+  for (const type of ['lesson', 'closure']) {
+    const matching = rows.filter(row => row.type === type);
+    assert.deepEqual(matching.map(row => [row.periodOrder + 1, row.periodId, row.startTime, row.endTime]), [
+      [1, 'first', '09:00', '10:00'], [2, 'second', '11:00', '12:00'], [3, 'third', '12:30', '13:30'],
+    ]);
+  }
+  assert.equal(rows.length, 6);
+});
+
 test('public duration never implies missed lessons; unclassified school duration never implies INSET', () => {
   const holidays = [
     { label: 'Public single day', holidayType: 'public', startDate: '2026-09-08', endDate: '2026-09-08' },

@@ -114,15 +114,15 @@ export default function Reports({ user, clock = systemClock }) {
       {yearReady && !layout.isLoading && !layout.isPersisted ? <p role="status">Save a timetable layout in Settings before viewing scheduled lessons.</p> : null}
       {yearReady ? <p className="reports-year">Academic year: <strong>{academicYear.label}</strong></p> : null}
       <div className="reports-filters">
-        <div className="settings-field"><label htmlFor="report-class">Class</label><select id="report-class" value={classId}
+        <div className="settings-field reports-class-filter"><label htmlFor="report-class">Class</label><select id="report-class" value={classId}
           disabled={!yearReady || !classes.isLoaded || !layout.isPersisted}
           onChange={event => setSelection({ yearId, classId: event.target.value })}>
           <option value="">Choose a class</option>{savedClasses.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
         </select></div>
-        <div className="settings-field"><label htmlFor="report-from">From</label><input id="report-from" type="date" value={from}
+        <div className="settings-field reports-date-filter"><label htmlFor="report-from">From</label><input id="report-from" type="date" value={from}
           min={academicYear?.startDate || undefined} max={academicYear?.endDate || undefined} disabled={!yearReady}
           onChange={event => setDates({ yearId, from: event.target.value, to })} /></div>
-        <div className="settings-field"><label htmlFor="report-to">To</label><input id="report-to" type="date" value={to}
+        <div className="settings-field reports-date-filter"><label htmlFor="report-to">To</label><input id="report-to" type="date" value={to}
           min={academicYear?.startDate || undefined} max={academicYear?.endDate || undefined} disabled={!yearReady}
           onChange={event => setDates({ yearId, from, to: event.target.value })} /></div>
       </div>
@@ -134,12 +134,12 @@ export default function Reports({ user, clock = systemClock }) {
       {active.status === 'ready' ? <section className="reports-results" aria-label={`Class Monitor for ${selectedClass?.name || 'class'}`}>
         {!active.rows.length ? <p>No scheduled lessons or school closures for this class in the selected dates.</p> : null}
         {active.rows.map((row, index) => ['holiday', 'school-unknown'].includes(row.type)
-          ? <article className={`reports-holiday${isPastClassMonitorRow(row, today) ? ' reports-holiday--past' : ''}`} key={`holiday-${index}`}><h3>{row.type === 'school-unknown' ? `School holiday or closure — ${row.label}` : row.label}</h3>
+          ? <article className="reports-holiday" key={`holiday-${index}`}><h3>{row.type === 'school-unknown' ? `School holiday or closure — ${row.label}` : row.label}</h3>
             <p>{dateLabel(row.visibleStart)} – {dateLabel(row.visibleEnd)}{row.visibleStart !== row.startDate || row.visibleEnd !== row.endDate ? ' (portion in selected dates)' : ''}</p></article>
-          : <article className={`reports-entry${row.type === 'closure' ? ' reports-entry--closure' : ''}${isPastClassMonitorRow(row, today) ? ' reports-entry--past' : ''}`} key={`${row.date}-${row.periodId}-${row.sessionId || index}`}>
-            <p className="reports-entry-date">{dateLabel(row.date)} · {row.startTime}–{row.endTime}</p>
+          : <article className={`reports-entry${row.type === 'closure' ? ' reports-entry--closure' : ''}`} key={`${row.date}-${row.periodId}-${row.sessionId || index}`}>
+            <p className="reports-entry-date">{dateLabel(row.date)} · Period {row.periodOrder + 1}</p>
             {row.type === 'closure' ? <strong>Lesson not held — {row.label}</strong>
-              : <div className="lesson-card reports-lesson"><strong className="session-class">{selectedClass?.name}</strong>
+              : <div className={`lesson-card reports-lesson${isPastClassMonitorRow(row, today) ? ' reports-lesson--past' : ''}`}><strong className="session-class">{selectedClass?.name}</strong>
                 {row.title ? <span className="session-lesson-title">{row.title}</span> : null}
                 {row.notes ? <span className="session-lesson-notes">{row.notes}</span> : null}</div>}
           </article>)}

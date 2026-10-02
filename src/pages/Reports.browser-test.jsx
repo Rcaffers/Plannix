@@ -14,7 +14,9 @@ const ORGANISATION = '40000000-0000-4000-8000-000000000001';
 const CLASS_A = '50000000-0000-4000-8000-000000000001';
 const CLASS_B = '50000000-0000-4000-8000-000000000002';
 const PERIOD = '60000000-0000-4000-8000-000000000001';
+const PERIOD_TWO = '60000000-0000-4000-8000-000000000002';
 const WEEK = '70000000-0000-4000-8000-000000000001';
+const LONG_TITLE = 'A detailed lesson title covering several concepts and an exceptionallylongunbrokentopicnameforwrapping';
 const reportClock = () => new Date('2026-11-02T12:00:00Z');
 let setYear, gate, failNext = false, revisionMismatch = false;
 const requests = [];
@@ -23,6 +25,7 @@ const years = {
     { label: 'INSET Day', closureType: 'closure', startDate: '2026-09-01', endDate: '2026-09-01' },
     { label: 'Half term', startDate: '2026-10-26', endDate: '2026-10-30' },
     { label: 'Public day', holidayType: 'public', startDate: '2026-11-03', endDate: '2026-11-03' },
+    { label: 'Training day', closureType: 'closure', startDate: '2026-11-10', endDate: '2026-11-10' },
   ] },
   [YEAR_B]: { id: YEAR_B, label: '2027/28', startDate: '2027-09-01', endDate: '2028-08-31', holidays: [] },
   [YEAR_LONG]: { id: YEAR_LONG, label: 'Long synthetic year', startDate: '2026-09-07', endDate: '2028-08-31', holidays: [] },
@@ -36,13 +39,23 @@ export function useClasses() {
 }
 export function useTimetableLayout() {
   return { isPersisted: true, isLoading: false, timetableId: '80000000-0000-4000-8000-000000000001', revision: 1,
-    periods: [{ id: PERIOD, type: 'teaching', number: 1, order: 1, startTime: '09:00', endTime: '10:00' }], error: '' };
+    periods: [
+      { id: 'registration', type: 'registration', order: 0, startTime: '08:30', endTime: '09:00' },
+      { id: PERIOD, type: 'teaching', number: 1, order: 1, startTime: '09:00', endTime: '10:00' },
+      { id: 'break', type: 'break', order: 2, startTime: '10:00', endTime: '10:20' },
+      { id: 'lunch', type: 'lunch', order: 3, startTime: '10:20', endTime: '10:50' },
+      { id: PERIOD_TWO, type: 'teaching', number: 2, order: 4, startTime: '10:50', endTime: '11:50' },
+    ], error: '' };
 }
 export function useTimetableSessions() { return { revision: 1 }; }
 export async function fetchRecurringTimetableSessions(_scope, { signal }) {
   requests.push({ type: 'recurring', signal });
-  return { revision: 1, weeks: [{ weekId: WEEK, sessions: [{ id: 'pattern', classId: CLASS_A, periodId: PERIOD, day: 1,
-    title: 'Synthetic lesson', notes: 'Private fixture notes' }] }] };
+  return { revision: 1, weeks: [{ weekId: WEEK, sessions: [
+    { id: 'pattern', classId: CLASS_A, periodId: PERIOD, day: 1,
+      title: 'Synthetic lesson', notes: 'Private fixture notes' },
+    { id: 'pattern-two', classId: CLASS_A, periodId: PERIOD_TWO, day: 1,
+      title: 'Second pattern', notes: '' },
+  ] }] };
 }
 export async function fetchDatedTimetableSessions(scope, { signal }) {
   requests.push({ type: 'date', monday: scope.weekStartDate, signal });
@@ -50,8 +63,14 @@ export async function fetchDatedTimetableSessions(scope, { signal }) {
   if (pending) await pending; // deliberately ignores cancellation
   if (failNext) { failNext = false; throw Object.assign(Error('Unsafe upstream detail'), { requestId: USER }); }
   return { revision: revisionMismatch ? 2 : 1, weekStartDate: scope.weekStartDate, repeatingWeekId: WEEK,
-    sessions: scope.weekStartDate === '2026-11-02' ? [{ id: 'dated', classId: CLASS_A, periodId: PERIOD,
-      day: 0, title: 'Dated title', notes: 'Dated notes' }] : [] };
+    sessions: scope.weekStartDate === '2026-09-14' ? [{ id: 'past-dated', classId: CLASS_A, periodId: PERIOD,
+      day: 0, title: 'Past dated lesson', notes: 'Past notes' }]
+      : scope.weekStartDate === '2026-11-02' ? [
+        { id: 'dated', classId: CLASS_A, periodId: PERIOD,
+          day: 0, title: 'Dated title', notes: 'Dated notes' },
+        { id: 'long-dated', classId: CLASS_A, periodId: PERIOD_TWO,
+          day: 0, title: LONG_TITLE, notes: 'Long-title details' },
+      ] : [] };
 }
 
 const host = document.createElement('div'); document.body.append(host);
@@ -92,13 +111,40 @@ async function run() {
     && host.textContent.includes('Dated title') && host.textContent.includes('Dated notes'),
   'closed pattern slot, holiday separator and dated lesson render as text');
   const inset = [...host.querySelectorAll('.reports-entry')].find(node => node.textContent.includes('INSET Day'));
+  const insetSlots = [...host.querySelectorAll('.reports-entry')].filter(node => node.textContent.includes('INSET Day'));
+  const training = [...host.querySelectorAll('.reports-entry')].find(node => node.textContent.includes('Training day'));
+  const trainingSlots = [...host.querySelectorAll('.reports-entry')].filter(node => node.textContent.includes('Training day'));
+  const pastLesson = [...host.querySelectorAll('.reports-entry')].find(node => node.textContent.includes('Past dated lesson'));
   const dated = [...host.querySelectorAll('.reports-entry')].find(node => node.textContent.includes('Dated title'));
   const halfTerm = [...host.querySelectorAll('.reports-holiday')].find(node => node.textContent.includes('Half term'));
   const publicDay = [...host.querySelectorAll('.reports-holiday')].find(node => node.textContent.includes('Public day'));
-  check(inset?.classList.contains('reports-entry--past') && halfTerm?.classList.contains('reports-holiday--past')
-    && !dated?.classList.contains('reports-entry--past') && !publicDay?.classList.contains('reports-holiday--past')
-    && getComputedStyle(inset).borderLeftWidth === '4px',
-  'past lesson closures and ended holiday ranges are tinted; today and future entries are not');
+  const pastTile = pastLesson?.querySelector('.reports-lesson');
+  const todayTile = dated?.querySelector('.reports-lesson');
+  check(insetSlots.map(node => node.querySelector('.reports-entry-date')?.textContent.split(' · ')[1]).join(',') === 'Period 1,Period 2'
+    && trainingSlots.map(node => node.querySelector('.reports-entry-date')?.textContent.split(' · ')[1]).join(',') === 'Period 1,Period 2'
+    && pastLesson?.querySelector('.reports-entry-date')?.textContent.endsWith('Period 1')
+    && dated?.querySelector('.reports-entry-date')?.textContent.endsWith('Period 1')
+    && [...host.querySelectorAll('.reports-entry-date')].every(node => !/\b\d{2}:\d{2}\b/.test(node.textContent))
+    && !halfTerm?.textContent.includes('Period '),
+  'lessons and missed closures display teaching-only period numbers without changing holiday labels');
+  const goldReportStyle = node => {
+    const style = getComputedStyle(node);
+    return style.backgroundColor === 'rgba(250, 240, 220, 0.55)'
+      && style.borderTopStyle === 'solid'
+      && style.borderTopColor === 'rgba(200, 160, 90, 0.45)'
+      && style.borderTopWidth === '1px' && style.borderTopLeftRadius === '12px';
+  };
+  check(pastTile?.classList.contains('reports-lesson--past')
+    && !todayTile?.classList.contains('reports-lesson--past')
+    && getComputedStyle(pastTile).backgroundColor === 'rgb(244, 214, 202)'
+    && getComputedStyle(todayTile).backgroundColor === 'rgb(232, 246, 232)'
+    && getComputedStyle(pastTile.querySelector('.session-lesson-notes')).color === 'rgb(61, 41, 36)'
+    && getComputedStyle(pastLesson).borderLeftWidth === '1px'
+    && goldReportStyle(inset) && goldReportStyle(training) && goldReportStyle(halfTerm) && goldReportStyle(publicDay)
+    && inset.textContent.includes('Lesson not held — INSET Day')
+    && training.textContent.includes('Lesson not held — Training day')
+    && halfTerm.textContent.includes('School holiday or closure — Half term'),
+  'past lesson tiles retain orange; closures and school/public ranges use solid gold report borders and original labels');
   input('#report-from', '2026-10-28'); input('#report-to', '2026-10-29'); await settle();
   check(host.textContent.includes('portion in selected dates') && !host.textContent.includes('Lesson not held — INSET Day'),
     'inclusive date filter clips overlapping holiday and clears old rows');

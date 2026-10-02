@@ -5,6 +5,8 @@
 .reports-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; min-width: 0; }
 .reports-filters .settings-field { min-width: 0; }
 .reports-filters :is(input, select) { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+.reports-class-filter select { min-height: 44px; }
+.reports-date-filter input[type='date'] { min-height: 44px; }
 .reports-error { margin: 0; padding: 12px 14px; border: 1px solid #ba7070; border-radius: 10px; background: #fff1ee; color: #842d2d; overflow-wrap: anywhere; }
 .reports-error p { margin: 0 0 8px; }
 .reports-error p:last-child { margin-bottom: 0; }
@@ -12,21 +14,35 @@
 .reports-results > p { margin: 0; }
 .reports-entry, .reports-holiday { min-width: 0; padding: 14px; border-radius: 12px; border: 1px solid rgba(63,127,120,.24); overflow-wrap: anywhere; }
 .reports-entry { background: rgba(255,255,255,.7); }
-.reports-entry--closure { background: #fff7e9; border-color: #d6b982; }
 .reports-entry-date { margin: 0 0 8px; color: #52635f; font-weight: 600; }
-.reports-holiday { background: #e9f2ec; }
-.reports-entry--past, .reports-holiday--past {
-  border-left: 4px solid #b1665e;
-  background: #fff3ec;
-  color: #2d2724;
+/* Keep the report tile shape, using the timetable Lunch colours. */
+.reports-holiday, .reports-entry--closure {
+  background: rgba(250, 240, 220, 0.55);
+  border-color: rgba(200, 160, 90, 0.45);
+  color: #2d2921;
 }
-.reports-entry--past .reports-entry-date { color: #7d413a; }
-.reports-entry--past .reports-lesson { background: #fffaf7; border-color: #e7c0af; }
 .reports-holiday h3, .reports-holiday p { margin: 0; }
 .reports-lesson { display: grid; gap: 4px; min-height: 0; padding: 10px 12px; cursor: default; white-space: pre-wrap; font-size: .9rem; }
 .reports-lesson:hover { transform: none; box-shadow: none; border-color: #b9dcb9; }
+.reports-page .reports-lesson--past,
+.reports-page .reports-lesson--past:hover { background: #f4d6ca; border-color: #b1665e; color: #3d2924; }
+.reports-page .reports-lesson--past :is(.session-class, .session-lesson-title, .session-lesson-notes) { color: #3d2924; }
 .reports-lesson :is(.session-lesson-title, .session-lesson-notes) { font-size: .85rem; }
 .reports-lesson .session-lesson-notes { display: block; -webkit-line-clamp: unset; }
 .reports-lesson :is(span, strong) { overflow-wrap: anywhere; }
 .reports-page :is(button, input, select):focus-visible { outline: 3px solid #22564e; outline-offset: 2px; }
-@media (max-width: 600px) { .reports-filters { grid-template-columns: minmax(0, 1fr); } .reports-card { padding: 18px 14px; } }
+@media (min-width: 601px) {
+  .reports-lesson { display: block; }
+  .reports-lesson .session-lesson-title { margin-top: 0; padding-top: 0; }
+  .reports-lesson .session-lesson-title::before { content: ' – '; white-space: pre; }
+  .reports-lesson .session-lesson-notes { padding-top: 4px; }
+}
+@media (max-width: 600px) {
+  .reports-card { padding: 18px 14px; }
+  .reports-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reports-class-filter { grid-column: 1 / -1; }
+}
+@media (max-width: 389px) {
+  .reports-filters { grid-template-columns: minmax(0, 1fr); }
+  .reports-date-filter { grid-template-columns: 44px minmax(0, 1fr); align-items: center; }
+}

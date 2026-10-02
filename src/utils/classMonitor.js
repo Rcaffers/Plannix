@@ -83,7 +83,8 @@ export function holidayReportKind(holiday) {
 /** Saved dated overrides are authoritative; closed days use their repeating pattern. */
 export function buildClassMonitor({ year, from, to, classId, datedWeeks, recurringWeeks, periods }) {
   const orderedPeriods = [...periods].filter(p => p.type === 'teaching')
-    .sort((a, b) => (a.number ?? a.order) - (b.number ?? b.order) || a.order - b.order);
+    .sort((a, b) => a.order - b.order || (a.number ?? 0) - (b.number ?? 0)
+      || String(a.id).localeCompare(String(b.id)));
   const periodOrder = new Map(orderedPeriods.map((period, index) => [period.id, index]));
   const periodById = new Map(orderedPeriods.map(period => [period.id, period]));
   const repeatingById = new Map(recurringWeeks.map(week => [week.weekId, week.sessions]));
