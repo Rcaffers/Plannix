@@ -15,6 +15,7 @@ const CLASS_A = '50000000-0000-4000-8000-000000000001';
 const CLASS_B = '50000000-0000-4000-8000-000000000002';
 const PERIOD = '60000000-0000-4000-8000-000000000001';
 const WEEK = '70000000-0000-4000-8000-000000000001';
+const reportClock = () => new Date('2026-11-02T12:00:00Z');
 let setYear, gate, failNext = false, revisionMismatch = false;
 const requests = [];
 const years = {
@@ -54,7 +55,7 @@ export async function fetchDatedTimetableSessions(scope, { signal }) {
 }
 
 const host = document.createElement('div'); document.body.append(host);
-const router = createMemoryRouter([{ path: '/reports', element: <Reports user={{ id: USER, organisationId: ORGANISATION }} /> },
+const router = createMemoryRouter([{ path: '/reports', element: <Reports user={{ id: USER, organisationId: ORGANISATION }} clock={reportClock} /> },
   { path: '/', element: <p>Home</p> }], { initialEntries: ['/reports'] });
 const root = createRoot(host); flushSync(() => root.render(<RouterProvider router={router} />));
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
@@ -90,6 +91,14 @@ async function run() {
     && host.textContent.includes('Public day') && !host.textContent.includes('Lesson not held — Public day')
     && host.textContent.includes('Dated title') && host.textContent.includes('Dated notes'),
   'closed pattern slot, holiday separator and dated lesson render as text');
+  const inset = [...host.querySelectorAll('.reports-entry')].find(node => node.textContent.includes('INSET Day'));
+  const dated = [...host.querySelectorAll('.reports-entry')].find(node => node.textContent.includes('Dated title'));
+  const halfTerm = [...host.querySelectorAll('.reports-holiday')].find(node => node.textContent.includes('Half term'));
+  const publicDay = [...host.querySelectorAll('.reports-holiday')].find(node => node.textContent.includes('Public day'));
+  check(inset?.classList.contains('reports-entry--past') && halfTerm?.classList.contains('reports-holiday--past')
+    && !dated?.classList.contains('reports-entry--past') && !publicDay?.classList.contains('reports-holiday--past')
+    && getComputedStyle(inset).borderLeftWidth === '4px',
+  'past lesson closures and ended holiday ranges are tinted; today and future entries are not');
   input('#report-from', '2026-10-28'); input('#report-to', '2026-10-29'); await settle();
   check(host.textContent.includes('portion in selected dates') && !host.textContent.includes('Lesson not held — INSET Day'),
     'inclusive date filter clips overlapping holiday and clears old rows');
@@ -152,6 +161,8 @@ async function run() {
   flushSync(() => host.querySelector('.reports-error button').click()); await settle();
   check(requests.slice(beforeRetry).filter(item => item.type === 'date').length === 2
     && host.querySelector('.reports-results'), 'retry rechecks the bounded range and loads complete weeks');
+  flushSync(() => setYear(YEAR_A)); await settle();
+  input('#report-class', CLASS_A); await settle();
   document.body.dataset.testResult = 'passed'; document.body.append(Object.assign(document.createElement('pre'), { textContent: `${checks.length} Reports browser assertions passed` }));
 }
 run().catch(error => { document.body.dataset.testResult = 'failed'; document.body.append(Object.assign(document.createElement('pre'), { textContent: error.stack })); });

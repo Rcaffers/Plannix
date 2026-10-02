@@ -3,6 +3,20 @@ import { toLocalYmd } from './academicYear.js';
 export const MAX_DATED_REPORT_WEEKS = 60;
 export const REPORT_RANGE_LIMIT_MESSAGE = 'Choose a shorter From/To range to view Class Monitor (up to 60 weeks).';
 
+export function londonCalendarToday(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now);
+  const value = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
+export function isPastClassMonitorRow(row, today) {
+  const finalDate = row.type === 'holiday' || row.type === 'school-unknown'
+    ? row.visibleEnd : row.date;
+  return finalDate < today;
+}
+
 export function localDate(ymd) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(ymd))) return null;
   const [year, month, day] = ymd.split('-').map(Number);

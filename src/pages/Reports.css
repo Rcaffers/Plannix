@@ -15,6 +15,13 @@
 .reports-entry--closure { background: #fff7e9; border-color: #d6b982; }
 .reports-entry-date { margin: 0 0 8px; color: #52635f; font-weight: 600; }
 .reports-holiday { background: #e9f2ec; }
+.reports-entry--past, .reports-holiday--past {
+  border-left: 4px solid #b1665e;
+  background: #fff3ec;
+  color: #2d2724;
+}
+.reports-entry--past .reports-entry-date { color: #7d413a; }
+.reports-entry--past .reports-lesson { background: #fffaf7; border-color: #e7c0af; }
 .reports-holiday h3, .reports-holiday p { margin: 0; }
 .reports-lesson { display: grid; gap: 4px; min-height: 0; padding: 10px 12px; cursor: default; white-space: pre-wrap; font-size: .9rem; }
 .reports-lesson:hover { transform: none; box-shadow: none; border-color: #b9dcb9; }

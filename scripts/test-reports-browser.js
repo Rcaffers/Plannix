@@ -46,10 +46,12 @@ try {
   const measurements = [];
   for (const width of [320, 375, 390, 430, 768, 820, 1024, 1366]) {
     await send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false }, sessionId);
-    const measurement = await send('Runtime.evaluate', { expression: '({viewport:innerWidth,scroll:document.documentElement.scrollWidth,card:(()=>{const r=document.querySelector(".reports-card").getBoundingClientRect();return {left:r.left,right:r.right}})()})', returnByValue: true }, sessionId);
+    const measurement = await send('Runtime.evaluate', { expression: '({viewport:innerWidth,scroll:document.documentElement.scrollWidth,card:(()=>{const r=document.querySelector(".reports-card").getBoundingClientRect();return {left:r.left,right:r.right}})(),past:(()=>{const e=document.querySelector(".reports-entry--past");if(!e)return null;const r=e.getBoundingClientRect(),s=getComputedStyle(e);return {left:r.left,right:r.right,border:s.borderLeftWidth,background:s.backgroundColor}})()})', returnByValue: true }, sessionId);
     const value = measurement.result.value;
     measurements.push(value);
-    assert.ok(value.scroll <= width + 1 && value.card.left >= -1 && value.card.right <= width + 1,
+    assert.ok(value.scroll <= width + 1 && value.card.left >= -1 && value.card.right <= width + 1
+      && value.past?.left >= value.card.left - 1 && value.past?.right <= value.card.right + 1
+      && value.past?.border === '4px' && value.past?.background === 'rgb(255, 243, 236)',
       `${width}px Reports card overflows: ${JSON.stringify(value)}`);
   }
   console.log(JSON.stringify(measurements));

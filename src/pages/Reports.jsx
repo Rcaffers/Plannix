@@ -6,7 +6,7 @@ import { useTimetableLayout } from '../context/TimetableLayoutContext.jsx';
 import { useTimetableSessions } from '../context/TimetableSessionContext.jsx';
 import { fetchDatedTimetableSessions, fetchRecurringTimetableSessions } from '../utils/timetableSessionApi.js';
 import { safeRequestReference } from '../utils/requestReference.js';
-import { buildClassMonitor, reportDateError, reportMondays } from '../utils/classMonitor.js';
+import { buildClassMonitor, isPastClassMonitorRow, londonCalendarToday, reportDateError, reportMondays } from '../utils/classMonitor.js';
 import '../components/ProjectCard.css';
 import './Settings.css';
 import './Reports.css';
@@ -30,7 +30,9 @@ async function loadDatedWeeks(scope, mondays, signal) {
   return weeks;
 }
 
-export default function Reports({ user }) {
+const systemClock = () => new Date();
+
+export default function Reports({ user, clock = systemClock }) {
   const { academicYear, selectedAcademicYearId, isLoading: yearLoading, error: yearError,
     requestReference: yearReference } = useAcademicYear();
   const classes = useClasses();
@@ -40,6 +42,7 @@ export default function Reports({ user }) {
   const [dates, setDates] = useState({ yearId: null, from: '', to: '' });
   const [retry, setRetry] = useState(0);
   const [result, setResult] = useState({ scope: '', status: 'idle', rows: [], error: null });
+  const [today, setToday] = useState(() => londonCalendarToday(clock()));
   const generation = useRef(0);
   const yearId = selectedAcademicYearId;
   const yearReady = Boolean(yearId && academicYear?.id === yearId && !yearLoading);
@@ -56,6 +59,12 @@ export default function Reports({ user }) {
   const selectedClass = savedClasses.find(entry => entry.id === classId);
   const patternScope = useMemo(() => ({ organisationId: user?.organisationId, academicYearId: yearId,
     timetableId: layout.timetableId }), [user?.organisationId, yearId, layout.timetableId]);
+
+  useEffect(() => {
+    setToday(londonCalendarToday(clock()));
+    const timer = window.setInterval(() => setToday(londonCalendarToday(clock())), 60000);
+    return () => window.clearInterval(timer);
+  }, [clock]);
 
   useEffect(() => {
     setSelection({ yearId, classId: '' });
@@ -125,9 +134,9 @@ export default function Reports({ user }) {
       {active.status === 'ready' ? <section className="reports-results" aria-label={`Class Monitor for ${selectedClass?.name || 'class'}`}>
         {!active.rows.length ? <p>No scheduled lessons or school closures for this class in the selected dates.</p> : null}
         {active.rows.map((row, index) => ['holiday', 'school-unknown'].includes(row.type)
-          ? <article className="reports-holiday" key={`holiday-${index}`}><h3>{row.type === 'school-unknown' ? `School holiday or closure — ${row.label}` : row.label}</h3>
+          ? <article className={`reports-holiday${isPastClassMonitorRow(row, today) ? ' reports-holiday--past' : ''}`} key={`holiday-${index}`}><h3>{row.type === 'school-unknown' ? `School holiday or closure — ${row.label}` : row.label}</h3>
             <p>{dateLabel(row.visibleStart)} – {dateLabel(row.visibleEnd)}{row.visibleStart !== row.startDate || row.visibleEnd !== row.endDate ? ' (portion in selected dates)' : ''}</p></article>
-          : <article className={`reports-entry ${row.type === 'closure' ? 'reports-entry--closure' : ''}`} key={`${row.date}-${row.periodId}-${row.sessionId || index}`}>
+          : <article className={`reports-entry${row.type === 'closure' ? ' reports-entry--closure' : ''}${isPastClassMonitorRow(row, today) ? ' reports-entry--past' : ''}`} key={`${row.date}-${row.periodId}-${row.sessionId || index}`}>
             <p className="reports-entry-date">{dateLabel(row.date)} · {row.startTime}–{row.endTime}</p>
             {row.type === 'closure' ? <strong>Lesson not held — {row.label}</strong>
               : <div className="lesson-card reports-lesson"><strong className="session-class">{selectedClass?.name}</strong>

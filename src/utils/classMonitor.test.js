@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addCalendarDays, buildClassMonitor, holidayReportKind, MAX_DATED_REPORT_WEEKS,
-  mondayFor, reportDateError, reportMondays, REPORT_RANGE_LIMIT_MESSAGE } from './classMonitor.js';
+import { addCalendarDays, buildClassMonitor, holidayReportKind, isPastClassMonitorRow,
+  londonCalendarToday, MAX_DATED_REPORT_WEEKS, mondayFor, reportDateError,
+  reportMondays, REPORT_RANGE_LIMIT_MESSAGE } from './classMonitor.js';
 
 const classId = 'class-a', periodId = 'period-1';
 const session = (id, title, day = 0) => ({ id, classId, periodId, day, title, notes: `${title} notes` });
@@ -19,6 +20,20 @@ test('local calendar dates survive both London clock changes and year boundaries
   assert.equal(mondayFor('2027-01-01'), '2026-12-28');
   assert.equal(reportDateError('2026-08-31', '2026-09-01', year), 'Keep report dates within the selected academic year.');
   assert.equal(reportDateError('2027-02-30', '2027-03-01', year), 'Enter a valid From and To date in order.');
+});
+
+test('past styling uses the London calendar day, not elapsed hours or UTC day', () => {
+  assert.equal(londonCalendarToday(new Date('2027-03-28T22:30:00Z')), '2027-03-28');
+  assert.equal(londonCalendarToday(new Date('2027-03-28T23:30:00Z')), '2027-03-29');
+  assert.equal(londonCalendarToday(new Date('2027-10-31T23:30:00Z')), '2027-10-31');
+  assert.equal(londonCalendarToday(new Date('2027-11-01T00:30:00Z')), '2027-11-01');
+  const today = '2027-03-29';
+  assert.equal(isPastClassMonitorRow({ type: 'lesson', date: '2027-03-28' }, today), true);
+  assert.equal(isPastClassMonitorRow({ type: 'closure', date: today }, today), false);
+  assert.equal(isPastClassMonitorRow({ type: 'lesson', date: '2027-03-30' }, today), false);
+  assert.equal(isPastClassMonitorRow({ type: 'holiday', visibleStart: '2027-03-27', visibleEnd: today }, today), false);
+  assert.equal(isPastClassMonitorRow({ type: 'school-unknown', visibleStart: '2027-03-27', visibleEnd: '2027-03-28' }, today), true);
+  assert.equal(isPastClassMonitorRow({ type: 'holiday', visibleStart: '2027-03-27', visibleEnd: '2027-03-28', endDate: '2027-04-04' }, today), true);
 });
 
 test('the report preflight permits exactly 60 calendar weeks and rejects 61 before enumeration', () => {
