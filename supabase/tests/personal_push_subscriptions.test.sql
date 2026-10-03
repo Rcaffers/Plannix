@@ -13,6 +13,7 @@ from (values
 
 select extensions.ok(not has_table_privilege('authenticated','private.plannix_push_subscriptions','SELECT,INSERT,UPDATE,DELETE'), 'browser role has no subscription table privileges');
 select extensions.ok(not has_table_privilege('anon','private.plannix_push_subscriptions','SELECT,INSERT,UPDATE,DELETE'), 'anon has no subscription table privileges');
+select extensions.ok(not has_table_privilege('service_role','private.plannix_push_subscriptions','SELECT'), 'service role does not read the private table directly');
 select extensions.ok(has_function_privilege('service_role','public.plannix_push_register_device(uuid,text,text,text,text)','EXECUTE'), 'service role can register');
 select extensions.ok(has_function_privilege('service_role','public.plannix_push_remove_expired_device(uuid,text,uuid)','EXECUTE'), 'service role can conditionally remove expired device');
 select extensions.ok(has_function_privilege('service_role','public.plannix_push_claim_device(uuid,text,text,text)','EXECUTE'), 'service role can claim an exact device');
@@ -86,13 +87,21 @@ select public.plannix_push_register_device('ca000000-0000-4000-8000-000000000002
 select extensions.ok(not public.plannix_push_device_status('ca000000-0000-4000-8000-000000000001',repeat('a',64)), 'reassignment removes previous owner');
 select extensions.ok(public.plannix_push_device_status('ca000000-0000-4000-8000-000000000002',repeat('a',64)), 'new owner has reassigned device');
 select extensions.ok(not public.plannix_push_remove_device('ca000000-0000-4000-8000-000000000001',repeat('a',64),
- (select subscription_version from private.plannix_push_subscriptions where endpoint_hash=repeat('a',64))),
+ (public.plannix_push_claim_device('ca000000-0000-4000-8000-000000000002',repeat('a',64),repeat('p',87),repeat('q',22)) ->> 'version')::uuid),
  'departed owner cannot remove reassigned device');
 select extensions.ok(public.plannix_push_device_status('ca000000-0000-4000-8000-000000000002',repeat('a',64)), 'old owner cannot remove new owner device');
+reset role;
+select extensions.is((select user_id from private.plannix_push_subscriptions where endpoint_hash=repeat('a',64)),
+ 'ca000000-0000-4000-8000-000000000002'::uuid, 'reassigned row still belongs to the new owner');
+set local role service_role;
 select extensions.ok(public.plannix_push_remove_device('ca000000-0000-4000-8000-000000000002',repeat('a',64),
- (select subscription_version from private.plannix_push_subscriptions where endpoint_hash=repeat('a',64))),
+ (public.plannix_push_claim_device('ca000000-0000-4000-8000-000000000002',repeat('a',64),repeat('p',87),repeat('q',22)) ->> 'version')::uuid),
  'current owner removes claimed version');
 select extensions.ok(not public.plannix_push_device_status('ca000000-0000-4000-8000-000000000002',repeat('a',64)), 'owner removes own device');
+reset role;
+select extensions.ok(not exists(select 1 from private.plannix_push_subscriptions where endpoint_hash=repeat('a',64)),
+ 'privileged inspection confirms claimed row was removed');
+set local role service_role;
 do $$
 declare n integer;
 begin
