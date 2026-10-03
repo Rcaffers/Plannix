@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import SettingsSubnav from '../components/SettingsSubnav';
+import MorningSummaryPanel from '../components/MorningSummaryPanel.jsx';
 import { currentPushSubscription, disableCurrentDevice, pushRequest, pushSupport, reconcilePushAccount, vapidBytes, waitForPushAccountReconciliation } from '../utils/pushNotifications';
 import { pushCoordinationSupported, PUSH_LOCK_UNAVAILABLE, withPushDeviceLock } from '../utils/pushDeviceLock';
 import './Settings.css';
 
-export default function Notifications({ userId }) {
+export default function Notifications({ userId, organisationId }) {
   const [configured, setConfigured] = useState(false);
   const [registered, setRegistered] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -141,6 +142,7 @@ export default function Notifications({ userId }) {
           <button className="settings-reset" type="button" disabled={!supported || !coordinated || !configured || loading || busy || !registered || permission !== 'granted'} onClick={test}>Send test notification</button>
         </div>
         <p className="settings-hint">A successful test request means the push service accepted it; your device may still delay or suppress delivery.</p>
+        <MorningSummaryPanel userId={userId} organisationId={organisationId} />
       </div>
     </div>
   </main>;

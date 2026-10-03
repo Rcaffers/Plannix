@@ -11,6 +11,10 @@ try {
   await build({ configFile: false, logLevel: 'error', define: { 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
     plugins: [{ name: 'notification-mock', enforce: 'pre', resolveId(source, importer) {
       if (importer?.endsWith('/Notifications.jsx') && source === '../utils/pushNotifications') return path.resolve('src/pages/Notifications.browser-test.jsx');
+      if (importer?.endsWith('/MorningSummaryPanel.jsx') && [
+        '../context/AcademicYearContext.jsx', '../context/ClassContext.jsx', '../context/TimetableLayoutContext.jsx',
+        '../utils/timetableSessionApi.js', '../utils/eventApi.js', '../utils/morningSummaryApi.js',
+      ].includes(source)) return path.resolve('src/pages/Notifications.browser-mocks.js');
     } }], build: { outDir: directory, emptyOutDir: false, lib: {
       entry: 'src/pages/Notifications.browser-test.jsx', formats: ['iife'], name: 'NotificationsTest', fileName: () => 'test.js', cssFileName: 'test',
     } } });
