@@ -52,7 +52,11 @@ test('context and UI include stale-response, explicit-save, switching and cleanu
   assert.match(context, /saving\.current/);
   assert.match(context, /await loadYear\(result\.academicYearId/);
   assert.doesNotMatch(context, /catch\(\(\) => \{\}\)/);
-  assert.match(page, /window\.confirm\('Discard unsaved academic-year changes or import preview\?'\)/);
+  // The rendered Academic Year fixture verifies that a dirty draft or AI review
+  // blocks navigation with one prompt. Keep this wiring check independent of copy.
+  assert.match(page, /const approveDiscard = useCallback\(\(\) => !\(draftDirtyRef\.current \|\| aiReviewDirtyRef\.current\)\s*\|\| window\.confirm\(/);
+  assert.match(page, /onReviewDirtyChange=\{onAiReviewDirtyChange\}/);
+  assert.match(page, /if \(draftDirtyRef\.current \|\| aiReviewDirtyRef\.current\) \{ event\.preventDefault\(\)/);
   assert.match(page, /disabled=\{isSaving \|\| isLoading\}/);
   assert.match(page, /academic-year-end/);
   assert.match(page, /Create academic year/);
