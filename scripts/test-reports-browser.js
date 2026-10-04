@@ -55,7 +55,12 @@ try {
       const rect = selector => { const r = document.querySelector(selector).getBoundingClientRect();
         return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
       const from = document.querySelector('#report-from'), to = document.querySelector('#report-to');
-      return { class: rect('#report-class'), from: rect('#report-from'), to: rect('#report-to'),
+      const card = document.querySelector('.reports-card'), cardRect = card.getBoundingClientRect(), style = getComputedStyle(card);
+      const cardContent = {
+        left: cardRect.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+        right: cardRect.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight),
+      };
+      return { class: rect('#report-class'), from: rect('#report-from'), to: rect('#report-to'), cardContent,
         fromLabel: rect('label[for="report-from"]'), toLabel: rect('label[for="report-to"]'),
         content: rect('.reports-filters'), fromClipped: from.scrollWidth > from.clientWidth + 1,
         toClipped: to.scrollWidth > to.clientWidth + 1,
@@ -65,13 +70,18 @@ try {
     assert.ok(filters.fromLabelled && filters.toLabelled
       && filters.class.height >= 44 && filters.from.height >= 44 && filters.to.height >= 44
       && !filters.fromClipped && !filters.toClipped
-      && filters.from.left >= filters.content.left - 1 && filters.to.right <= filters.content.right + 1
+      && filters.content.left >= filters.cardContent.left - 1 && filters.content.right <= filters.cardContent.right + 1
+      && filters.class.left >= filters.cardContent.left - 1 && filters.class.right <= filters.cardContent.right + 1
+      && filters.from.left >= filters.cardContent.left - 1 && filters.from.right <= filters.cardContent.right + 1
+      && filters.to.left >= filters.cardContent.left - 1 && filters.to.right <= filters.cardContent.right + 1
       && (phone
         ? filters.class.left <= filters.content.left + 1 && filters.class.right >= filters.content.right - 1
           && filters.class.bottom < filters.from.top && filters.from.bottom < filters.to.top
           && filters.fromLabel.right <= filters.from.left && filters.toLabel.right <= filters.to.left
           && Math.abs((filters.fromLabel.top + filters.fromLabel.bottom) / 2 - (filters.from.top + filters.from.bottom) / 2) <= 2
           && Math.abs((filters.toLabel.top + filters.toLabel.bottom) / 2 - (filters.to.top + filters.to.bottom) / 2) <= 2
+          && Math.abs(filters.from.right - filters.class.right) <= 1
+          && Math.abs(filters.to.right - filters.class.right) <= 1
           && filters.from.width >= 156 && filters.to.width >= 156
         : Math.abs(filters.class.top - filters.from.top) <= 1 && Math.abs(filters.from.top - filters.to.top) <= 1
           && filters.class.right < filters.from.left && filters.from.right < filters.to.left),
@@ -111,7 +121,9 @@ try {
       `${width}px Reports card overflows: ${JSON.stringify(value)}`);
   }
   console.log(JSON.stringify(measurements.map(({ viewport, scroll, filters, lessons }) => ({
-    viewport, scroll, fromWidth: filters.from.width, toWidth: filters.to.width,
+    viewport, scroll, cardContentRight: filters.cardContent.right,
+    classRight: filters.class.right, fromRight: filters.from.right, toRight: filters.to.right,
+    fromWidth: filters.from.width, toWidth: filters.to.width,
     shortTile: lessons.short.display, longTitleFragments: lessons.long.titleLines,
   }))));
   const printLayout = await send('Runtime.evaluate', { expression: `(() => {

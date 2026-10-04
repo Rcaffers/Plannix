@@ -48,8 +48,17 @@
   .reports-card { padding: 18px 14px; }
 }
 @media (max-width: 767px), (max-width: 950px) and (max-height: 450px) and (orientation: landscape) {
-  .reports-filters { grid-template-columns: minmax(0, 1fr); }
-  .reports-date-filter { grid-template-columns: 44px minmax(0, 1fr); align-items: center; }
+  .reports-filters { grid-template-columns: minmax(0, 1fr); width: 100%; }
+  .reports-date-filter { display: flex; align-items: center; min-width: 0; }
+  .reports-date-filter label { flex: 0 0 44px; }
+  .reports-filters .reports-date-filter input[type='date'] {
+    flex: 1 1 0%;
+    width: 0;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding-inline: 8px;
+  }
 }
 @page class-monitor { size: A4; margin: 14mm; }
 @media print {
