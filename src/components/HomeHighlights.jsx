@@ -2,20 +2,28 @@ import './HomeHighlights.css';
 
 const highlights = [
   {
-    title: 'Real weeks, real dates',
-    body: 'Move week by week with a timetable that knows Monday to Friday—including Week A and Week B when you use a two-week cycle.',
+    title: 'Plan lessons by week',
+    body: 'Use a weekly or Week A/B timetable. Place classes in teaching slots and add lesson titles and notes.',
   },
   {
-    title: 'Classes that stay within limits',
-    body: 'Define what you teach and how often. Plannix helps you place classes without blowing past the totals you set.',
+    title: 'Keep the school year in view',
+    body: 'Set your academic year and school holidays or closures. Add dated events, with optional weekend visibility in the timetable.',
   },
   {
-    title: 'Holidays that blank the grid',
-    body: 'Add term breaks and holidays once; those days show as closed, and full weeks off keep your A/B pattern in step.',
+    title: 'Review AI holiday suggestions',
+    body: 'Import from pasted text, PDF, images, Excel or CSV. Review suggestions, add them to your draft, then save the academic year.',
   },
   {
-    title: 'Your day, your layout',
-    body: 'Set periods, registration, breaks, and lunch in settings so the grid matches how your school actually runs.',
+    title: 'Preview extracted events',
+    body: 'Extract event ideas from text or a document and correct them in an editable preview. The preview does not save events.',
+  },
+  {
+    title: 'See each class across the year',
+    body: 'Filter Class Monitor by class and date, then export the report to Excel or print it.',
+  },
+  {
+    title: 'Keep Plannix close',
+    body: 'Install Plannix on your home screen. On supported devices, you can opt in to notifications and send a test notification.',
   },
 ];
 
@@ -25,10 +33,9 @@ export default function HomeHighlights() {
       <div className="container home-highlights-inner">
         <header className="home-highlights-header">
           <p className="home-highlights-kicker">Why teachers use Plannix</p>
-          <h2 id="home-highlights-heading">Everything in one weekly view</h2>
+          <h2 id="home-highlights-heading">Plan the week and see the bigger picture</h2>
           <p className="home-highlights-lead">
-            Built for teachers who want a clear timetable—not another generic calendar. Start with the Individual plan and
-            grow when your school is ready.
+            From class placement to term dates and reports, keep the details of your teaching year together.
           </p>
         </header>
         <ul className="home-highlights-grid">

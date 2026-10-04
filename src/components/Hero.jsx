@@ -14,7 +14,7 @@ export default function Hero({ user }) {
           <p className="hero-subtitle">
             {user
               ? 'Pick up your timetable, classes, and settings where you left off.'
-              : 'A weekly timetable built for teachers—classes, holidays, Week A/B, and a layout that matches your school day.'}
+              : 'Plan weekly or alternating-week lessons, school closures and events in one teacher-friendly timetable.'}
           </p>
           <p className="hero-copy">
             {user ? (
@@ -24,9 +24,8 @@ export default function Hero({ user }) {
               </>
             ) : (
               <>
-                Stop juggling spreadsheets and sticky notes. Plannix keeps limits, dates, and term breaks in sync so you
-                can focus on teaching. Join teachers who use the Individual plan today—School and School Pro when you are
-                ready to scale.
+                Set up your school day, place classes, and keep lesson titles and notes alongside your timetable.
+                Review your plans by date whenever you need them.
               </>
             )}
           </p>
@@ -46,7 +45,7 @@ export default function Hero({ user }) {
                   Start free—create an account
                 </button>
                 <Link to="/features" className="hero-button hero-button-secondary">
-                  View plans and pricing
+                  Explore features
                 </Link>
                 <a href="#highlights" className="hero-button hero-button-ghost">
                   See what you get

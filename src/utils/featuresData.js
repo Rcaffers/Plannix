@@ -1,25 +1,31 @@
 export const featureTiers = [
   {
-    heading: 'Individual',
-    description: 'Plan your week, lessons, and priorities in one place—built for a single teacher’s workflow.',
+    heading: 'Plan your teaching year',
+    description: 'Build a timetable around the school day and keep each class’s lessons in context.',
     bullets: [
-      'Configure your school day—periods, registration, breaks, and lunch—so the grid matches how you actually teach',
-      'One-week or two-week timetable cycle with Week A / Week B labelling when you use a fortnight rotation',
-      'Academic year label, year start, and holiday ranges; closed days show on the grid and full holiday weeks keep A/B in step',
-      'Classes list with how often each group meets per week or per 2-week cycle, following your timetable rotation',
-      'Assign classes and lesson titles to lesson slots, with usage counts so you stay within the caps you set',
-      'Date-aware Monday–Friday view: move week by week with real calendar dates, not a disconnected repeating strip',
-      'Dedicated Classes pages for reviewing your list and a focused flow for entering groups and limits',
-      'Your layout, classes, and weekly plan persist in the browser on this device so you can continue between visits',
+      'Choose a weekly or alternating Week A/B timetable, with teaching periods, registration, breaks and lunch',
+      'Place classes into lesson slots, track their frequency, and add lesson titles and notes',
+      'Set the academic year and record school holidays and closures so dated weeks reflect days off',
+      'Add dated events without changing lessons; choose whether weekend events appear in the timetable',
     ],
     signupCta: true,
   },
   {
-    heading: 'School',
-    description: 'Shared structure and visibility for departments and teams, with room to grow as your school does.',
+    heading: 'Review AI import suggestions',
+    description: 'Bring school-calendar information into a review flow before deciding what belongs in your plan.',
+    bullets: [
+      'For holidays and closures, import pasted text, PDF, images, Excel or CSV',
+      'Correct and select holiday suggestions, add them to the academic-year draft, then explicitly save the academic year',
+      'For events, extract suggestions into an editable preview; the preview does not save events',
+    ],
   },
   {
-    heading: 'School Pro',
-    description: 'Advanced coordination, reporting, and support for larger institutions with complex timetables.',
+    heading: 'Review and keep in touch',
+    description: 'Look back over a class’s schedule and keep quick access to Plannix on supported devices.',
+    bullets: [
+      'Filter Class Monitor by class and inclusive dates, then export its report to Excel or print it',
+      'Install Plannix on your home screen for convenient access',
+      'Optionally enable notifications on a supported device and send a test notification',
+    ],
   },
 ];

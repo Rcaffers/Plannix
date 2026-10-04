@@ -10,8 +10,7 @@ export default function Features({ user }) {
           <p className="features-kicker">Features</p>
           <h1 className="features-title">Explore what Plannix can do</h1>
           <p className="features-lead">
-            Three feature areas for using Plannix as an individual, across a whole school, or in enterprise-style
-            operations.
+            Set up your lessons, review school dates and events, and see what you have planned for each class.
           </p>
         </header>
 
