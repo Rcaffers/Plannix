@@ -35,7 +35,7 @@ function harness({ claim = true, send = async () => ({ statusCode: 201 }), snaps
       calls.push([name, args]);
       if (referenceDenied && name === 'plannix_morning_summary_notification_snapshot')
         return { data: null, error: { code: 'P0002', message: 'Synthetic foreign reference' } };
-      const data = name === 'plannix_claim_morning_summary_jobs'
+      const data = name === 'plannix_claim_morning_summary_pilot_jobs'
         ? claim ? [{ userId, academicYearId: yearId, date: '2026-10-05', token, revision: 1, notificationRef }] : []
         : name === 'plannix_morning_summary_snapshot'
           || name === 'plannix_morning_summary_notification_snapshot' ? snapshotValue
@@ -59,7 +59,7 @@ test('snapshot and preview share canonical Week A ordering while the push contai
     'scheduler and preview use the same summary transformation');
   assert.deepEqual(await service.resolveReference(userId, notificationRef), expectedPreview,
     'authenticated reference resolves the same complete day after access checks');
-  assert.deepEqual((await service.run()).claimed, 1);
+  assert.deepEqual((await service.run({ pilotUserId: userId })).claimed, 1);
   assert.equal(pushes.length, 1);
   const payload = JSON.parse(pushes[0][1]);
   assert.equal(payload.notificationRef, notificationRef);
@@ -75,7 +75,7 @@ test('snapshot and preview share canonical Week A ordering while the push contai
 
 test('failed snapshot prevents all device claims and provider calls', async () => {
   const { service, calls, pushes } = harness({ snapshotValue: { ...snapshot, dated: null } });
-  await assert.rejects(service.run(), /unavailable/);
+  await assert.rejects(service.run({ pilotUserId: userId }), /unavailable/);
   assert.equal(calls.some(([name]) => name === 'plannix_claim_morning_summary_device'), false);
   assert.equal(pushes.length, 0);
 });
@@ -86,7 +86,7 @@ test('explicit rejection is retryable; unknown outcome stays uncertain; expiry c
       if (statusCode === undefined) throw Error('synthetic lost response');
       return { statusCode };
     } });
-    await service.run();
+    await service.run({ pilotUserId: userId });
     assert.equal(calls.find(([name]) => name === 'plannix_finish_morning_summary_device')[1].target_state, expected);
     assert.equal(calls.some(([name]) => name === 'plannix_push_remove_expired_device'), expected === 'expired');
     if (expected === 'expired') assert.equal(calls.find(([name]) => name === 'plannix_push_remove_expired_device')[1].claimed_version, version);
@@ -95,11 +95,15 @@ test('explicit rejection is retryable; unknown outcome stays uncertain; expiry c
 
 test('no claim means no send; invalid payloads fail before transport', async () => {
   const empty = harness({ claim: false });
-  assert.equal((await empty.service.run()).claimed, 0);
+  await assert.rejects(empty.service.run(), /unavailable/);
+  assert.equal(empty.calls.length, 0, 'missing pilot scope cannot reach the database');
+  assert.equal((await empty.service.run({ pilotUserId: userId })).claimed, 0);
+  assert.equal(empty.calls[0][0], 'plannix_claim_morning_summary_pilot_jobs');
+  assert.equal(empty.calls[0][1].pilot_user, userId);
   assert.equal(empty.pushes.length, 0);
   assert.throws(() => summaryPayload({ date: '2026-10-05', lessons: [], events: [] }, 'foreign'), /unavailable/);
   const invalid = harness({ snapshotValue: { ...snapshot, year: { ...snapshot.year, id: userId } } });
-  await assert.rejects(invalid.service.run(), /unavailable/);
+  await assert.rejects(invalid.service.run({ pilotUserId: userId }), /unavailable/);
   assert.equal(invalid.pushes.length, 0);
   const bounded = summaryPayload({ date: '2026-10-05', lessons: Array.from({ length: 20 }, (_, index) =>
     ({ period: `P${index + 1}`, className: '7A', title: '📚'.repeat(80), isPpa: false })),
@@ -113,7 +117,7 @@ test('reassignment after claim skips transport; reassignment immediately before 
   let currentVersion = version;
   const beforeCheck = harness({ onDeviceClaim: () => { currentVersion = userId; },
     dispatchSeconds: () => currentVersion === version ? 600 : null });
-  await beforeCheck.service.run();
+  await beforeCheck.service.run({ pilotUserId: userId });
   assert.equal(beforeCheck.pushes.length, 0);
   assert.equal(beforeCheck.calls.find(([name]) => name === 'plannix_finish_morning_summary_device')[1].target_state, 'skipped');
 
@@ -123,7 +127,7 @@ test('reassignment after claim skips transport; reassignment immediately before 
     assert.doesNotMatch(rawPayload, /Fractions|Assembly|7A/);
     return { statusCode: 201 };
   } });
-  await beforeSend.service.run();
+  await beforeSend.service.run({ pilotUserId: userId });
   assert.equal(beforeSend.pushes.length, 1);
   const foreign = harness({ referenceDenied: true });
   await assert.rejects(foreign.service.resolveReference(userId, notificationRef), /unavailable/);
@@ -132,13 +136,30 @@ test('reassignment after claim skips transport; reassignment immediately before 
 test('delivery-window check bounds TTL and skips an attempt crossing the cutoff, including retries', async () => {
   let tick = 0;
   const nearCutoff = harness({ dispatchSeconds: 2, monotonicNow: () => tick++ ? 1200 : 0 });
-  await nearCutoff.service.run();
+  await nearCutoff.service.run({ pilotUserId: userId });
   assert.equal(nearCutoff.pushes.length, 0);
   assert.equal(nearCutoff.calls.find(([name]) => name === 'plannix_finish_morning_summary_device')[1].target_state, 'skipped');
   const inside = harness({ dispatchSeconds: 14 });
-  await inside.service.run();
+  await inside.service.run({ pilotUserId: userId });
   assert.equal(inside.pushes[0][2].TTL, 14);
   const retryAtCutoff = harness({ dispatchSeconds: null });
-  await retryAtCutoff.service.run();
+  await retryAtCutoff.service.run({ pilotUserId: userId });
   assert.equal(retryAtCutoff.pushes.length, 0);
+});
+
+test('polling AbortSignal reaches the database request and prevents transport', async () => {
+  const controller = new AbortController(); let receivedSignal; let pushes = 0;
+  const service = createMorningSummaryDelivery({ config, getPushConfiguration: () => vapid,
+    createClientImpl: () => ({ rpc: () => ({ abortSignal: signal => {
+      receivedSignal = signal;
+      return new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(Error('synthetic abort')), { once: true }));
+    } }) }),
+    pushImpl: { sendNotification: async () => { pushes++; return { statusCode: 201 }; } },
+  });
+  const running = service.run({ pilotUserId: userId, signal: controller.signal });
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(receivedSignal, controller.signal);
+  controller.abort();
+  await assert.rejects(running, /unavailable/);
+  assert.equal(pushes, 0);
 });

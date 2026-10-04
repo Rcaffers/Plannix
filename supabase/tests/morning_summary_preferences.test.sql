@@ -71,8 +71,8 @@ select extensions.is((select pg_catalog.count(*) from private.plannix_morning_su
 select extensions.is((select pg_catalog.count(*) from private.plannix_morning_summary_preferences where enabled),0::bigint,'only committed preference values remain');
 select extensions.ok(not has_table_privilege('authenticated','private.plannix_morning_summary_jobs','SELECT,INSERT,UPDATE,DELETE'), 'browser cannot access claims');
 select extensions.ok(not has_table_privilege('authenticated','private.plannix_morning_summary_deliveries','SELECT,INSERT,UPDATE,DELETE'), 'browser cannot access delivery state');
-select extensions.ok(has_function_privilege('service_role','public.plannix_claim_morning_summary_jobs(integer)','EXECUTE'), 'worker can claim');
-select extensions.ok(not has_function_privilege('authenticated','public.plannix_claim_morning_summary_jobs(integer)','EXECUTE'), 'browser cannot claim');
+select extensions.ok(has_function_privilege('service_role','public.plannix_claim_morning_summary_pilot_jobs(integer,uuid)','EXECUTE'), 'worker can claim the pilot');
+select extensions.ok(not has_function_privilege('authenticated','public.plannix_claim_morning_summary_pilot_jobs(integer,uuid)','EXECUTE'), 'browser cannot claim');
 select extensions.is(private.plannix_morning_summary_due_date('2026-10-05 06:00:00+00','07:00'),'2026-10-05'::date,'London delivery window begins inclusively');
 select extensions.is(private.plannix_morning_summary_due_date('2026-10-05 06:14:59+00','07:00'),'2026-10-05'::date,'London delivery window includes final second');
 select extensions.is(private.plannix_morning_summary_due_date('2026-10-05 06:15:00+00','07:00'),null::date,'London delivery window ends after 15 minutes');

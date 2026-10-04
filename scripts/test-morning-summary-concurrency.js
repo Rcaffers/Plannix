@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 
 const exec = promisify(execFile);
 const database = process.argv[2];
-if (!/^summary_(?:review|stage2)_[a-z0-9_]+$/.test(database || '')) throw Error('Disposable summary database required.');
+if (!/^summary_(?:review|stage2|stage3)_[a-z0-9_]+$/.test(database || '')) throw Error('Disposable summary database required.');
 for (const name of ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG']) {
   if (process.env[name]) throw Error('Docker connection overrides are not allowed.');
 }
@@ -19,13 +19,23 @@ const user = 'cb000000-0000-4000-8000-000000000071';
 const organisation = 'cb000000-0000-4000-8000-000000000072';
 const member = 'cb000000-0000-4000-8000-000000000073';
 const year = 'cb000000-0000-4000-8000-000000000074';
+const otherUser = 'cb000000-0000-4000-8000-000000000081';
+const otherOrganisation = 'cb000000-0000-4000-8000-000000000082';
+const otherMember = 'cb000000-0000-4000-8000-000000000083';
+const otherYear = 'cb000000-0000-4000-8000-000000000084';
 if (await query('select count(*) from auth.users') !== '0') throw Error('Disposable database must have no users.');
 await query(`insert into auth.users(id,email,email_confirmed_at) values ('${user}','summary-race@example.test',now());
 insert into public.plannix_organisations(id,name,organisation_type) values ('${organisation}','Summary race','personal');
 insert into private.plannix_personal_organisations(user_id,organisation_id) values ('${user}','${organisation}');
 insert into public.plannix_organisation_users(id,user_id,organisation_id) values ('${member}','${user}','${organisation}');
 insert into public.plannix_academic_years(id,organisation_id,name,start_date,end_date)
-values ('${year}','${organisation}','2026-27','2026-09-01','2027-08-31')`);
+values ('${year}','${organisation}','2026-27','2026-09-01','2027-08-31');
+insert into auth.users(id,email,email_confirmed_at) values ('${otherUser}','summary-other@example.test',now());
+insert into public.plannix_organisations(id,name,organisation_type) values ('${otherOrganisation}','Other summary race','personal');
+insert into private.plannix_personal_organisations(user_id,organisation_id) values ('${otherUser}','${otherOrganisation}');
+insert into public.plannix_organisation_users(id,user_id,organisation_id) values ('${otherMember}','${otherUser}','${otherOrganisation}');
+insert into public.plannix_academic_years(id,organisation_id,name,start_date,end_date)
+values ('${otherYear}','${otherOrganisation}','2026-27','2026-09-01','2027-08-31')`);
 
 function session(name) {
   const child = spawn('docker', ['exec', '-i', container, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1',
@@ -81,16 +91,19 @@ await race('update', 1, '07:15', '10:00', 2);
 // A real contended unique-key insert: B reaches the production job claim's
 // user/day key while A holds the uncommitted claim transaction.
 await query(`insert into private.plannix_push_subscriptions(endpoint_hash,user_id,endpoint,p256dh,auth_key)
-values (repeat('a',64),'${user}','https://fcm.googleapis.com/fcm/send/synthetic-summary-race',repeat('x',88),repeat('y',22))`);
+values (repeat('a',64),'${user}','https://fcm.googleapis.com/fcm/send/synthetic-summary-race',repeat('x',88),repeat('y',22));
+select public.plannix_save_morning_summary_preferences('${otherUser}',0,true,'07:15','${otherYear}');
+insert into private.plannix_push_subscriptions(endpoint_hash,user_id,endpoint,p256dh,auth_key)
+values (repeat('b',64),'${otherUser}','https://fcm.googleapis.com/fcm/send/synthetic-other-race',repeat('x',88),repeat('y',22))`);
 const aName = `summary_job_a_${process.pid}`;
 const bName = `summary_job_b_${process.pid}`;
 const a = session(aName); const b = session(bName);
 try {
   a.send(`begin; set local application_name='${aName}'; set local statement_timeout='12s';
-select private.plannix_claim_morning_summary_jobs_at('2026-10-05 06:15:00+00',1);\n\\echo A_HOLD\n`);
+select private.plannix_claim_morning_summary_pilot_jobs_at('2026-10-05 06:15:00+00',1,'${user}');\n\\echo A_HOLD\n`);
   await a.waitFor('A_HOLD');
   b.send(`begin; set local application_name='${bName}'; set local statement_timeout='12s';
-select private.plannix_claim_morning_summary_jobs_at('2026-10-05 06:15:01+00',1);\n\\echo B_DONE\n`);
+select private.plannix_claim_morning_summary_pilot_jobs_at('2026-10-05 06:15:01+00',1,'${user}');\n\\echo B_DONE\n`);
   let blocked = '';
   const end = Date.now() + 7000;
   while (Date.now() < end) {
@@ -107,7 +120,9 @@ select private.plannix_claim_morning_summary_jobs_at('2026-10-05 06:15:01+00',1)
   assert.match(b.result().output, /\[\]/, 'second worker acquired no claim');
   assert.equal(await query(`select count(*) from private.plannix_morning_summary_jobs
     where user_id='${user}' and london_date='2026-10-05'`), '1');
-  console.log(`job claim: competing worker blocked on ${blocked}; exactly one durable user/day job.`);
+  assert.equal(await query(`select count(*) from private.plannix_morning_summary_jobs
+    where user_id='${otherUser}'`), '0', 'non-pilot has no reserved job during concurrent claims');
+  console.log(`job claim: competing worker blocked on ${blocked}; exactly one pilot job and no other-user job.`);
 } finally { a.stop(); b.stop(); }
 
 // A production dispatch check reads the clock after acquiring the job row.
@@ -154,4 +169,5 @@ select coalesce(private.plannix_morning_summary_dispatch_seconds_at(
   console.log(`dispatch cutoff: competing check blocked on ${blocked}; post-lock clock skipped the attempt.`);
 } finally { cutoffA.stop(); cutoffB.stop(); }
 
-await query(`delete from public.plannix_organisations where id='${organisation}'; delete from auth.users where id='${user}'`);
+await query(`delete from public.plannix_organisations where id in ('${organisation}','${otherOrganisation}');
+  delete from auth.users where id in ('${user}','${otherUser}')`);

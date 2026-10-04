@@ -30,18 +30,20 @@ export function createMorningSummaryDelivery({ config = env, createClientImpl = 
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     });
   };
-  async function rpc(name, args) {
+  async function rpc(name, args, signal) {
     try {
-      const { data, error } = await client().rpc(name, args);
+      if (signal?.aborted) throw unavailable();
+      const request = client().rpc(name, args);
+      const { data, error } = await (signal ? request.abortSignal(signal) : request);
       if (error) throw unavailable();
       return data;
     } catch { throw unavailable(); }
   }
-  async function resolve(userId, academicYearId, date) {
+  async function resolve(userId, academicYearId, date, signal) {
     if (!UUID.test(userId) || !UUID.test(academicYearId) || !DATE.test(date)) throw unavailable();
     const snapshot = await rpc('plannix_morning_summary_snapshot', {
       target_user: userId, target_year: academicYearId, target_date: date,
-    });
+    }, signal);
     if (!snapshot || snapshot.date !== date || snapshot.year?.id !== academicYearId
       || !summaryDateInfo(date, snapshot.year).eligible) throw unavailable();
     try {
@@ -61,10 +63,14 @@ export function createMorningSummaryDelivery({ config = env, createClientImpl = 
         classes: snapshot.classes, events: snapshot.events, weeks: snapshot.weeks });
     } catch { throw unavailable(); }
   }
-  async function run({ maxJobs = 4, concurrency = 4 } = {}) {
+  async function run({ maxJobs = 4, concurrency = 4, pilotUserId, signal } = {}) {
     if (!getPushConfiguration(config) || !Number.isInteger(maxJobs) || maxJobs < 1 || maxJobs > 50
-      || !Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw unavailable();
-    const claims = await rpc('plannix_claim_morning_summary_jobs', { max_jobs: maxJobs });
+      || !Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4
+      || !UUID.test(pilotUserId)) throw unavailable();
+    const call = (name, args) => rpc(name, args, signal);
+    const claims = await call('plannix_claim_morning_summary_pilot_jobs', {
+      max_jobs: maxJobs, pilot_user: pilotUserId,
+    });
     if (!Array.isArray(claims) || claims.length > maxJobs) throw unavailable();
     let index = 0;
     async function next() {
@@ -75,14 +81,14 @@ export function createMorningSummaryDelivery({ config = env, createClientImpl = 
           || !UUID.test(job.token) || !DATE.test(job.date) || !Number.isSafeInteger(job.revision)) throw unavailable();
         // A missing or partial snapshot fails closed. The lease expires, but no
         // device has been claimed or contacted.
-        const summary = await resolve(job.userId, job.academicYearId, job.date);
+        const summary = await resolve(job.userId, job.academicYearId, job.date, signal);
         const payload = JSON.stringify(summaryPayload(summary, job.notificationRef));
-        const hashes = await rpc('plannix_morning_summary_device_hashes', {
+        const hashes = await call('plannix_morning_summary_device_hashes', {
           target_user: job.userId, target_date: job.date, target_token: job.token,
         });
         if (!Array.isArray(hashes) || hashes.length > 10 || hashes.some(hash => !HASH.test(hash))) throw unavailable();
         for (const hash of hashes) {
-          const device = await rpc('plannix_claim_morning_summary_device', {
+          const device = await call('plannix_claim_morning_summary_device', {
             target_user: job.userId, target_date: job.date, target_token: job.token,
             target_hash: hash, target_revision: job.revision, target_year: job.academicYearId,
           });
@@ -90,7 +96,7 @@ export function createMorningSummaryDelivery({ config = env, createClientImpl = 
           if (!UUID.test(device.version) || !validPushSubscription({ endpoint: device.endpoint, keys: device.keys })
             || endpointHash(device.endpoint) !== hash) throw unavailable();
           const checkedFrom = monotonicNow();
-          const seconds = await rpc('plannix_morning_summary_dispatch_seconds', {
+          const seconds = await call('plannix_morning_summary_dispatch_seconds', {
             target_user: job.userId, target_date: job.date, target_token: job.token,
             target_hash: hash, target_version: device.version,
             target_revision: job.revision, target_year: job.academicYearId,
@@ -98,7 +104,7 @@ export function createMorningSummaryDelivery({ config = env, createClientImpl = 
           if (seconds !== null && (!Number.isInteger(seconds) || seconds < 1 || seconds > 900)) throw unavailable();
           const ttl = seconds === null ? 0 : seconds - Math.ceil(Math.max(0, monotonicNow() - checkedFrom) / 1000);
           if (ttl < 1) {
-            await rpc('plannix_finish_morning_summary_device', {
+            await call('plannix_finish_morning_summary_device', {
               target_user: job.userId, target_date: job.date, target_token: job.token,
               target_hash: hash, target_version: device.version, target_state: 'skipped',
             });
@@ -106,6 +112,7 @@ export function createMorningSummaryDelivery({ config = env, createClientImpl = 
           }
           let state = 'uncertain';
           try {
+            if (signal?.aborted) throw unavailable();
             const vapid = getPushConfiguration(config);
             const response = await pushImpl.sendNotification({ endpoint: device.endpoint, keys: device.keys }, payload, {
               vapidDetails: { subject: vapid.subject, publicKey: vapid.publicKey, privateKey: vapid.privateKey },
@@ -119,15 +126,15 @@ export function createMorningSummaryDelivery({ config = env, createClientImpl = 
             else if (error?.statusCode === 429) state = 'retryable';
             // No status can mean accepted with a lost response. Never retry it.
           }
-          await rpc('plannix_finish_morning_summary_device', {
+          await call('plannix_finish_morning_summary_device', {
             target_user: job.userId, target_date: job.date, target_token: job.token,
             target_hash: hash, target_version: device.version, target_state: state,
           });
-          if (state === 'expired') await rpc('plannix_push_remove_expired_device', {
+          if (state === 'expired') await call('plannix_push_remove_expired_device', {
             validated_user_id: job.userId, target_hash: hash, claimed_version: device.version,
           });
         }
-        await rpc('plannix_finish_morning_summary_job', {
+        await call('plannix_finish_morning_summary_job', {
           target_user: job.userId, target_date: job.date, target_token: job.token,
         });
       }
