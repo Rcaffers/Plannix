@@ -368,14 +368,15 @@ async function run() {
   check(document.activeElement === notes && !saturdayCards[2].querySelector('script'), 'Notes are keyboard accessible and rendered as text');
   notes.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); click(notes);
   check(saturdayCards[2].querySelector('details').open && saturdayCards[2].textContent.includes('<script>Plain notes</script>'), 'Notes can be revealed without HTML execution');
-  check(document.querySelector('.schedule-events-manage').getAttribute('href') === '/settings/events', 'Manage Events link opens Settings Events');
-  document.querySelector('.schedule-events-manage').focus();
-  check(document.activeElement === document.querySelector('.schedule-events-manage'), 'Manage Events link accepts keyboard focus');
+  check(!document.querySelector('.schedule-events-manage') && !document.querySelector('.schedule-events').textContent.includes('Manage events in Settings'),
+    'Timetable has no Manage Events link');
   for (const size of [320, 375, 390, 430, 768, 820, 1024, 1366]) {
     await width(size);
     const scroll = document.querySelector('.schedule-scroll');
     const eventRow = document.querySelector('.schedule-events-row');
     const scheduleGrid = document.querySelector('.schedule-grid');
+    const eventSection = document.querySelector('.schedule-events');
+    const lastEventContent = eventSection.querySelector('.schedule-events-weekend') || eventRow;
     const headings = [...document.querySelectorAll('.schedule-head > *')];
     const eventCells = [...eventRow.children];
     const columnError = Math.max(...eventCells.map((cell, index) => {
@@ -385,6 +386,8 @@ async function run() {
     check(eventRow.getBoundingClientRect().top >= scheduleGrid.getBoundingClientRect().bottom - 1
       && columnError <= 1, `${size}px: event cells follow final period and align with weekday headings`);
     check(document.documentElement.scrollWidth <= innerWidth + 1, `${size}px: event text does not cause page overflow`);
+    check(Math.abs(eventSection.getBoundingClientRect().bottom - lastEventContent.getBoundingClientRect().bottom) <= 1,
+      `${size}px: removed link leaves no trailing gap below event content`);
     if (size < 768) {
       check(Math.abs(eventRow.getBoundingClientRect().left - document.querySelector('.schedule-grid').getBoundingClientRect().left) <= 1
         && Math.abs(eventRow.getBoundingClientRect().right - document.querySelector('.schedule-grid').getBoundingClientRect().right) <= 1,

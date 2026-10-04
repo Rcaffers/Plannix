@@ -73,6 +73,5 @@ export default function TimetableEvents({ userId, academicYearId, monday, dayInd
         <div className="schedule-events-weekend-cards">{cards(dates[index])}</div>
       </div>)}
     </div> : null}
-    <a className="schedule-events-manage" href="/settings/events">Manage events in Settings</a>
   </section>;
 }
