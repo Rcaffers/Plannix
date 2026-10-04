@@ -45,8 +45,9 @@ try {
   assert.equal(result.result.value[0], 'passed', result.result.value[1]);
   console.log(result.result.value[1]);
   const measurements = [];
-  for (const width of [320, 375, 390, 430, 768, 820, 1024, 1366]) {
-    await send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false }, sessionId);
+  for (const [width, height] of [[320, 900], [375, 900], [390, 900], [430, 900],
+    [667, 375], [700, 900], [767, 900], [844, 390], [932, 430], [768, 900], [820, 900], [1024, 900], [1366, 900]]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
     const measurement = await send('Runtime.evaluate', { expression: '({viewport:innerWidth,scroll:document.documentElement.scrollWidth,card:(()=>{const r=document.querySelector(".reports-card").getBoundingClientRect();return {left:r.left,right:r.right}})(),past:(()=>{const e=document.querySelector(".reports-lesson--past");if(!e)return null;const r=e.getBoundingClientRect(),s=getComputedStyle(e),outer=getComputedStyle(e.closest(".reports-entry"));return {left:r.left,right:r.right,border:s.borderLeftWidth,background:s.backgroundColor,outerBackground:outer.backgroundColor,outerBorder:outer.borderLeftWidth}})(),yellow:(()=>{const nodes=[...document.querySelectorAll(".reports-holiday,.reports-entry--closure")],card=document.querySelector(".reports-card").getBoundingClientRect();return {count:nodes.length,fit:nodes.every(e=>{const r=e.getBoundingClientRect();return r.left>=card.left-1&&r.right<=card.right+1}),style:nodes.every(e=>{const s=getComputedStyle(e);return s.backgroundColor==="rgba(250, 240, 220, 0.55)"&&s.borderTopStyle==="solid"&&s.borderTopColor==="rgba(200, 160, 90, 0.45)"&&s.borderTopLeftRadius==="12px"})}})()})', returnByValue: true }, sessionId);
     const value = measurement.result.value;
     measurements.push(value);
@@ -60,7 +61,7 @@ try {
         toClipped: to.scrollWidth > to.clientWidth + 1,
         fromLabelled: from.labels?.[0]?.textContent === 'From', toLabelled: to.labels?.[0]?.textContent === 'To' };
     })()`, returnByValue: true }, sessionId)).result.value;
-    const phone = width <= 430;
+    const phone = width <= 767 || (width <= 950 && height <= 450 && width > height);
     assert.ok(filters.fromLabelled && filters.toLabelled
       && filters.class.height >= 44 && filters.from.height >= 44 && filters.to.height >= 44
       && !filters.fromClipped && !filters.toClipped
@@ -74,7 +75,7 @@ try {
           && filters.from.width >= 156 && filters.to.width >= 156
         : Math.abs(filters.class.top - filters.from.top) <= 1 && Math.abs(filters.from.top - filters.to.top) <= 1
           && filters.class.right < filters.from.left && filters.from.right < filters.to.left),
-    `${width}px Reports date filters are clipped or misaligned: ${JSON.stringify(filters)}`);
+    `${width}×${height}px Reports date filters are clipped or misaligned: ${JSON.stringify(filters)}`);
     value.filters = filters;
     const lessons = (await send('Runtime.evaluate', { expression: `(() => {
       const tiles = [...document.querySelectorAll('.reports-lesson')];

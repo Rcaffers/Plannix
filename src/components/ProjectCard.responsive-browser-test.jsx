@@ -8,9 +8,10 @@ import Timetable from '../pages/Timetable.jsx';
 import { writeWeekendEventsPreference } from '../utils/weekendEventPreference.js';
 import '../App.css';
 
-const entries = [{ id: '7a', name: '7A', frequency: 3 }];
-const periods = [{ id: 'p1', type: 'teaching', number: 1 }, { id: 'p2', type: 'teaching', number: 2 }];
-const rowSegments = periods.map((p, i) => ({ kind: 'lesson', rowIndex: i, timeLabel: i ? '10:00' : '09:00', rangeLabel: i ? '10:00 – 11:00' : '09:00 – 10:00' }));
+const entries = [{ id: '7a', name: '7A', frequency: 3 },
+  ...['8B', '9C', '10D', '11E', '12F An exceptionallylongunbrokenclassnameforwrapping'].map((name, index) => ({ id: `class-${index}`, name, frequency: 2 }))];
+let periods = [{ id: 'p1', type: 'teaching', number: 1 }, { id: 'p2', type: 'teaching', number: 2 }];
+let rowSegments = periods.map((p, i) => ({ kind: 'lesson', rowIndex: i, timeLabel: i ? '10:00' : '09:00', rangeLabel: i ? '10:00 – 11:00' : '09:00 – 10:00' }));
 let fixtureAcademicYear = null;
 export const useAcademicYear = () => ({ academicYear: fixtureAcademicYear, selectedAcademicYearId: fixtureAcademicYear?.id });
 let eventRequests = [], eventResponder = () => Promise.resolve({ events: [] });
@@ -38,11 +39,12 @@ function Harness() {
     <header id="site-header-fixture" style={{ height: 64 }}>Site navigation</header>
     {mode === 'date' ? <Timetable /> : <section className="classes-input-timetable"><ProjectCard project={{ title: 'Input Classes' }} weekMode="fixed" enableFixedPhoneSingleDay enableClassPlacement /></section>}
   </>;
+  const card = <ProjectCard project={{ title: 'Test' }} weekMode={mode} enableEditing={allowEditing} enableClassPlacement enableFixedPhoneSingleDay
+    weekendEventsUserId={fixtureUserId}
+    fixedWeekKey={selectedWeek === 'B' ? 'cycle-2' : 'cycle-1'} fixedWeekLabel={`Week ${selectedWeek}`} />;
   return <>
     {mode === 'fixed' ? <div><button id="week-a" onClick={() => setSelectedWeek('A')}>Week A</button><button id="week-b" onClick={() => setSelectedWeek('B')}>Week B</button></div> : null}
-    <ProjectCard project={{ title: 'Test' }} weekMode={mode} enableEditing={allowEditing} enableClassPlacement enableFixedPhoneSingleDay
-      weekendEventsUserId={fixtureUserId}
-      fixedWeekKey={selectedWeek === 'B' ? 'cycle-2' : 'cycle-1'} fixedWeekLabel={`Week ${selectedWeek}`} />
+    {mode === 'fixed' ? <section className="classes-input-timetable">{card}</section> : card}
   </>;
 }
 const root = createRoot(document.body.appendChild(document.createElement('div')));
@@ -50,7 +52,7 @@ const results = [];
 function check(value, message) { if (!value) throw Error(message); assertHiddenStatuses(); results.push(message); }
 const tick = () => new Promise(resolve => setTimeout(resolve, 100));
 const click = el => flushSync(() => el.click());
-async function width(value) { frameElement.style.width = `${value}px`; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); await tick(); }
+async function width(value, height = 900) { frameElement.style.width = `${value}px`; frameElement.style.height = `${height}px`; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); await tick(); }
 function mount() { flushSync(() => root.render(<Harness key={Math.random()} />)); }
 function hiddenAnnouncement(selector) {
   const el = document.querySelector(selector), style = getComputedStyle(el);
@@ -72,6 +74,9 @@ function fullWeek(label) {
   check(cols.length === 5 && document.querySelectorAll('.day-head').length === 5, `${label}: five weekdays mounted`);
   check(!document.querySelector('.schedule-compact-nav') && document.querySelector('[aria-label="Go to next week"]') || mode === 'fixed', `${label}: standard week navigation`);
   check(cols.every((el,i) => el.getBoundingClientRect().width >= 100 && (!i || cols[i-1].getBoundingClientRect().right <= el.getBoundingClientRect().left + 1)), `${label}: readable columns without overlap`);
+  if (mode === 'fixed') check(Math.max(...cols.map(el => el.getBoundingClientRect().width))
+    - Math.min(...cols.map(el => el.getBoundingClientRect().width)) <= 1,
+  `${label}: all weekday columns have equal widths`);
   const bar = document.querySelector('.schedule-titlebar').getBoundingClientRect();
   const grid = document.querySelector('.schedule-grid').getBoundingClientRect();
   const scroll = document.querySelector('.schedule-scroll');
@@ -121,6 +126,11 @@ async function run() {
   card.style.width = '500px'; await tick();
   const narrowScroll = document.querySelector('.schedule-scroll');
   check(narrowScroll.scrollWidth > narrowScroll.clientWidth && document.querySelector('.schedule-grid').getBoundingClientRect().width >= 662, 'Narrow container retains minimum width and permits scrolling');
+  narrowScroll.scrollLeft = narrowScroll.scrollWidth;
+  const narrowFriday = document.querySelectorAll('.day-col')[4].getBoundingClientRect();
+  check(narrowFriday.left >= narrowScroll.getBoundingClientRect().left - 1
+    && narrowFriday.right <= narrowScroll.getBoundingClientRect().right + 1,
+  'Narrow inner timetable scroll reveals Friday without overflowing the card');
   card.style.width = ''; await tick();
   await width(820);
   check(window.matchMedia('(pointer: coarse)').matches, 'Chrome touch emulation supplies a real coarse pointer');
@@ -187,6 +197,60 @@ async function run() {
     check(state.recurring[0].sessions.length === 2 && state.recurring[1].sessions.length === 1 && document.querySelector('.lesson-card--placed'), 'Week A/B placements remain separate and intact');
   }
   for (const size of [768, 820, 1024, 1366]) { await width(size); fullWeek(`Input Classes ${size}px`); }
+  for (const [size, height] of [[320, 900], [375, 900], [390, 900], [430, 900],
+    [667, 375], [844, 390], [932, 430], [768, 900], [820, 900], [1024, 900], [1366, 900]]) {
+    await width(size, height); mount(); await tick();
+    const label = `Input Classes ${size}×${height}`;
+    const edit = [...document.querySelectorAll('.schedule-titlebar-actions button')].find(button => /^(Edit classes|Finish editing)$/.test(button.textContent));
+    if (edit.textContent === 'Edit classes') click(edit);
+    const palette = document.querySelector('.class-placement-palette').getBoundingClientRect();
+    const list = document.querySelector('.class-placement-list');
+    const chips = [...document.querySelectorAll('.class-placement-chip')];
+    const lastChip = chips.at(-1);
+    const lastRect = lastChip.getBoundingClientRect();
+    const chipSizes = chips.map(chip => chip.getBoundingClientRect());
+    check(chips.length === entries.length && list.scrollWidth <= list.clientWidth + 1
+      && chips.every(chip => { const box = chip.getBoundingClientRect();
+        return box.left >= palette.left - 1 && box.right <= palette.right + 1 && box.bottom <= palette.bottom + 1; })
+      && lastRect.width >= 130 && lastRect.height >= 44
+      && Math.max(...chipSizes.map(box => box.width)) - Math.min(...chipSizes.map(box => box.width)) <= 1
+      && Math.max(...chipSizes.map(box => box.height)) - Math.min(...chipSizes.map(box => box.height)) <= 1
+      && lastChip.querySelector('strong').scrollWidth <= lastChip.querySelector('strong').clientWidth + 1,
+    `${label}: every class has equal dimensions and long names wrap without clipping`);
+    if (size === 768 || size === 820) check(lastRect.top > chipSizes[0].top + 1
+      && Math.abs(lastRect.width - chipSizes[0].width) <= 1,
+    `${label}: the partially filled last row keeps the same card width`);
+    lastChip.focus(); check(document.activeElement === lastChip, `${label}: last class remains keyboard reachable`);
+    const finish = [...document.querySelectorAll('.schedule-titlebar-actions button')].find(button => button.textContent === 'Finish editing');
+    const header = document.querySelector('.schedule-titlebar').getBoundingClientRect();
+    const controls = [...document.querySelectorAll('.schedule-titlebar button')];
+    check(Boolean(finish) && controls.every(button => { const box = button.getBoundingClientRect();
+      return box.left >= header.left - 1 && box.right <= header.right + 1 && box.top >= header.top - 1 && box.bottom <= header.bottom + 1; })
+      && controls.every((button, index) => controls.slice(index + 1).every(other => {
+        const left = button.getBoundingClientRect(), right = other.getBoundingClientRect();
+        return left.right <= right.left + 1 || right.right <= left.left + 1
+          || left.bottom <= right.top + 1 || right.bottom <= left.top + 1;
+      }))
+      && finish.getBoundingClientRect().width >= 44,
+    `${label}: Finish and header controls stay visible within wrapping header`);
+    if (size < 768) {
+      click(document.querySelector('[aria-label="Previous day"]'));
+      check(document.querySelector('.schedule-day-label').textContent === 'Friday'
+        && document.querySelector('.day-col'), `${label}: phone navigation reaches Friday`);
+    } else {
+      const scroll = document.querySelector('.schedule-scroll');
+      scroll.scrollLeft = scroll.scrollWidth;
+      const friday = [...document.querySelectorAll('.day-col')].at(-1).getBoundingClientRect();
+      const viewport = scroll.getBoundingClientRect();
+      check(scroll.tabIndex === 0 && scroll.getAttribute('aria-label')?.includes('scroll horizontally')
+        && friday.left >= viewport.left - 1 && friday.right <= viewport.right + 1,
+      `${label}: inner timetable scroll keeps Friday reachable`);
+    }
+    check(document.documentElement.scrollWidth <= innerWidth + 1, `${label}: no page-level horizontal overflow`);
+    click(finish);
+  }
+  await width(820);
+  click([...document.querySelectorAll('.schedule-titlebar-actions button')].find(button => button.textContent === 'Edit classes'));
 
   // These tests drive the actual toolbar against session-state boundary states;
   // the provider browser suite separately exercises real queue success/recovery.
@@ -531,6 +595,52 @@ async function run() {
     && document.querySelector('.schedule-events-weekend-only').textContent.includes('Museum trip'),
   'Autumn DST Saturday stays distinct from Sunday');
   fixtureAcademicYear = null;
+
+  mode = 'fixed'; allowEditing = true;
+  periods = [
+    { id: 'registration', type: 'registration', order: 0 },
+    { id: 'p1', type: 'teaching', number: 1, order: 1 },
+    { id: 'break', type: 'break', order: 2 },
+    { id: 'p2', type: 'teaching', number: 2, order: 3 },
+    { id: 'lunch', type: 'lunch', order: 4 },
+  ];
+  rowSegments = [
+    { kind: 'registration', rowIndex: 0, timeLabel: '08:30', rangeLabel: '08:30 – 09:00' },
+    { kind: 'lesson', rowIndex: 1, timeLabel: '09:00', rangeLabel: '09:00 – 10:00' },
+    { kind: 'break', rowIndex: 2, timeLabel: '10:00', rangeLabel: '10:00 – 10:20' },
+    { kind: 'lesson', rowIndex: 3, timeLabel: '10:20', rangeLabel: '10:20 – 11:20' },
+    { kind: 'lunch', rowIndex: 4, timeLabel: '11:20', rangeLabel: '11:20 – 12:00' },
+  ];
+  initial.title = 'An exceptionallylongunbrokenlessontitlethatmustwrapwithinitscard';
+  initial.notes = 'Long lesson notes '.repeat(30);
+  for (const size of [320, 430, 820]) {
+    await width(size); mount(); await tick();
+    const edit = [...document.querySelectorAll('.schedule-titlebar-actions button')].find(button => button.textContent === 'Edit classes');
+    if (edit) click(edit);
+    const slots = [...document.querySelector('.day-col').querySelectorAll('.slot')];
+    const tiles = slots.map(slot => slot.querySelector('.lesson-card, .schedule-block-muted'));
+    const boxes = tiles.map(tile => tile.getBoundingClientRect());
+    const padding = tiles.map(tile => getComputedStyle(tile).paddingTop);
+    check(slots.length === 5 && tiles.every(Boolean)
+      && slots.filter(slot => slot.classList.contains('slot--nonlesson')).length === 3
+      && Math.max(...boxes.map(box => box.height)) - Math.min(...boxes.map(box => box.height)) <= 1
+      && padding.every(value => value === padding[0])
+      && tiles.every((tile, index) => tile.scrollHeight <= tile.clientHeight + 1
+        && Math.abs(boxes[index].left - slots[index].getBoundingClientRect().left - 6) <= 1),
+    `${size}px: lesson, Add class, registration, break and lunch tiles share padding and height without clipping`);
+    check(tiles[1].textContent.includes(initial.title) && tiles[1].textContent.includes(initial.notes.trim())
+      && document.documentElement.scrollWidth <= innerWidth + 1,
+    `${size}px: long lesson title and notes wrap without page overflow`);
+    if (size === 820) {
+      const columns = [...document.querySelectorAll('.day-col')];
+      const widths = columns.map(column => column.getBoundingClientRect().width);
+      check(Math.max(...widths) - Math.min(...widths) <= 1
+        && columns.every(column => [...column.querySelectorAll('.slot')].every((slot, index) =>
+          Math.abs(slot.getBoundingClientRect().top - slots[index].getBoundingClientRect().top) <= 1
+          && Math.abs(slot.getBoundingClientRect().bottom - slots[index].getBoundingClientRect().bottom) <= 1)),
+      'Long-content row grows matching weekday tiles together and keeps all day columns equal');
+    }
+  }
 
 }
 run().then(() => { parent.document.body.dataset.testResult='passed'; }, error => { parent.document.body.dataset.testResult='failed'; results.push(error.stack); }).finally(() => {

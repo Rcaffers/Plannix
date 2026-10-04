@@ -6,7 +6,11 @@
 .reports-filters .settings-field { min-width: 0; }
 .reports-filters :is(input, select) { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
 .reports-class-filter select { min-height: 44px; }
-.reports-date-filter input[type='date'] { min-height: 44px; }
+.reports-date-filter input[type='date'] {
+  min-height: 44px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
 .reports-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .reports-actions button { min-height: 44px; }
 .reports-print-header { display: none; }
@@ -42,6 +46,8 @@
 }
 @media (max-width: 600px) {
   .reports-card { padding: 18px 14px; }
+}
+@media (max-width: 767px), (max-width: 950px) and (max-height: 450px) and (orientation: landscape) {
   .reports-filters { grid-template-columns: minmax(0, 1fr); }
   .reports-date-filter { grid-template-columns: 44px minmax(0, 1fr); align-items: center; }
 }

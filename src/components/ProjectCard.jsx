@@ -993,7 +993,9 @@ export default function ProjectCard({
           <p className={`class-placement-status${placement.statusIsError ? ' classes-hint--error' : ' timetable-announcement visually-hidden'}`} role="status" aria-live="polite" aria-atomic="true">{placement.status}</p>
         </> : null}
         <div className="schedule-dynamic" style={scheduleVars}>
-          <div className={`schedule-scroll${isSingleDayTimetable ? ' schedule-scroll--single-day' : ''}`}>
+          <div className={`schedule-scroll${isSingleDayTimetable ? ' schedule-scroll--single-day' : ''}`}
+            tabIndex={enableClassPlacement && !isSingleDayTimetable ? 0 : undefined}
+            aria-label={enableClassPlacement && !isSingleDayTimetable ? 'Timetable days; scroll horizontally to see all weekdays' : undefined}>
             <div
               className={`schedule-scroll-track${isSingleDayTimetable ? ' schedule-scroll-track--single-day' : ''}`}
             >
