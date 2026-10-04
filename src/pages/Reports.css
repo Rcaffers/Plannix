@@ -42,10 +42,6 @@
 }
 @media (max-width: 600px) {
   .reports-card { padding: 18px 14px; }
-  .reports-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .reports-class-filter { grid-column: 1 / -1; }
-}
-@media (max-width: 389px) {
   .reports-filters { grid-template-columns: minmax(0, 1fr); }
   .reports-date-filter { grid-template-columns: 44px minmax(0, 1fr); align-items: center; }
 }

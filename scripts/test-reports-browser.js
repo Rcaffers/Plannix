@@ -61,17 +61,19 @@ try {
         fromLabelled: from.labels?.[0]?.textContent === 'From', toLabelled: to.labels?.[0]?.textContent === 'To' };
     })()`, returnByValue: true }, sessionId)).result.value;
     const phone = width <= 430;
-    const narrow = width <= 380;
     assert.ok(filters.fromLabelled && filters.toLabelled
       && filters.class.height >= 44 && filters.from.height >= 44 && filters.to.height >= 44
       && !filters.fromClipped && !filters.toClipped
       && filters.from.left >= filters.content.left - 1 && filters.to.right <= filters.content.right + 1
-      && (!phone || (filters.class.left <= filters.content.left + 1 && filters.class.right >= filters.content.right - 1))
-      && (narrow
-        ? filters.from.bottom < filters.to.top && filters.fromLabel.right <= filters.from.left
-          && filters.toLabel.right <= filters.to.left
-        : !phone || (Math.abs(filters.from.top - filters.to.top) <= 1
-          && filters.from.right < filters.to.left && filters.from.width >= 156 && filters.to.width >= 156)),
+      && (phone
+        ? filters.class.left <= filters.content.left + 1 && filters.class.right >= filters.content.right - 1
+          && filters.class.bottom < filters.from.top && filters.from.bottom < filters.to.top
+          && filters.fromLabel.right <= filters.from.left && filters.toLabel.right <= filters.to.left
+          && Math.abs((filters.fromLabel.top + filters.fromLabel.bottom) / 2 - (filters.from.top + filters.from.bottom) / 2) <= 2
+          && Math.abs((filters.toLabel.top + filters.toLabel.bottom) / 2 - (filters.to.top + filters.to.bottom) / 2) <= 2
+          && filters.from.width >= 156 && filters.to.width >= 156
+        : Math.abs(filters.class.top - filters.from.top) <= 1 && Math.abs(filters.from.top - filters.to.top) <= 1
+          && filters.class.right < filters.from.left && filters.from.right < filters.to.left),
     `${width}px Reports date filters are clipped or misaligned: ${JSON.stringify(filters)}`);
     value.filters = filters;
     const lessons = (await send('Runtime.evaluate', { expression: `(() => {
