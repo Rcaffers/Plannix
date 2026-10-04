@@ -10,11 +10,11 @@ export function weekendEventsPreferenceKey(userId) {
 
 export function readWeekendEventsPreference(userId, storage) {
   const key = weekendEventsPreferenceKey(userId);
-  if (!key) return true;
+  if (!key) return false;
   try {
-    return (storage ?? globalThis.localStorage).getItem(key) !== 'false';
+    return (storage ?? globalThis.localStorage).getItem(key) === 'true';
   } catch {
-    return true;
+    return false;
   }
 }
 

@@ -110,23 +110,22 @@ async function run() {
     && getComputedStyle(sections[2].querySelector('.import-preview-controls')).borderTopWidth === '0px',
   'shared card keeps the settings tint and subtle section dividers without nested cards');
   const weekendSwitch = host.querySelector('input[role="switch"]');
-  check(weekendSwitch?.checked && weekendSwitch.closest('label').textContent.includes('Show weekend events in timetable'),
-    'Weekend event display switch is labelled and enabled by default');
+  check(!weekendSwitch?.checked && weekendSwitch.closest('label').textContent.includes('Show weekend events in timetable'),
+    'Weekend event display switch is labelled and disabled without a saved preference');
+  flushSync(() => weekendSwitch.click()); await settle();
+  check(weekendSwitch.checked && localStorage.getItem(`plannix_show_weekend_events_v1:${USER_A}`) === 'true',
+    'Weekend switch stores an explicit enabled preference');
   flushSync(() => weekendSwitch.click()); await settle();
   check(!weekendSwitch.checked && localStorage.getItem(`plannix_show_weekend_events_v1:${USER_A}`) === 'false'
     && !host.querySelector('.events-form'), 'Weekend switch persists independently of the event draft');
-  flushSync(() => weekendSwitch.click()); await settle();
-  check(weekendSwitch.checked && localStorage.getItem(`plannix_show_weekend_events_v1:${USER_A}`) === 'true',
-    'Weekend switch restores the saved enabled preference');
   window.failPreferenceStorage = true;
   flushSync(() => weekendSwitch.click()); await settle();
-  check(weekendSwitch.checked && host.querySelector('.events-weekend-setting [role="alert"]')?.getBoundingClientRect().height > 1,
+  check(!weekendSwitch.checked && host.querySelector('.events-weekend-setting [role="alert"]')?.getBoundingClientRect().height > 1,
     'Unavailable browser storage leaves preference unchanged and shows a visible error');
   window.failPreferenceStorage = false;
   flushSync(() => weekendSwitch.click()); await settle();
-  check(!weekendSwitch.checked && !host.querySelector('.events-weekend-setting [role="alert"]'),
+  check(weekendSwitch.checked && !host.querySelector('.events-weekend-setting [role="alert"]'),
     'Successful preference retry clears the storage error');
-  flushSync(() => weekendSwitch.click()); await settle();
   check(button('Show events (0)')?.getAttribute('aria-expanded') === 'false'
     && button('Show events (0)').getAttribute('aria-controls') === 'events-list-panel'
     && host.querySelector('#events-list-panel')?.hidden, 'loaded Events list starts collapsed with an accessible count');

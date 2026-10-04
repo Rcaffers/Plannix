@@ -329,8 +329,32 @@ async function run() {
     ] });
   };
   eventRequests = []; mount(); await tick();
-  check(eventRequests.length === 1 && eventRequests[0].yearId === fixtureAcademicYear.id
-    && nextDate(eventRequests[0].from, 6) === eventRequests[0].to, 'Dated timetable requests one authenticated week range, Monday through Sunday');
+  check(!document.querySelector('.schedule-events-weekend')
+    && document.querySelector('.schedule-events-day[aria-label="Fri events"]').textContent.includes('Half-term activity'),
+  'Unsaved preference hides weekend rows while retaining weekday events');
+  for (const size of [320, 375, 390, 430]) {
+    await width(size);
+    const fridayDate = nextDate(eventRequests.at(-1).from, 4);
+    const dateInput = document.querySelector('.schedule-date-input');
+    flushSync(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(dateInput, fridayDate);
+      dateInput.dispatchEvent(new Event('input', { bubbles: true })); dateInput.dispatchEvent(new Event('change', { bubbles: true })); });
+    await tick();
+    check(document.querySelector('.schedule-day-label').textContent.includes('Friday')
+      && !document.querySelector('.schedule-events-weekend-only'), `${size}px: unsaved preference shows weekdays only`);
+    click(document.querySelector('[aria-label="Next day"]')); await tick();
+    check(document.querySelector('.schedule-day-label').textContent.includes('Monday')
+      && !document.querySelector('.schedule-events-weekend-only'), `${size}px: next day skips weekend when not enabled`);
+    const saturdayDate = nextDate(eventRequests.at(-1).from, 5);
+    flushSync(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(dateInput, saturdayDate);
+      dateInput.dispatchEvent(new Event('input', { bubbles: true })); dateInput.dispatchEvent(new Event('change', { bubbles: true })); });
+    await tick();
+    check(document.querySelector('.schedule-day-label').textContent.includes('Friday')
+      && !document.querySelector('.schedule-events-weekend-only'), `${size}px: date picker cannot expose weekend without opt-in`);
+  }
+  check(writeWeekendEventsPreference(fixtureUserId, true), 'Explicit opt-in enables weekend cards');
+  await tick(); await width(820);
+  check(eventRequests.length >= 1 && eventRequests.at(-1).yearId === fixtureAcademicYear.id
+    && nextDate(eventRequests.at(-1).from, 6) === eventRequests.at(-1).to, 'Dated timetable requests an authenticated week range, Monday through Sunday');
   check(document.querySelector('.schedule-events-day[aria-label="Fri events"]').textContent.includes('Half-term activity'), 'Events display on holiday dates');
   check(!document.querySelector('.schedule-events-day[aria-label="Fri events"]').querySelector('.lesson-card'), 'Holiday event is separate from lesson slots');
   const saturdayCards = [...document.querySelectorAll('.schedule-events-weekend-day')][0].querySelectorAll('.schedule-event-card');
@@ -379,6 +403,23 @@ async function run() {
       `${size}px: stacked weekend rows contain horizontal cards that wrap within the viewport`);
     }
   }
+  for (const size of [320, 375, 390, 430]) {
+    await width(size);
+    const saturdayDate = nextDate(eventRequests.at(-1).from, 5);
+    const picker = document.querySelector('.schedule-date-input');
+    flushSync(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(picker, saturdayDate);
+      picker.dispatchEvent(new Event('input', { bubbles: true })); picker.dispatchEvent(new Event('change', { bubbles: true })); });
+    await tick();
+    check(document.querySelector('.schedule-day-label').textContent.includes('Saturday')
+      && document.querySelector('.schedule-events-weekend-only')?.textContent.includes('Museum trip')
+      && !document.querySelector('.schedule-grid'), `${size}px: explicit opt-in shows Saturday events without teaching slots`);
+    click(document.querySelector('[aria-label="Next day"]'));
+    check(document.querySelector('.schedule-day-label').textContent.includes('Sunday')
+      && document.querySelector('.schedule-events-weekend-only')?.textContent.includes('Sunday event'),
+    `${size}px: explicit opt-in navigates to Sunday events`);
+    check(document.documentElement.scrollWidth <= innerWidth + 1, `${size}px: opted-in weekend has no horizontal overflow`);
+  }
+  await width(820);
   check(writeWeekendEventsPreference(fixtureUserId, false), 'Weekend preference can be stored for first user');
   await tick();
   check(!document.querySelector('.schedule-events-weekend')
@@ -390,15 +431,17 @@ async function run() {
   flushSync(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(hiddenWeekendInput, hiddenWeekendDate);
     hiddenWeekendInput.dispatchEvent(new Event('input', { bubbles: true })); hiddenWeekendInput.dispatchEvent(new Event('change', { bubbles: true })); });
   await tick();
-  check(document.querySelector('.schedule-events-weekend-only')?.textContent.includes('Weekend events are hidden')
-    && !document.querySelector('.schedule-events-weekend-only .schedule-event-card') && !document.querySelector('.schedule-grid'),
-  'Phone weekend remains navigable without teaching slots while cards are hidden');
+  check(document.querySelector('.schedule-day-label').textContent.includes('Friday')
+    && !document.querySelector('.schedule-events-weekend-only') && document.querySelector('.schedule-grid'),
+  'Explicitly disabled preference keeps phone on weekday teaching slots');
   check(writeWeekendEventsPreference(fixtureUserId, true), 'Weekend preference can be restored');
   await tick(); await width(820);
   check(document.querySelectorAll('.schedule-events-weekend-day').length === 2, 'Restoring preference shows both weekend rows');
   const firstUser = fixtureUserId;
   fixtureUserId = '30000000-0000-4000-8000-000000000002'; mount(); await tick();
-  check(document.querySelectorAll('.schedule-events-weekend-day').length === 2, 'Second user defaults to enabled independently');
+  check(!document.querySelector('.schedule-events-weekend'), 'Second user has no inherited weekend opt-in');
+  check(writeWeekendEventsPreference(fixtureUserId, true), 'Second user can opt in independently');
+  await tick(); check(document.querySelectorAll('.schedule-events-weekend-day').length === 2, 'Second user opt-in shows weekend rows');
   check(writeWeekendEventsPreference(fixtureUserId, false), 'Second user preference persists separately');
   await tick(); check(!document.querySelector('.schedule-events-weekend'), 'Second user can hide weekend cards');
   fixtureUserId = firstUser; mount(); await tick();

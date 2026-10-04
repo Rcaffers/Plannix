@@ -28,6 +28,7 @@ import TimetableEvents from './TimetableEvents';
 import { localCalendarDayDifference } from '../utils/timetableEvents';
 import { classPlacementUnavailableReason } from '../utils/timetableClassPlacement';
 import { useClassPlacement } from '../hooks/useClassPlacement';
+import { useWeekendEventsPreference } from '../hooks/useWeekendEventsPreference.js';
 import './ProjectCard.css';
 
 /** Single-day navigation is reserved for phone widths, regardless of pointer type. */
@@ -224,7 +225,8 @@ export default function ProjectCard({
   }, []);
 
   const isSingleDayTimetable = isCompactTimetable && (weekMode === 'date' || enableFixedPhoneSingleDay);
-  const navigationDayCount = weekMode === 'date' ? 7 : dayCount;
+  const [showWeekendEvents] = useWeekendEventsPreference(weekendEventsUserId);
+  const navigationDayCount = weekMode === 'date' && showWeekendEvents ? 7 : dayCount;
   const [compactDayIndex, setCompactDayIndex] = useState(0);
   const compactDayBootstrappedRef = useRef(false);
   const weekStartRef = useRef(weekStartDate);
@@ -250,7 +252,7 @@ export default function ProjectCard({
 
     const finish = (idx) => {
       if (compactDayBootstrappedRef.current) return;
-      const maxIdx = Math.max(0, (weekMode === 'date' ? 7 : dayCountRef.current) - 1);
+      const maxIdx = Math.max(0, navigationDayCount - 1);
       setCompactDayIndex(Math.min(maxIdx, Math.max(0, idx)));
       compactDayBootstrappedRef.current = true;
     };
@@ -262,9 +264,9 @@ export default function ProjectCard({
 
     const rafId = requestAnimationFrame(() => finish(pickIndex()));
     return () => cancelAnimationFrame(rafId);
-  }, [isSingleDayTimetable, todayColumnIndex, weekMode]);
+  }, [isSingleDayTimetable, todayColumnIndex, weekMode, navigationDayCount]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setCompactDayIndex((i) => (i >= navigationDayCount ? Math.max(0, navigationDayCount - 1) : i));
   }, [navigationDayCount]);
 

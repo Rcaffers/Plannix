@@ -17,7 +17,7 @@ export function useWeekendEventsPreference(userId) {
     };
   }, [userId]);
   const snapshot = useCallback(() => readWeekendEventsPreference(userId), [userId]);
-  const enabled = useSyncExternalStore(subscribe, snapshot, () => true);
+  const enabled = useSyncExternalStore(subscribe, snapshot, () => false);
   const setEnabled = useCallback(value => writeWeekendEventsPreference(userId, value), [userId]);
   return [enabled, setEnabled];
 }

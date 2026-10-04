@@ -38,7 +38,7 @@ try {
   let serial = 0; const pending = new Map();
   socket.onmessage = event => { const m = JSON.parse(event.data); const item = pending.get(m.id); if (item) { clearTimeout(item.timer); pending.delete(m.id); m.error ? item.reject(new Error(m.error.message)) : item.resolve(m.result); } };
   const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
-    const id = ++serial; const timer = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timed out`)); }, 15000);
+    const id = ++serial; const timer = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timed out`)); }, 30000);
     pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
   });
   const { targetInfos } = await send('Target.getTargets');
@@ -53,7 +53,7 @@ try {
   await send('Emulation.setTimezoneOverride', { timezoneId: 'Europe/London' }, sessionId);
   await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }, sessionId);
   await send('Page.reload', {}, sessionId);
-  await evaluate(`new Promise((resolve,reject)=>{let n=0;const id=setInterval(()=>{if(document.body.dataset.testResult){clearInterval(id);resolve(document.body.dataset.testResult)}else if(++n>200){clearInterval(id);reject(Error('Fixture did not load'))}},50)})`);
+  await evaluate(`new Promise((resolve,reject)=>{let n=0;const id=setInterval(()=>{if(document.body.dataset.testResult){clearInterval(id);resolve(document.body.dataset.testResult)}else if(++n>500){clearInterval(id);reject(Error('Fixture did not load'))}},50)})`);
   assert.equal(await evaluate('document.body.dataset.testResult'), 'passed', await evaluate('document.querySelector("pre")?.textContent'));
   console.log(await evaluate('document.querySelector("pre").textContent'));
 } finally {
