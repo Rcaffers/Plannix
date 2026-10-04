@@ -35,6 +35,13 @@ export function buildMorningSummary({ date, dated, periods, classes, events, wee
   const periodList = periods.filter(period => period.type === 'teaching' && period.enabled !== false)
     .sort((a, b) => a.order - b.order || (a.number ?? 0) - (b.number ?? 0)
       || String(a.id).localeCompare(String(b.id)));
+  if (periodList.length === 0 || periodList.some(period => typeof period.id !== 'string' || !period.id
+    || !/^([01]\d|2[0-3]):[0-5]\d$/.test(period.startTime)
+    || !/^([01]\d|2[0-3]):[0-5]\d$/.test(period.endTime)
+    || period.startTime >= period.endTime || !Number.isSafeInteger(period.order))
+    || new Set(periodList.map(period => period.id)).size !== periodList.length) {
+    throw new Error('Morning summary data is incomplete.');
+  }
   const classNames = new Map(classes.map(item => [item.id, item.name]));
   const daySessions = dated.sessions.filter(session => session.day === info.dayIndex);
   if (daySessions.some(session => !periodList.some(period => period.id === session.periodId)

@@ -15,10 +15,12 @@ export function validDeliveryTime(value) {
 
 function mapPreferences(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).sort().join(',') !== 'deliveryTime,enabled,revision'
+    || Object.keys(value).sort().join(',') !== 'academicYearId,deliveryTime,enabled,revision'
     || typeof value.enabled !== 'boolean' || !validDeliveryTime(value.deliveryTime)
-    || !validRevision(value.revision)) throw unavailable();
-  return { enabled: value.enabled, deliveryTime: value.deliveryTime, revision: value.revision };
+    || !validRevision(value.revision)
+    || (value.academicYearId !== null && (typeof value.academicYearId !== 'string' || !UUID.test(value.academicYearId)))) throw unavailable();
+  return { enabled: value.enabled, deliveryTime: value.deliveryTime, revision: value.revision,
+    academicYearId: value.academicYearId };
 }
 
 export function createMorningSummaryPreferenceService({ config = env, createClientImpl = createClient } = {}) {
@@ -42,9 +44,11 @@ export function createMorningSummaryPreferenceService({ config = env, createClie
     load: userId => rpc('plannix_get_morning_summary_preferences', userId),
     save(userId, value) {
       if (!value || typeof value.enabled !== 'boolean' || !validDeliveryTime(value.deliveryTime)
-        || !validRevision(value.revision) || value.revision === Number.MAX_SAFE_INTEGER) throw unavailable();
+        || !validRevision(value.revision) || value.revision === Number.MAX_SAFE_INTEGER
+        || typeof value.academicYearId !== 'string' || !UUID.test(value.academicYearId)) throw unavailable();
       return rpc('plannix_save_morning_summary_preferences', userId,
-        { expected_revision: value.revision, target_enabled: value.enabled, target_delivery_time: value.deliveryTime });
+        { expected_revision: value.revision, target_enabled: value.enabled,
+          target_delivery_time: value.deliveryTime, target_academic_year_id: value.academicYearId });
     },
   };
 }

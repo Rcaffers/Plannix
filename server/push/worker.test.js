@@ -48,3 +48,24 @@ test('click focuses an existing same-origin page and falls back if navigation fa
   await job;
   assert.deepEqual(w.opened, ['https://plannix.example.test/settings/notifications']);
 });
+
+test('versioned summary payload opens only a locally constructed authenticated day link', async () => {
+  const w = worker(); let job;
+  const notificationRef = 'cb000000-0000-4000-8000-000000000010';
+  const payload = { type: 'plannix-morning-summary', version: 1, notificationRef,
+    title: 'Your Plannix day', body: 'Open Plannix to view your morning summary.' };
+  w.listeners.get('push')({ data: { json: () => payload }, waitUntil: value => { job = value; } });
+  await job;
+  assert.equal(w.notifications[0][0], 'Your Plannix day');
+  assert.equal(w.notifications[0][1].body, 'Open Plannix to view your morning summary.');
+  w.listeners.get('notificationclick')({ notification: { data: w.notifications[0][1].data, close() {} },
+    waitUntil: value => { job = value; } });
+  await job;
+  assert.equal(w.opened[0], `https://plannix.example.test/settings/notifications?summaryRef=${notificationRef}`);
+  for (const invalid of [{ ...payload, date: '2026-10-05' }, { ...payload, path: 'https://evil.test' },
+    { ...payload, notificationRef: 'invalid' }, { ...payload, body: 'P1 7A: Fractions' },
+    { ...payload, title: 'Private lesson' }]) {
+    w.listeners.get('push')({ data: { json: () => invalid }, waitUntil: () => { throw Error('invalid push accepted'); } });
+  }
+  assert.equal(w.notifications.length, 1);
+});

@@ -85,16 +85,22 @@ const chooseTime = value => {
   await tick(); await tick();
   check(calls.includes('config') && !calls.includes('permission'), 'permission is not requested on load');
   check(document.body.textContent.includes('Morning summaries are not active yet'), 'summary preference cannot imply scheduling');
+  check(document.querySelector('#morning-academic-year')?.value === 'cb000000-0000-4000-8000-000000000010'
+    && document.body.textContent.includes('Saved notification year: Not confirmed'),
+  'current Settings year is offered but an old preference has no confirmed delivery year');
   check(document.querySelector('#morning-preview-date')?.value, 'London preview date selector is present');
   const optIn = document.querySelector('.morning-opt-in input');
   optIn.click(); await tick();
   button('Save preferences').click(); await tick();
   check(window.summaryPreferenceSaves?.at(-1)?.enabled === true, 'opt-in preference reaches only the preference API');
+  check(window.summaryPreferenceSaves.at(-1).academicYearId === 'cb000000-0000-4000-8000-000000000010',
+    'saving explicitly confirms the notification academic year');
   check(window.summaryPreferenceSaves.at(-1).revision === 0, 'first save uses absent-row revision');
   check(document.body.textContent.includes('Morning summaries are not active yet'), 'saved opt-in still does not imply activation');
   chooseTime('08:20'); await tick();
   window.setSummaryPreference('ca000000-0000-4000-8000-000000000001',
-    { enabled: true, deliveryTime: '06:30', revision: 2 });
+    { enabled: true, deliveryTime: '06:30', revision: 2,
+      academicYearId: 'cb000000-0000-4000-8000-000000000010' });
   button('Save preferences').click(); await tick();
   check(document.body.textContent.includes('Preferences changed elsewhere')
     && document.querySelector('#morning-delivery-time').value === '08:20'
@@ -134,6 +140,14 @@ const chooseTime = value => {
     'failed week does not display fabricated PPA');
   window.summaryFailWeek = null; button('Retry preview').click(); await tick(); await tick();
   check(document.querySelector('.morning-preview-content')?.textContent.includes('Fractions'), 'retry loads complete preview');
+  window.summaryEmptyPeriods = true;
+  chooseDate('2026-11-03'); await tick(); await tick();
+  check(document.body.textContent.includes('Could not load the daily summary preview')
+    && !document.querySelector('.morning-preview-content'),
+  'missing teaching periods never render a successful empty preview or PPA');
+  window.summaryEmptyPeriods = false; button('Retry preview').click(); await tick(); await tick();
+  check(document.querySelector('.morning-preview-content')?.textContent.includes('2026-11-03'),
+    'complete period data restores the preview');
   window.summaryDelayWeek = '2026-11-09';
   chooseDate('2026-11-09'); await tick();
   chooseDate('2026-11-16'); await tick(); await tick();
@@ -235,6 +249,18 @@ const chooseTime = value => {
   check(!document.querySelector('.morning-preview-content'), 'unmounted preview ignores late failure');
   window.summaryDelayWeek = null;
   await router.navigate('/settings/notifications'); await tick(); await tick();
+  await router.navigate('/settings/notifications?summaryRef=cb000000-0000-4000-8000-000000000030');
+  await tick(); await tick();
+  check(document.querySelector('#morning-linked-heading')?.textContent.includes('2026-10-05')
+    && document.body.textContent.includes('Linked lesson')
+    && window.summaryLinkedDayRequests.at(-1).userId === 'ca000000-0000-4000-8000-000000000001'
+    && window.summaryLinkedDayRequests.at(-1).summaryRef === 'cb000000-0000-4000-8000-000000000030',
+  'notification link re-requests the original day using the currently authenticated account');
+  window.summaryLinkedDayFailure = true;
+  await router.navigate('/settings/notifications?summaryRef=cb000000-0000-4000-8000-000000000031');
+  await tick(); await tick();
+  check(document.body.textContent.includes('Could not load this notification’s day')
+    && !document.body.textContent.includes('Linked lesson'), 'failed linked day never displays stale data');
   document.body.dataset.testResult = 'passed';
 } catch (error) {
   document.body.dataset.testResult = 'failed';

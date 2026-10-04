@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAcademicYear } from '../context/AcademicYearContext.jsx';
 import { useClasses } from '../context/ClassContext.jsx';
 import { useTimetableLayout } from '../context/TimetableLayoutContext.jsx';
@@ -10,11 +10,12 @@ import { buildMorningSummary, londonToday, summaryDateInfo } from '../utils/morn
 import { safeRequestReference } from '../utils/requestReference.js';
 import './MorningSummaryPanel.css';
 
-const DEFAULT_PREFERENCES = { enabled: false, deliveryTime: '07:00', revision: 0 };
+const DEFAULT_PREFERENCES = { enabled: false, deliveryTime: '07:00', revision: 0, academicYearId: null };
 
 export default function MorningSummaryPanel({ userId, organisationId, preferenceApi = morningSummaryApi,
   loadDated = fetchDatedTimetableSessions, listEvents = eventApi.list }) {
   const year = useAcademicYear();
+  const location = useLocation();
   const classes = useClasses();
   const layout = useTimetableLayout();
   const [date, setDate] = useState(() => londonToday());
@@ -42,9 +43,10 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
     setSaveError(''); setSaveReference(''); setSavedNotice('');
     if (userId) preferenceApi.load(userId, { signal: controller.signal }).then(result => {
       if (ticket !== preferenceGeneration.current || controller.signal.aborted) return;
-      const value = { enabled: result.enabled, deliveryTime: result.deliveryTime, revision: result.revision };
+      const value = { enabled: result.enabled, deliveryTime: result.deliveryTime, revision: result.revision,
+        academicYearId: result.academicYearId ?? null };
       setPreferences({ userId, status: 'ready', value, error: '', reference: '' });
-      setDraft(value);
+      setDraft({ ...value, academicYearId: value.academicYearId || year.selectedAcademicYearId || null });
     }).catch(error => {
       if (ticket !== preferenceGeneration.current || controller.signal.aborted) return;
       setPreferences({ userId, status: 'error', value: DEFAULT_PREFERENCES,
@@ -52,6 +54,14 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
     });
     return () => { controller.abort(); preferenceGeneration.current++; };
   }, [userId, preferenceRetry, preferenceApi]);
+
+  useEffect(() => {
+    if (preferences.userId === userId && preferences.status === 'ready'
+      && !preferences.value.academicYearId && year.selectedAcademicYearId) {
+      setDraft(value => value.academicYearId ? value
+        : { ...value, academicYearId: year.selectedAcademicYearId });
+    }
+  }, [preferences, userId, year.selectedAcademicYearId]);
 
   const currentPreferences = preferences.userId === userId ? preferences : { status: 'loading' };
   async function savePreferences() {
@@ -63,7 +73,8 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
     try {
       const result = await preferenceApi.save(userId, value);
       if (ticket !== preferenceGeneration.current) return;
-      const saved = { enabled: result.enabled, deliveryTime: result.deliveryTime, revision: result.revision };
+      const saved = { enabled: result.enabled, deliveryTime: result.deliveryTime, revision: result.revision,
+        academicYearId: result.academicYearId };
       setPreferences({ userId, status: 'ready', value: saved, error: '', reference: '' });
       if (version === draftVersion.current) setDraft(saved);
       setSavedNotice('Morning summary preferences saved. Summaries are not active yet.');
@@ -83,7 +94,8 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
   async function reloadPreferences() {
     if (!conflict || reloadingRef.current || savingRef.current || currentPreferences.status !== 'ready') return;
     const changed = draft.enabled !== currentPreferences.value.enabled
-      || draft.deliveryTime !== currentPreferences.value.deliveryTime;
+      || draft.deliveryTime !== currentPreferences.value.deliveryTime
+      || draft.academicYearId !== currentPreferences.value.academicYearId;
     if (changed && !window.confirm('Discard your unsaved morning summary preference changes and reload latest?')) return;
     reloadingRef.current = true; setReloading(true); setReloadError('');
     const ticket = preferenceGeneration.current;
@@ -96,7 +108,8 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
         setReloadError('Preferences changed while reloading. Your choices are retained; reload latest again.');
         return;
       }
-      const value = { enabled: result.enabled, deliveryTime: result.deliveryTime, revision: result.revision };
+      const value = { enabled: result.enabled, deliveryTime: result.deliveryTime, revision: result.revision,
+        academicYearId: result.academicYearId };
       setPreferences({ userId, status: 'ready', value, error: '', reference: '' });
       setDraft(value); setConflict(false); setSaveError(''); setSaveReference('');
     } catch (error) {
@@ -127,6 +140,29 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
   const [preview, setPreview] = useState({ scope: '', status: 'idle', summary: null, reference: '' });
   const [previewRetry, setPreviewRetry] = useState(0);
   const previewGeneration = useRef(0);
+  const linkedParams = new URLSearchParams(location.search);
+  const linkedRef = linkedParams.get('summaryRef');
+  const linkedScope = linkedRef && userId ? JSON.stringify([userId, linkedRef]) : '';
+  const [linked, setLinked] = useState({ scope: '', status: 'idle', summary: null, reference: '' });
+  const [linkedRetry, setLinkedRetry] = useState(0);
+  const linkedGeneration = useRef(0);
+  const linkedActive = linked.scope === linkedScope ? linked
+    : { scope: linkedScope, status: linkedScope ? 'loading' : 'idle', summary: null, reference: '' };
+
+  useEffect(() => {
+    const ticket = ++linkedGeneration.current;
+    const controller = new AbortController();
+    setLinked({ scope: linkedScope, status: linkedScope ? 'loading' : 'idle', summary: null, reference: '' });
+    if (linkedScope) preferenceApi.day(userId, linkedRef, { signal: controller.signal })
+      .then(summary => {
+        if (ticket === linkedGeneration.current && !controller.signal.aborted)
+          setLinked({ scope: linkedScope, status: 'ready', summary, reference: '' });
+      }).catch(error => {
+        if (ticket === linkedGeneration.current && !controller.signal.aborted)
+          setLinked({ scope: linkedScope, status: 'error', summary: null, reference: safeRequestReference(error) });
+      });
+    return () => { controller.abort(); linkedGeneration.current++; };
+  }, [linkedScope, linkedRetry, preferenceApi]);
   const active = preview.scope === scope ? preview : { scope, status: scope ? 'loading' : 'idle', summary: null, reference: '' };
 
   useEffect(() => {
@@ -150,10 +186,29 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
   }, [scope, previewRetry]);
 
   return <div className="morning-summary">
+    {linkedScope ? <section aria-labelledby="morning-linked-heading">
+      <h2 id="morning-linked-heading" className="settings-section-title">Notification day{linkedActive.status === 'ready' ? `: ${linkedActive.summary.date}` : ''}</h2>
+      {linkedActive.status === 'error' ? <div className="settings-error" role="alert"><p>Could not load this notification’s day. Access or school-day eligibility may have changed.</p>
+        {linkedActive.reference ? <p>Support reference: <code>{linkedActive.reference}</code></p> : null}
+        <button type="button" className="settings-reset" onClick={() => setLinkedRetry(value => value + 1)}>Retry daily summary</button></div> : null}
+      <p className="visually-hidden" role="status" aria-live="polite">{linkedActive.status === 'loading' ? 'Loading notification day.' : ''}</p>
+      {linkedActive.status === 'ready' ? <div className="morning-preview-content">
+        <p>Week {linkedActive.summary.week}</p>
+        <h3>Teaching periods</h3>
+        <ol className="morning-lessons">{linkedActive.summary.lessons.map(lesson => <li key={lesson.period}>
+          <strong>{lesson.period}</strong> — {lesson.isPpa ? 'PPA' : <>{lesson.className}{lesson.title ? ` — ${lesson.title}` : ' — Untitled lesson'}</>}
+        </li>)}</ol>
+        <h3>Events</h3>
+        {linkedActive.summary.events.length ? <ul className="morning-events">{linkedActive.summary.events.map(event => <li key={event.id}>
+          <strong>{event.title}</strong> — {event.startTime === null ? 'All day' : `${event.startTime}–${event.endTime}`}{event.location ? ` · ${event.location}` : ''}
+        </li>)}</ul> : <p>No events for this date.</p>}
+      </div> : null}
+    </section> : null}
     <section aria-labelledby="morning-preferences-heading">
       <h2 id="morning-preferences-heading" className="settings-section-title">Morning summary preferences</h2>
       <p className="settings-hint"><strong>Morning summaries are not active yet.</strong> These preferences do not schedule or send notifications.</p>
       <p className="settings-hint">Delivery time uses Europe/London, including clock changes. It is separate from this device’s notification subscription.</p>
+      <p className="settings-hint">Changing the academic year selected in Settings does not change the saved notification year. Save these preferences again to confirm a new year.</p>
       {currentPreferences.status === 'error' ? <div className="settings-error" role="alert"><p>{currentPreferences.error}</p>
         {currentPreferences.reference ? <p>Support reference: <code>{currentPreferences.reference}</code></p> : null}
         <button type="button" className="settings-reset" onClick={() => setPreferenceRetry(value => value + 1)}>Retry preferences</button></div> : null}
@@ -166,8 +221,18 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
           <input id="morning-delivery-time" type="time" value={draft.deliveryTime}
             disabled={currentPreferences.status !== 'ready' || saving || reloading}
             onChange={event => editDraft({ deliveryTime: event.target.value })} /></div>
+        <div className="settings-field"><label htmlFor="morning-academic-year">Notification academic year</label>
+          <select id="morning-academic-year" value={draft.academicYearId || ''}
+            disabled={currentPreferences.status !== 'ready' || saving || reloading}
+            onChange={event => editDraft({ academicYearId: event.target.value || null })}>
+            <option value="">Choose an academic year</option>
+            {year.academicYears.map(item => <option key={item.id} value={item.id}>{item.label || item.name}</option>)}
+          </select></div>
+        <p className="settings-hint">Saved notification year: <strong>{year.academicYears.find(item => item.id === currentPreferences.value?.academicYearId)?.label || 'Not confirmed'}</strong></p>
         <button type="button" className="settings-save" disabled={currentPreferences.status !== 'ready' || saving || reloading || conflict
-          || (draft.enabled === currentPreferences.value.enabled && draft.deliveryTime === currentPreferences.value.deliveryTime)}
+          || !draft.academicYearId || (draft.enabled === currentPreferences.value.enabled
+            && draft.deliveryTime === currentPreferences.value.deliveryTime
+            && draft.academicYearId === currentPreferences.value.academicYearId)}
           onClick={savePreferences}>Save preferences</button>
       </div>
       {saveError ? <div className="settings-error" role="alert"><p>{saveError}</p>

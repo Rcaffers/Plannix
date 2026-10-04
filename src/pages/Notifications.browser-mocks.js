@@ -7,12 +7,14 @@ const periodId = 'cb000000-0000-4000-8000-000000000015';
 export const notificationFixtureOrganisationId = organisationId;
 
 export const useAcademicYear = () => ({ selectedAcademicYearId: window.summaryYearId || yearId, isLoading: false, error: '',
+  academicYears: [{ id: yearId, label: '2026/2027' }],
   academicYear: { id: window.summaryYearId || yearId, label: '2026/2027', startDate: '2026-09-01', endDate: '2027-07-31', holidays: [] } });
 export const useClasses = () => ({ isLoaded: true, isLoading: false, error: '', revision: 1,
   authoritativeEntries: [{ id: classId, name: '7A' }] });
 export const useTimetableLayout = () => ({ isPersisted: true, isLoading: false, error: '', revision: 1, timetableId,
-  weeks: [{ id: weekId, code: 'A' }], periods: [{ id: periodId, type: 'teaching', enabled: true,
-    order: 1, startTime: '09:00', endTime: '10:00' }] });
+  weeks: [{ id: weekId, code: 'A' }], periods: window.summaryEmptyPeriods ? []
+    : [{ id: periodId, type: 'teaching', enabled: true,
+      order: 1, startTime: '09:00', endTime: '10:00' }] });
 export const fetchDatedTimetableSessions = async ({ weekStartDate }, { signal } = {}) => {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   if (window.summaryDelayWeek === weekStartDate) await new Promise((resolve, reject) => {
@@ -31,9 +33,16 @@ export const eventApi = { list: async (academicYearId, options) => {
   return { events: [] };
 } };
 const preferencesByUser = new Map();
-const currentPreference = userId => preferencesByUser.get(userId) || { enabled: false, deliveryTime: '07:00', revision: 0 };
+const currentPreference = userId => preferencesByUser.get(userId) || { enabled: false, deliveryTime: '07:00', revision: 0, academicYearId: null };
 window.setSummaryPreference = (userId, value) => preferencesByUser.set(userId, value);
 export const morningSummaryApi = {
+  day: async (userId, summaryRef, { signal } = {}) => {
+    window.summaryLinkedDayRequests = [...(window.summaryLinkedDayRequests || []), { userId, summaryRef }];
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (window.summaryLinkedDayFailure) throw Error('Synthetic denied day');
+    return { date: '2026-10-05', week: 'A', lessons: [{ period: 'P1', className: '7A', title: 'Linked lesson', isPpa: false }],
+      events: [{ id: 'linked-event', title: 'Linked assembly', startTime: null, endTime: null, location: null }] };
+  },
   load: async userId => {
     window.summaryPreferenceLoads = (window.summaryPreferenceLoads || 0) + 1;
     if (window.summaryPreferenceFailLoad) throw Error('Synthetic preference reload failure');
@@ -47,7 +56,8 @@ export const morningSummaryApi = {
     window.summaryPreferenceSaves = [...(window.summaryPreferenceSaves || []), value];
     const current = currentPreference(userId);
     if (value.revision !== current.revision) throw Object.assign(Error('Synthetic conflict'), { status: 409 });
-    const saved = { enabled: value.enabled, deliveryTime: value.deliveryTime, revision: current.revision + 1 };
+    const saved = { enabled: value.enabled, deliveryTime: value.deliveryTime,
+      academicYearId: value.academicYearId, revision: current.revision + 1 };
     preferencesByUser.set(userId, saved);
     return saved;
   },

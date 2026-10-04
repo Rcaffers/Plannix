@@ -60,4 +60,8 @@ test('failed or inconsistent dated data cannot fabricate blank PPA', () => {
   assert.throws(() => buildMorningSummary({ ...base, dated: { ...base.dated, weekStartDate: '2026-11-09' } }), /incomplete/);
   assert.throws(() => buildMorningSummary({ ...base, dated: { ...base.dated, sessions: [{ day: 0, periodId: 'one', classId: 'missing', title: '' }] } }), /incomplete/);
   assert.throws(() => buildMorningSummary({ ...base, weeks: [] }), /incomplete/);
+  assert.throws(() => buildMorningSummary({ ...base, periods: [] }), /incomplete/);
+  assert.throws(() => buildMorningSummary({ ...base, periods: [{ id: 'break', type: 'break', order: 0 }] }), /incomplete/);
+  assert.throws(() => buildMorningSummary({ ...base, periods: [{ id: 'one', type: 'teaching', order: 0,
+    startTime: '', endTime: '10:00' }] }), /incomplete/);
 });

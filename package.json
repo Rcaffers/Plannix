@@ -7,6 +7,7 @@
     "dev": "vite",
     "start": "node server/server.js",
     "server": "node server/server.js",
+    "worker:morning-summary": "node server/morningSummary/worker.js",
     "test:auth": "node --test src/utils/supabaseAuth.test.js src/utils/supabaseAuthController.test.js src/utils/supabaseRecovery.test.js",
     "test:frontend-auth": "node --test src/utils/supabaseAuthController.test.js",
     "test:recovery": "node --test src/utils/supabaseRecovery.test.js",

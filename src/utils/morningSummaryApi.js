@@ -7,12 +7,14 @@ const PATH = '/api/notifications/morning-summary/preferences';
 
 function preferences(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).sort().join(',') !== 'deliveryTime,enabled,revision'
+    || Object.keys(value).sort().join(',') !== 'academicYearId,deliveryTime,enabled,revision'
     || typeof value.enabled !== 'boolean' || typeof value.deliveryTime !== 'string'
     || !TIME.test(value.deliveryTime) || !Number.isSafeInteger(value.revision)
-    || value.revision < 0)
+    || value.revision < 0 || (value.academicYearId !== null
+      && (typeof value.academicYearId !== 'string' || !UUID.test(value.academicYearId))))
     throw new ApiError('The server returned invalid morning summary preferences.');
-  return { enabled: value.enabled, deliveryTime: value.deliveryTime, revision: value.revision };
+  return { enabled: value.enabled, deliveryTime: value.deliveryTime, revision: value.revision,
+    academicYearId: value.academicYearId };
 }
 
 async function currentSession() {
@@ -29,7 +31,7 @@ export function createMorningSummaryApi({ fetchImpl = fetch, getSession = curren
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     if (typeof expectedUserId !== 'string' || !UUID.test(expectedUserId)) throw new ApiError('Authentication is required.', { status: 401 });
     const requestBody = method === 'PUT' ? JSON.stringify(preferences(value)) : null;
-    if (method === 'PUT' && value.revision === Number.MAX_SAFE_INTEGER)
+    if (method === 'PUT' && (value.revision === Number.MAX_SAFE_INTEGER || !value.academicYearId))
       throw new ApiError('Morning summary preferences cannot be saved until reloaded.');
     const session = await getSession();
     if (session.userId !== expectedUserId || signal?.aborted) throw new ApiError('The signed-in account changed.', { status: 401 });
@@ -55,6 +57,30 @@ export function createMorningSummaryApi({ fetchImpl = fetch, getSession = curren
   return {
     load: (userId, { signal } = {}) => request('GET', userId, null, signal),
     save: (userId, value, { signal } = {}) => request('PUT', userId, value, signal),
+    async day(userId, summaryRef, { signal } = {}) {
+      if (!UUID.test(userId) || !UUID.test(summaryRef))
+        throw new ApiError('Daily summary request is invalid.');
+      const session = await getSession();
+      if (session.userId !== userId || signal?.aborted) throw new ApiError('The signed-in account changed.', { status: 401 });
+      const query = new URLSearchParams({ summaryRef });
+      let response;
+      try {
+        response = await fetchImpl(`${API_BASE_URL}/api/notifications/morning-summary/day?${query}`, {
+          method: 'GET', credentials: 'omit', signal, headers: { Authorization: `Bearer ${session.token}` },
+        });
+      } catch (error) {
+        if (signal?.aborted || error?.name === 'AbortError') throw error;
+        throw new ApiError('Could not load daily summary.');
+      }
+      const payload = await parseJsonSafe(response);
+      const rawId = response.headers?.get?.('x-request-id');
+      const requestId = UUID.test(String(rawId || '')) ? rawId : null;
+      if (!response.ok) throw new ApiError('Could not load daily summary.', { status: response.status, requestId });
+      if (!payload || !/^\d{4}-\d{2}-\d{2}$/.test(payload.date)
+        || !Array.isArray(payload.lessons) || !Array.isArray(payload.events))
+        throw new ApiError('The server returned an invalid daily summary.', { requestId });
+      return payload;
+    },
   };
 }
 
