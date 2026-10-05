@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import express from 'express';
+import helmet from 'helmet';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { createProductionCspConfig } from '../config/csp.js';
+import { registerAnalyticsFrameStatic } from '../config/analyticsFrameStatic.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { requestId } from '../middleware/requestId.js';
 import {
@@ -96,6 +101,70 @@ test('production CSP configuration is exact, enforced, and uses exact HTTPS orig
   assert.equal(serialized.includes('upgrade-insecure-requests'), false);
   assert.equal(config.contentSecurityPolicy.directives.scriptSrc.includes("'unsafe-inline'"), false);
   assert.deepEqual(config.contentSecurityPolicy.directives.styleSrcAttr, ["'unsafe-inline'"]);
+});
+
+test('valid GA4 configuration confines Google hosts to the isolated frame policy', () => {
+  const base = { supabaseUrl: 'https://project.supabase.test', frontendOrigins: ['https://app.example.test'] };
+  const disabled = createProductionCspConfig({ ...base, gaMeasurementId: 'invalid' });
+  assert.deepEqual(disabled.contentSecurityPolicy.directives.scriptSrc, ["'self'"]);
+  const enabled = createProductionCspConfig({ ...base, gaMeasurementId: 'G-KB7KT8NJW8' });
+  const directives = enabled.contentSecurityPolicy.directives;
+  assert.deepEqual(directives.scriptSrc, ["'self'"]);
+  assert.deepEqual(directives.imgSrc, ["'self'"]);
+  assert.deepEqual(directives.connectSrc, ["'self'", 'https://project.supabase.test']);
+  assert.deepEqual(directives.frameSrc, ["'self'"]);
+  assert.deepEqual(enabled.analyticsFrameContentSecurityPolicy.directives.frameAncestors, ["'self'"]);
+  assert.deepEqual(enabled.analyticsFrameContentSecurityPolicy.directives.frameSrc, ["'none'"]);
+  assert.deepEqual(enabled.analyticsFrameContentSecurityPolicy.directives.scriptSrc,
+    ['https://app.example.test', 'https://www.googletagmanager.com']);
+  assert.deepEqual(enabled.analyticsFrameContentSecurityPolicy.directives.connectSrc,
+    ['https://www.googletagmanager.com', 'https://*.google-analytics.com', 'https://*.google.com']);
+  assert.doesNotMatch(JSON.stringify(directives), /doubleclick|googlesyndication|unsafe-inline.*script/i);
+});
+
+test('Express and Helmet scope the CORP exception to the exact frame bootstrap', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'plannix-analytics-headers-'));
+  let server;
+  try {
+    await Promise.all([
+      writeFile(path.join(directory, 'analytics-frame.html'), '<!doctype html><title>Frame</title>'),
+      writeFile(path.join(directory, 'analytics-frame.js'), '/* synthetic bootstrap */'),
+      writeFile(path.join(directory, 'other.js'), '/* unrelated resource */'),
+      writeFile(path.join(directory, 'index.html'), '<!doctype html><title>Main</title>'),
+    ]);
+    const csp = createProductionCspConfig({
+      supabaseUrl: 'https://project.supabase.test',
+      frontendOrigins: ['https://app.example.test'],
+      gaMeasurementId: 'G-KB7KT8NJW8',
+    });
+    const app = express();
+    app.use(helmet({ contentSecurityPolicy: csp.contentSecurityPolicy }));
+    registerAnalyticsFrameStatic({ app, distDirectory: directory,
+      frameCsp: csp.analyticsFrameContentSecurityPolicy });
+    app.use(express.static(directory));
+    server = app.listen(0, '127.0.0.1');
+    await new Promise((resolve, reject) => {
+      server.once('listening', resolve);
+      server.once('error', reject);
+    });
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const [main, frame, bootstrap, other] = await Promise.all([
+      fetch(origin), fetch(`${origin}/analytics-frame.html`),
+      fetch(`${origin}/analytics-frame.js`), fetch(`${origin}/other.js`),
+    ]);
+    assert.equal(main.status, 200);
+    assert.equal(frame.status, 200);
+    assert.equal(bootstrap.status, 200);
+    assert.equal(other.status, 200);
+    assert.equal(bootstrap.headers.get('cross-origin-resource-policy'), 'cross-origin');
+    assert.equal(other.headers.get('cross-origin-resource-policy'), 'same-origin');
+    assert.equal(frame.headers.get('cross-origin-resource-policy'), 'same-origin');
+    assert.match(frame.headers.get('content-security-policy'), /https:\/\/www\.googletagmanager\.com/);
+    assert.doesNotMatch(main.headers.get('content-security-policy'), /googletagmanager|google-analytics|google\.com/);
+  } finally {
+    if (server) await new Promise(resolve => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('production CSP configuration rejects non-HTTPS and ambiguous reporting origins', () => {

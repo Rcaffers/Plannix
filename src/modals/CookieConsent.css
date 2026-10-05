@@ -92,6 +92,11 @@
   background: #346b66;
 }
 
+.cookie-consent-actions button:focus-visible {
+  outline: 3px solid #22564e;
+  outline-offset: 2px;
+}
+
 @media (max-width: 480px) {
   .cookie-consent-dialog {
     padding: 20px 16px 18px;

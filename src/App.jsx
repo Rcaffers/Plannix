@@ -8,6 +8,7 @@ import ProjectGrid from './components/ProjectGrid';
 import CTASection from './components/CTASection';
 import Footer from './components/Footer';
 import CookieConsent from './modals/CookieConsent';
+import AnalyticsTracker from './components/AnalyticsTracker';
 import Features from './pages/Features';
 import Contact from './pages/Contact';
 import ResetPassword from './pages/ResetPassword';
@@ -236,6 +237,7 @@ export default function App() {
           <TimetableSessionProvider user={user}>
           <div className="page-shell">
           <ScrollToTop />
+          <AnalyticsTracker user={user} isAuthLoading={isAuthLoading} />
           <Header
             user={user}
             memberships={memberships}

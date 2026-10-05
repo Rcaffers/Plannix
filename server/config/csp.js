@@ -1,3 +1,5 @@
+import { validMeasurementId } from '../../shared/gaMeasurementId.js';
+
 const REPORT_PATH = '/api/csp-report';
 
 function httpsOrigin(value, label, { requireOrigin = false } = {}) {
@@ -25,6 +27,7 @@ export function createProductionCspConfig(config) {
   const applicationOrigin = httpsOrigin(frontendOrigins[0], 'FRONTEND_ORIGIN', {
     requireOrigin: true,
   });
+  const analyticsEnabled = Boolean(validMeasurementId(config?.gaMeasurementId));
 
   return Object.freeze({
     applicationOrigin,
@@ -42,7 +45,7 @@ export function createProductionCspConfig(config) {
         imgSrc: ["'self'"],
         fontSrc: ["'none'"],
         connectSrc: ["'self'", supabaseOrigin],
-        frameSrc: ["'none'"],
+        frameSrc: analyticsEnabled ? ["'self'"] : ["'none'"],
         objectSrc: ["'none'"],
         baseUri: ["'none'"],
         formAction: ["'self'"],
@@ -53,6 +56,22 @@ export function createProductionCspConfig(config) {
         reportTo: ['csp-endpoint'],
       }),
     }),
+    analyticsFrameContentSecurityPolicy: analyticsEnabled ? Object.freeze({
+      useDefaults: false,
+      directives: Object.freeze({
+        defaultSrc: ["'none'"],
+        scriptSrc: [applicationOrigin, 'https://www.googletagmanager.com'],
+        scriptSrcAttr: ["'none'"],
+        styleSrc: ["'none'"],
+        imgSrc: ['https://www.googletagmanager.com', 'https://*.google-analytics.com'],
+        connectSrc: ['https://www.googletagmanager.com', 'https://*.google-analytics.com', 'https://*.google.com'],
+        frameSrc: ["'none'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'none'"],
+        formAction: ["'none'"],
+        frameAncestors: ["'self'"],
+      }),
+    }) : null,
   });
 }
 

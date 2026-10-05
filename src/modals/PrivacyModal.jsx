@@ -3,7 +3,7 @@ import { PLANNIX_OPEN_PRIVACY_EVENT } from '../utils/plannixEvents';
 import PrivacyLegalContent from './PrivacyLegalContent';
 import './TermsModal.css';
 
-const LAST_UPDATED = '6 May 2026';
+const LAST_UPDATED = '5 October 2026';
 
 export default function PrivacyModal() {
   const titleId = useId();

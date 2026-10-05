@@ -145,9 +145,12 @@ export default function PrivacyLegalContent() {
           <strong>strictly necessary</strong> exemptions under the ePrivacy rules, as implemented in national law.
         </p>
         <p>
-          Where we use <strong>non-essential</strong> cookies (for example analytics or marketing), we will request your
-          <strong>consent</strong> where required and you can adjust choices via our cookie controls (for example the
-          cookie banner or settings link in the footer).
+          If you choose <strong>Accept analytics</strong>, we load Google Analytics 4 to count visits to the public Home,
+          Features and Contact pages. We send fixed page titles and public URLs without query strings or fragments.
+          Google may receive your IP address and browser information and set analytics cookies. We do not send account,
+          class, lesson or form content as analytics events. Advertising tracking is disabled in our tag configuration.
+          Use <strong>Cookie settings</strong> in the footer to reject or withdraw analytics; this stops further
+          Plannix page views and clears this site's analytics cookies where the browser permits it.
         </p>
       </section>
 

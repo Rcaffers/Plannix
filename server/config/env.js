@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { validMeasurementId } from '../../shared/gaMeasurementId.js';
 
 const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,6 +39,7 @@ export const env = Object.freeze({
   vapidPublicKey: String(process.env.VAPID_PUBLIC_KEY || '').trim(),
   vapidPrivateKey: String(process.env.VAPID_PRIVATE_KEY || '').trim(),
   vapidSubject: String(process.env.VAPID_SUBJECT || '').trim(),
+  gaMeasurementId: validMeasurementId(process.env.VITE_GA_MEASUREMENT_ID),
   distDirectory: path.join(serverDirectory, '..', '..', 'dist'),
 });
 
