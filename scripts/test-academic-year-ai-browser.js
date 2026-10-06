@@ -60,7 +60,8 @@ try {
         const inputs = [...card.querySelectorAll('.settings-holiday-grid input')].map(input => {
           const box = input.getBoundingClientRect(), computed = getComputedStyle(input);
           return { label: input.labels[0]?.textContent, left: box.left, right: box.right, width: box.width,
-            value: input.value, type: input.type, display: computed.display, boxSizing: computed.boxSizing };
+            height: box.height, value: input.value, type: input.type, display: computed.display,
+            boxSizing: computed.boxSizing, declaredWidth: input.computedStyleMap?.().get('width')?.toString() };
         });
         return { left, right, inputs };
       });
@@ -76,7 +77,10 @@ try {
           `${width}x${height}: ${input.label} exceeds its own holiday card: ${JSON.stringify(card)}`);
         assert.ok(input.width >= 140 && input.value && input.display !== 'none' && input.boxSizing === 'border-box',
           `${width}x${height}: ${input.label} is clipped or hidden: ${JSON.stringify(card)}`);
+        assert.ok(input.height >= 44, `${width}x${height}: ${input.label} touch target is too short: ${JSON.stringify(card)}`);
       }
+      assert.ok(dates.every(input => input.declaredWidth === 'auto'),
+        `${width}x${height}: padded date inputs must stretch without iOS WebKit's width:100% calculation: ${JSON.stringify(card)}`);
       if (width < 720) for (const input of dates) {
         assert.ok(Math.abs(input.left - label.left) <= 1 && Math.abs(input.right - label.right) <= 1,
           `${width}x${height}: ${input.label} does not align with Label: ${JSON.stringify(card)}`);

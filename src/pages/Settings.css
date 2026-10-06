@@ -220,6 +220,12 @@
   box-sizing: border-box;
 }
 
+/* iOS WebKit miscalculates padded date controls at width: 100%; let the grid stretch the native input. */
+.academic-year-page .settings-holiday-grid input[type='date'] {
+  width: auto;
+  justify-self: stretch;
+}
+
 @media (min-width: 720px) {
   .settings-holiday-grid {
     grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr));
