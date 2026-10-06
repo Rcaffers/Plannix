@@ -48,6 +48,36 @@ try {
     assert.ok(measured.result.value.scroll <= width + 1, `${width}px overflows: ${JSON.stringify(measured.result.value)}`);
   }
   console.log(JSON.stringify(widths));
+  const holidayDateBounds = [];
+  for (const [width, height] of [[320, 700], [375, 760], [390, 780], [430, 850],
+    [667, 375], [844, 390], [932, 430], [768, 900], [820, 900], [1024, 900], [1366, 900]]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
+    const result = await send('Runtime.evaluate', { expression: `(() => {
+      const card = document.querySelector('.academic-year-page .settings-timetable-form');
+      const cardBox = card.getBoundingClientRect(), style = getComputedStyle(card);
+      const left = cardBox.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
+      const right = cardBox.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
+      const inputs = [...document.querySelectorAll('#school-holidays-panel input[type="date"]')].map(input => {
+        const box = input.getBoundingClientRect();
+        return { label: input.labels[0]?.textContent, left: box.left, right: box.right, width: box.width,
+          value: input.value, picker: getComputedStyle(input).display };
+      });
+      return { left, right, inputs, scroll: document.documentElement.scrollWidth };
+    })()`, returnByValue: true }, sessionId);
+    const measured = result.result?.value;
+    assert.equal(measured?.inputs.length, 2, `${width}x${height}: expanded saved dates must be present`);
+    for (const input of measured.inputs) {
+      assert.ok(input.left >= measured.left - 1 && input.right <= measured.right + 1,
+        `${width}x${height}: ${input.label} exceeds card content: ${JSON.stringify(measured)}`);
+      assert.ok(input.width >= 140 && input.value && input.picker !== 'none',
+        `${width}x${height}: ${input.label} is clipped or hidden: ${JSON.stringify(measured)}`);
+    }
+    assert.ok(measured.scroll <= width + 1, `${width}x${height}: document overflows: ${JSON.stringify(measured)}`);
+    holidayDateBounds.push({ viewport: `${width}x${height}`, content: [measured.left, measured.right],
+      fields: measured.inputs.map(input => [input.label, input.left, input.right]) });
+  }
+  console.log(`Expanded saved holiday date bounds: ${JSON.stringify(holidayDateBounds)}`);
+  await send('Emulation.clearDeviceMetricsOverride', {}, sessionId);
   await send('Runtime.evaluate', { expression: `new Promise(resolve=>{[...document.querySelectorAll('button')].find(button=>button.textContent==='Paste text').click();requestAnimationFrame(resolve)})`, awaitPromise: true }, sessionId);
   const keyboardReady = await send('Runtime.evaluate', { expression: `new Promise(resolve=>{const node=document.querySelector('#school-holiday-text');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(node,'Synthetic calendar');node.dispatchEvent(new Event('input',{bubbles:true}));requestAnimationFrame(()=>{const button=[...document.querySelectorAll('button')].find(button=>button.textContent==='Extract holidays');button.focus();resolve({disabled:button.disabled,focused:document.activeElement===button})})})`, awaitPromise: true, returnByValue: true }, sessionId);
   assert.deepEqual(keyboardReady.result.value, { disabled: false, focused: true }, 'Pasted-text extraction is keyboard ready');

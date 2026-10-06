@@ -201,11 +201,24 @@
 .settings-holiday-grid {
   display: grid;
   gap: 12px;
+  min-width: 0;
+}
+
+.academic-year-page .settings-holiday-grid > .settings-field {
+  min-width: 0;
+}
+
+.academic-year-page .settings-holiday-grid input[type='date'] {
+  width: 100%;
+  min-width: 0;
+  min-inline-size: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 @media (min-width: 720px) {
   .settings-holiday-grid {
-    grid-template-columns: 1.4fr 1fr 1fr;
+    grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr));
   }
 }
 

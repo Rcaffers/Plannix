@@ -170,6 +170,16 @@ async function run() {
   check(window.__plannixConfirmImportPreviewDiscard === undefined && window.__plannixConfirmAcademicYearDiscard?.() === false
     && prompts === 2, 'sign-out uses one combined Academic Year confirmation and preserves both edits on rejection');
   window.confirm = () => true; click('Discard suggestions'); await settle();
+  // Keep an already-saved holiday expanded for the runner's native date-input measurements.
+  flushSync(() => setYear({ ...initial, holidays: [{ id: '91000000-0000-4000-8000-000000000021',
+    label: 'Saved half-term', startDate: '2026-10-26', endDate: '2026-10-30', holidayType: 'school' }] }));
+  await settle();
+  if (host.querySelector('#school-holidays-toggle')?.getAttribute('aria-expanded') !== 'true') {
+    click('Show school holidays (1)'); await settle();
+  }
+  check(host.querySelector('#school-holidays-panel input[type="date"]')?.value === '2026-10-26'
+    && host.querySelector('#school-holidays-toggle').getAttribute('aria-expanded') === 'true',
+  'saved school holiday dates are expanded for responsive checks');
   document.body.dataset.testResult = 'passed'; const report = document.createElement('pre'); report.style.whiteSpace = 'pre-wrap'; report.style.overflowWrap = 'anywhere'; report.textContent = checks.join('\n'); document.body.append(report);
 }
 window.verifyAcademicYearSignOut = async () => {
