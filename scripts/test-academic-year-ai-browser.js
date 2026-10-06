@@ -53,28 +53,39 @@ try {
     [667, 375], [844, 390], [932, 430], [768, 900], [820, 900], [1024, 900], [1366, 900]]) {
     await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
     const result = await send('Runtime.evaluate', { expression: `(() => {
-      const card = document.querySelector('.academic-year-page .settings-timetable-form');
-      const cardBox = card.getBoundingClientRect(), style = getComputedStyle(card);
-      const left = cardBox.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
-      const right = cardBox.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
-      const inputs = [...document.querySelectorAll('#school-holidays-panel input[type="date"]')].map(input => {
-        const box = input.getBoundingClientRect();
-        return { label: input.labels[0]?.textContent, left: box.left, right: box.right, width: box.width,
-          value: input.value, picker: getComputedStyle(input).display };
+      const cards = [...document.querySelectorAll('#school-holidays-panel .settings-holiday-card')].map(card => {
+        const cardBox = card.getBoundingClientRect(), style = getComputedStyle(card);
+        const left = cardBox.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
+        const right = cardBox.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
+        const inputs = [...card.querySelectorAll('.settings-holiday-grid input')].map(input => {
+          const box = input.getBoundingClientRect(), computed = getComputedStyle(input);
+          return { label: input.labels[0]?.textContent, left: box.left, right: box.right, width: box.width,
+            value: input.value, type: input.type, display: computed.display, boxSizing: computed.boxSizing };
+        });
+        return { left, right, inputs };
       });
-      return { left, right, inputs, scroll: document.documentElement.scrollWidth };
+      return { cards, scroll: document.documentElement.scrollWidth };
     })()`, returnByValue: true }, sessionId);
     const measured = result.result?.value;
-    assert.equal(measured?.inputs.length, 2, `${width}x${height}: expanded saved dates must be present`);
-    for (const input of measured.inputs) {
-      assert.ok(input.left >= measured.left - 1 && input.right <= measured.right + 1,
-        `${width}x${height}: ${input.label} exceeds card content: ${JSON.stringify(measured)}`);
-      assert.ok(input.width >= 140 && input.value && input.picker !== 'none',
-        `${width}x${height}: ${input.label} is clipped or hidden: ${JSON.stringify(measured)}`);
+    assert.equal(measured?.cards.length, 2, `${width}x${height}: two saved cards must be expanded`);
+    for (const card of measured.cards) {
+      assert.equal(card.inputs.length, 3, `${width}x${height}: every card has Label, First day and Last day`);
+      const [label, ...dates] = card.inputs;
+      for (const input of card.inputs) {
+        assert.ok(input.left >= card.left - 1 && input.right <= card.right + 1,
+          `${width}x${height}: ${input.label} exceeds its own holiday card: ${JSON.stringify(card)}`);
+        assert.ok(input.width >= 140 && input.value && input.display !== 'none' && input.boxSizing === 'border-box',
+          `${width}x${height}: ${input.label} is clipped or hidden: ${JSON.stringify(card)}`);
+      }
+      if (width < 720) for (const input of dates) {
+        assert.ok(Math.abs(input.left - label.left) <= 1 && Math.abs(input.right - label.right) <= 1,
+          `${width}x${height}: ${input.label} does not align with Label: ${JSON.stringify(card)}`);
+      }
     }
     assert.ok(measured.scroll <= width + 1, `${width}x${height}: document overflows: ${JSON.stringify(measured)}`);
-    holidayDateBounds.push({ viewport: `${width}x${height}`, content: [measured.left, measured.right],
-      fields: measured.inputs.map(input => [input.label, input.left, input.right]) });
+    holidayDateBounds.push({ viewport: `${width}x${height}`, cards: measured.cards.map(card => ({
+      content: [card.left, card.right], fields: card.inputs.map(input => [input.label, input.left, input.right]),
+    })) });
   }
   console.log(`Expanded saved holiday date bounds: ${JSON.stringify(holidayDateBounds)}`);
   await send('Emulation.clearDeviceMetricsOverride', {}, sessionId);

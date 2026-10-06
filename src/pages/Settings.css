@@ -161,6 +161,7 @@
 }
 
 .settings-holiday-card {
+  min-width: 0;
   padding: 14px 14px 12px;
   border-radius: 10px;
   border: 1px solid rgba(63, 127, 120, 0.2);
@@ -200,6 +201,7 @@
 
 .settings-holiday-grid {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   min-width: 0;
 }
@@ -208,10 +210,12 @@
   min-width: 0;
 }
 
-.academic-year-page .settings-holiday-grid input[type='date'] {
+.academic-year-page .settings-holiday-grid :is(input[type='text'], input[type='date']) {
+  display: block;
   width: 100%;
   min-width: 0;
   min-inline-size: 0;
+  min-height: 44px;
   max-width: 100%;
   box-sizing: border-box;
 }
