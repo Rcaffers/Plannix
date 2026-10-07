@@ -7,7 +7,7 @@ import helmet from 'helmet';
 import { env } from './config/env.js';
 import { corsDelegate } from './config/cors.js';
 import { createProductionCspConfig, reportingEndpoints } from './config/csp.js';
-import { registerAnalyticsFrameStatic } from './config/analyticsFrameStatic.js';
+import { analyticsHostBoundary } from './config/analyticsHost.js';
 import { errorHandler, logRouteError, sendError } from './middleware/errorHandler.js';
 import { notFound } from './middleware/notFound.js';
 import { requestId } from './middleware/requestId.js';
@@ -27,10 +27,17 @@ import { registerPushRoutes } from './routes/push-routes.js';
 import { registerMorningSummaryRoutes } from './routes/morning-summary-routes.js';
 
 export const app = express();
+if (env.nodeEnv === 'production' && env.analyticsFrameOrigin
+  && new URL(env.analyticsFrameOrigin).hostname !== 'analytics.plannix.co.uk') {
+  throw new Error('ANALYTICS_FRAME_ORIGIN must use analytics.plannix.co.uk.');
+}
 const productionCsp = env.nodeEnv === 'production' ? createProductionCspConfig(env) : null;
 
 app.disable('x-powered-by');
 app.set('trust proxy', env.trustProxyHops);
+app.use(analyticsHostBoundary({ analyticsFrameOrigin: productionCsp?.analyticsFrameOrigin,
+  applicationOrigin: productionCsp?.applicationOrigin, measurementId: env.gaMeasurementId,
+  frameCsp: productionCsp?.analyticsFrameContentSecurityPolicy }));
 app.use(requestId);
 app.use(helmet({
   contentSecurityPolicy: productionCsp?.contentSecurityPolicy || false,
@@ -121,8 +128,6 @@ registerHolidayRoutes({
 app.use(notFound);
 
 if (fs.existsSync(env.distDirectory)) {
-  registerAnalyticsFrameStatic({ app, distDirectory: env.distDirectory,
-    frameCsp: productionCsp?.analyticsFrameContentSecurityPolicy });
   app.use(express.static(env.distDirectory, { index: ['index.html'] }));
   app.get(/.*/, (_req, res, next) => {
     res.sendFile(path.join(env.distDirectory, 'index.html'), (error) => {

@@ -43,7 +43,7 @@ Client build:
 - `VITE_SUPABASE_URL` — public Supabase project URL used by the browser client
 - `VITE_SUPABASE_PUBLISHABLE_KEY` — public/publishable Supabase browser key
 - `VITE_API_BASE_URL` — leave **unset** when the API is served from the **same** host as the UI (typical `npm start` / DigitalOcean single service). Never deploy a build that still contains a **local** URL (e.g. `http://localhost:4000` from your machine’s `.env`)—the browser cannot reach it. For a **separate** API host, set this to the public **https** base URL (no trailing slash).
-- `VITE_GA_MEASUREMENT_ID` — optional GA4 ID. Set the same value at build time and on the web-service runtime so the production CSP allows the tag. Invalid or missing values disable analytics. See [analytics setup](docs/analytics.md).
+- `VITE_GA_MEASUREMENT_ID` and `VITE_ANALYTICS_FRAME_ORIGIN` — optional build-time GA4 configuration. Analytics also requires separate `GA_MEASUREMENT_ID` and `ANALYTICS_FRAME_ORIGIN` web-service variables and a verified separate hostname; it remains disabled when the values are absent. See [analytics setup](docs/analytics.md).
 
 Never expose a privileged Supabase key through a `VITE_` variable. Vite embeds these variables in browser code.
 

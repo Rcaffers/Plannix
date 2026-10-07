@@ -1,4 +1,5 @@
 import { validMeasurementId } from '../../shared/gaMeasurementId.js';
+import { parseAnalyticsFrameOrigin } from '../../shared/analyticsOrigin.js';
 
 const PUBLIC_PAGES = Object.freeze({
   '/': 'Plannix | Home',
@@ -36,14 +37,18 @@ export function clearAnalyticsCookies(doc, hostname, pathname = '/') {
   }
 }
 
-export function createAnalyticsController({ measurementId, win, doc }) {
+export function createAnalyticsController({ measurementId, frameOrigin, win, doc, cleanupTimeoutMs = 500 }) {
   const id = validMeasurementId(measurementId);
+  const origin = win && parseAnalyticsFrameOrigin(frameOrigin, win.location.origin);
   let frame = null;
   let frameReady = false;
   let generation = 0;
   let lastPath = null;
   let lastUrl = null;
   let pending = null;
+  let lastChoice;
+  let desired;
+  let cleanup = null;
 
   function destroy() {
     generation += 1;
@@ -63,18 +68,66 @@ export function createAnalyticsController({ measurementId, win, doc }) {
     if (!frame || !frameReady || !pending) return;
     const message = pending;
     pending = null;
-    try { frame.contentWindow?.postMessage(message, '*'); }
+    try { frame.contentWindow?.postMessage(message, origin); }
     catch { destroy(); }
   }
 
+  function finishCleanup(ticket) {
+    if (!cleanup || cleanup.ticket !== ticket) return;
+    clearTimeout(cleanup.timer);
+    win.removeEventListener?.('message', cleanup.listener);
+    cleanup = null;
+    destroy();
+    if (desired?.choice === 'analytics') update(desired);
+  }
+
+  function startCleanup() {
+    if (!origin || cleanup) return;
+    const current = frame || doc.createElement('iframe');
+    const ticket = ++generation;
+    const sendCleanup = () => {
+      if (cleanup?.ticket !== ticket) return;
+      try { current.contentWindow?.postMessage({ type: 'plannix:analytics-cleanup', token: ticket }, origin); }
+      catch { finishCleanup(ticket); }
+    };
+    const listener = event => {
+      if (cleanup?.ticket !== ticket || event.source !== current.contentWindow || event.origin !== origin
+        || event.data?.type !== 'plannix:analytics-cleanup-done' || event.data.token !== ticket
+        || typeof event.data.cleared !== 'boolean') return;
+      finishCleanup(ticket);
+    };
+    if (!frame) {
+      current.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+      current.setAttribute('aria-hidden', 'true');
+      current.setAttribute('tabindex', '-1');
+      current.referrerPolicy = 'no-referrer';
+      current.style.display = 'none';
+      current.src = `${origin}/analytics-frame.html#cleanup`;
+      frame = current;
+      frameReady = false;
+      try { doc.body.appendChild(current); }
+      catch { destroy(); return; }
+    }
+    current.onload = () => { if (frame === current && cleanup?.ticket === ticket) sendCleanup(); };
+    current.onerror = () => finishCleanup(ticket);
+    cleanup = { ticket, listener, timer: setTimeout(() => finishCleanup(ticket), cleanupTimeoutMs) };
+    win.addEventListener?.('message', listener);
+    if (frameReady) sendCleanup();
+  }
+
   function update({ choice, pathname, hasParameters = false, authenticated, authLoading }) {
-    const page = !authenticated && !authLoading && !hasParameters && choice === 'analytics' && id
+    desired = { choice, pathname, hasParameters, authenticated, authLoading };
+    const page = !authenticated && !authLoading && !hasParameters && choice === 'analytics' && id && origin
       ? publicPage(pathname, win.location.origin) : null;
     if (!page) {
-      destroy();
+      if (choice !== 'analytics' && lastChoice === 'analytics') startCleanup();
+      else if (!cleanup) destroy();
       if (choice !== 'analytics') clearAnalyticsCookies(doc, win.location.hostname, win.location.pathname);
+      lastChoice = choice;
       return;
     }
+    lastChoice = choice;
+    if (cleanup) return;
     if (lastPath === pathname) return;
     const referrer = lastUrl || publicReferrer(doc.referrer, win.location.origin);
     pending = { type: 'plannix:analytics-page', id, page_location: page.url,
@@ -83,12 +136,12 @@ export function createAnalyticsController({ measurementId, win, doc }) {
     lastUrl = page.url;
     if (!frame) {
       const current = doc.createElement('iframe');
-      current.setAttribute('sandbox', 'allow-scripts');
+      current.setAttribute('sandbox', 'allow-scripts allow-same-origin');
       current.setAttribute('aria-hidden', 'true');
       current.setAttribute('tabindex', '-1');
       current.referrerPolicy = 'no-referrer';
       current.style.display = 'none';
-      current.src = '/analytics-frame.html';
+      current.src = `${origin}/analytics-frame.html`;
       const ticket = ++generation;
       current.onload = () => {
         if (frame !== current || ticket !== generation) return;
@@ -109,6 +162,7 @@ export function createAnalyticsController({ measurementId, win, doc }) {
 
 export const analyticsController = createAnalyticsController({
   measurementId: import.meta.env?.VITE_GA_MEASUREMENT_ID,
+  frameOrigin: import.meta.env?.VITE_ANALYTICS_FRAME_ORIGIN,
   win: typeof window === 'undefined' ? null : window,
   doc: typeof document === 'undefined' ? null : document,
 });

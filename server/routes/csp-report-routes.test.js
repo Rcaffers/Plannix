@@ -5,8 +5,9 @@ import helmet from 'helmet';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { createProductionCspConfig } from '../config/csp.js';
-import { registerAnalyticsFrameStatic } from '../config/analyticsFrameStatic.js';
+import { analyticsHostBoundary } from '../config/analyticsHost.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { requestId } from '../middleware/requestId.js';
 import {
@@ -107,40 +108,43 @@ test('valid GA4 configuration confines Google hosts to the isolated frame policy
   const base = { supabaseUrl: 'https://project.supabase.test', frontendOrigins: ['https://app.example.test'] };
   const disabled = createProductionCspConfig({ ...base, gaMeasurementId: 'invalid' });
   assert.deepEqual(disabled.contentSecurityPolicy.directives.scriptSrc, ["'self'"]);
-  const enabled = createProductionCspConfig({ ...base, gaMeasurementId: 'G-KB7KT8NJW8' });
+  const enabled = createProductionCspConfig({ ...base, gaMeasurementId: 'G-YFG3PYKMXG',
+    analyticsFrameOrigin: 'https://analytics.example.test' });
   const directives = enabled.contentSecurityPolicy.directives;
   assert.deepEqual(directives.scriptSrc, ["'self'"]);
   assert.deepEqual(directives.imgSrc, ["'self'"]);
   assert.deepEqual(directives.connectSrc, ["'self'", 'https://project.supabase.test']);
-  assert.deepEqual(directives.frameSrc, ["'self'"]);
-  assert.deepEqual(enabled.analyticsFrameContentSecurityPolicy.directives.frameAncestors, ["'self'"]);
+  assert.deepEqual(directives.frameSrc, ['https://analytics.example.test']);
+  assert.deepEqual(enabled.analyticsFrameContentSecurityPolicy.directives.frameAncestors, ['https://app.example.test']);
   assert.deepEqual(enabled.analyticsFrameContentSecurityPolicy.directives.frameSrc, ["'none'"]);
   assert.deepEqual(enabled.analyticsFrameContentSecurityPolicy.directives.scriptSrc,
-    ['https://app.example.test', 'https://www.googletagmanager.com']);
+    ["'self'", 'https://www.googletagmanager.com']);
   assert.deepEqual(enabled.analyticsFrameContentSecurityPolicy.directives.connectSrc,
     ['https://www.googletagmanager.com', 'https://*.google-analytics.com', 'https://*.google.com']);
   assert.doesNotMatch(JSON.stringify(directives), /doubleclick|googlesyndication|unsafe-inline.*script/i);
 });
 
-test('Express and Helmet scope the CORP exception to the exact frame bootstrap', async () => {
+test('Express host boundary serves only frame assets and Helmet confines Google hosts', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'plannix-analytics-headers-'));
   let server;
   try {
     await Promise.all([
-      writeFile(path.join(directory, 'analytics-frame.html'), '<!doctype html><title>Frame</title>'),
-      writeFile(path.join(directory, 'analytics-frame.js'), '/* synthetic bootstrap */'),
       writeFile(path.join(directory, 'other.js'), '/* unrelated resource */'),
       writeFile(path.join(directory, 'index.html'), '<!doctype html><title>Main</title>'),
     ]);
     const csp = createProductionCspConfig({
       supabaseUrl: 'https://project.supabase.test',
       frontendOrigins: ['https://app.example.test'],
-      gaMeasurementId: 'G-KB7KT8NJW8',
+      gaMeasurementId: 'G-YFG3PYKMXG',
+      analyticsFrameOrigin: 'https://analytics.example.test',
     });
     const app = express();
+    app.set('trust proxy', 1);
+    app.use(analyticsHostBoundary({ analyticsFrameOrigin: csp.analyticsFrameOrigin,
+      applicationOrigin: csp.applicationOrigin, measurementId: 'G-YFG3PYKMXG',
+      frameCsp: csp.analyticsFrameContentSecurityPolicy }));
     app.use(helmet({ contentSecurityPolicy: csp.contentSecurityPolicy }));
-    registerAnalyticsFrameStatic({ app, distDirectory: directory,
-      frameCsp: csp.analyticsFrameContentSecurityPolicy });
+    app.get('/api/private', (_req, res) => res.json({ private: true }));
     app.use(express.static(directory));
     server = app.listen(0, '127.0.0.1');
     await new Promise((resolve, reject) => {
@@ -148,23 +152,67 @@ test('Express and Helmet scope the CORP exception to the exact frame bootstrap',
       server.once('error', reject);
     });
     const origin = `http://127.0.0.1:${server.address().port}`;
+    const request = (url, host = 'app.example.test', extra = {}) => new Promise((resolve, reject) => {
+      const outgoing = http.request(`${origin}${url}`, { headers: { Host: host, ...extra } }, response => {
+        const chunks = [];
+        response.on('data', chunk => chunks.push(chunk));
+        response.on('end', () => resolve({ status: response.statusCode,
+          headers: { get: name => response.headers[name.toLowerCase()] || null },
+          text: async () => Buffer.concat(chunks).toString('utf8') }));
+      });
+      outgoing.on('error', reject);
+      outgoing.end();
+    });
     const [main, frame, bootstrap, other] = await Promise.all([
-      fetch(origin), fetch(`${origin}/analytics-frame.html`),
-      fetch(`${origin}/analytics-frame.js`), fetch(`${origin}/other.js`),
+      request('/'), request('/analytics-frame.html', 'analytics.example.test'),
+      request('/analytics-frame.js', 'analytics.example.test'), request('/other.js'),
     ]);
     assert.equal(main.status, 200);
     assert.equal(frame.status, 200);
     assert.equal(bootstrap.status, 200);
     assert.equal(other.status, 200);
-    assert.equal(bootstrap.headers.get('cross-origin-resource-policy'), 'cross-origin');
+    assert.equal(bootstrap.headers.get('cross-origin-resource-policy'), 'same-origin');
     assert.equal(other.headers.get('cross-origin-resource-policy'), 'same-origin');
     assert.equal(frame.headers.get('cross-origin-resource-policy'), 'same-origin');
     assert.match(frame.headers.get('content-security-policy'), /https:\/\/www\.googletagmanager\.com/);
     assert.doesNotMatch(main.headers.get('content-security-policy'), /googletagmanager|google-analytics|google\.com/);
+    assert.match(main.headers.get('content-security-policy'), /frame-src https:\/\/analytics\.example\.test/);
+    assert.match(await frame.text(), /G-YFG3PYKMXG/);
+    for (const url of ['/', '/login', '/auth/callback', '/api/private', '/other.js',
+      '/analytics-frame.html?x=1', '/%61nalytics-frame.js', '/analytics-frame%2ehtml']) {
+      assert.equal((await request(url, 'analytics.example.test')).status, 404, url);
+    }
+    for (const host of ['analytics.example.test:443', 'analytics.example.test.',
+      'ANALYTICS.EXAMPLE.TEST:443']) {
+      assert.equal((await request('/api/private', host)).status, 404, host);
+    }
+    assert.equal((await request('/analytics-frame.js', 'app.example.test')).status, 404);
+    assert.equal((await request('/api/private', 'analytics.example.test',
+      { 'X-Forwarded-Host': 'app.example.test' })).status, 404);
+    assert.equal((await request('/api/private', 'app.example.test',
+      { 'X-Forwarded-Host': 'analytics.example.test' })).status, 200);
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('reserved analytics hostname fails closed when analytics is disabled', async () => {
+  const app = express();
+  app.use(analyticsHostBoundary({}));
+  app.get('/api/private', (_req, res) => res.status(200).end());
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
+    const request = host => new Promise((resolve, reject) => {
+      const outgoing = http.request(`http://127.0.0.1:${server.address().port}/api/private`,
+        { headers: { Host: host } }, response => { response.resume(); response.on('end', () => resolve(response.statusCode)); });
+      outgoing.on('error', reject); outgoing.end();
+    });
+    assert.equal(await request('analytics.plannix.co.uk'), 404);
+    assert.equal(await request('analytics.plannix.co.uk:443'), 404);
+    assert.equal(await request('app.example.test'), 200);
+  } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
 test('production CSP configuration rejects non-HTTPS and ambiguous reporting origins', () => {
@@ -184,6 +232,13 @@ test('production CSP configuration rejects non-HTTPS and ambiguous reporting ori
     supabaseUrl: 'https://project.supabase.test',
     frontendOrigins: ['https://one.example.test', 'https://two.example.test'],
   }), /exactly one/);
+  for (const analyticsFrameOrigin of ['http://analytics.example.test',
+    'https://analytics.example.test/path', 'https://app.example.test',
+    'https://analytics.example.test?private=1']) {
+    assert.throws(() => createProductionCspConfig({ supabaseUrl: 'https://project.supabase.test',
+      frontendOrigins: ['https://app.example.test'], gaMeasurementId: 'G-YFG3PYKMXG',
+      analyticsFrameOrigin }), /ANALYTICS_FRAME_ORIGIN/);
+  }
 });
 
 test('legacy and modern reports are accepted and logged using only safe fields', async () => {
@@ -410,4 +465,5 @@ test('production app registers the CSP report route exactly once', async () => {
   ].map((entry) => source.indexOf(entry));
   assert.equal(orderedRegistrations.every((index) => index >= 0), true);
   assert.deepEqual(orderedRegistrations, [...orderedRegistrations].sort((a, b) => a - b));
+  assert.ok(source.indexOf('app.use(analyticsHostBoundary') < source.indexOf('app.use(requestId)'));
 });

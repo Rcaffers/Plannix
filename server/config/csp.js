@@ -1,4 +1,5 @@
 import { validMeasurementId } from '../../shared/gaMeasurementId.js';
+import { parseAnalyticsFrameOrigin } from '../../shared/analyticsOrigin.js';
 
 const REPORT_PATH = '/api/csp-report';
 
@@ -27,10 +28,17 @@ export function createProductionCspConfig(config) {
   const applicationOrigin = httpsOrigin(frontendOrigins[0], 'FRONTEND_ORIGIN', {
     requireOrigin: true,
   });
-  const analyticsEnabled = Boolean(validMeasurementId(config?.gaMeasurementId));
+  const configuredFrameOrigin = config?.analyticsFrameOrigin;
+  const analyticsFrameOrigin = configuredFrameOrigin
+    ? parseAnalyticsFrameOrigin(configuredFrameOrigin, applicationOrigin) : null;
+  if (configuredFrameOrigin && !analyticsFrameOrigin) {
+    throw new Error('ANALYTICS_FRAME_ORIGIN must be a distinct HTTPS origin.');
+  }
+  const analyticsEnabled = Boolean(validMeasurementId(config?.gaMeasurementId) && analyticsFrameOrigin);
 
   return Object.freeze({
     applicationOrigin,
+    analyticsFrameOrigin: analyticsEnabled ? analyticsFrameOrigin : null,
     reportingEndpoints: `csp-endpoint="${applicationOrigin}${REPORT_PATH}"`,
     contentSecurityPolicy: Object.freeze({
       reportOnly: false,
@@ -45,7 +53,7 @@ export function createProductionCspConfig(config) {
         imgSrc: ["'self'"],
         fontSrc: ["'none'"],
         connectSrc: ["'self'", supabaseOrigin],
-        frameSrc: analyticsEnabled ? ["'self'"] : ["'none'"],
+        frameSrc: analyticsEnabled ? [analyticsFrameOrigin] : ["'none'"],
         objectSrc: ["'none'"],
         baseUri: ["'none'"],
         formAction: ["'self'"],
@@ -60,7 +68,7 @@ export function createProductionCspConfig(config) {
       useDefaults: false,
       directives: Object.freeze({
         defaultSrc: ["'none'"],
-        scriptSrc: [applicationOrigin, 'https://www.googletagmanager.com'],
+        scriptSrc: ["'self'", 'https://www.googletagmanager.com'],
         scriptSrcAttr: ["'none'"],
         styleSrc: ["'none'"],
         imgSrc: ['https://www.googletagmanager.com', 'https://*.google-analytics.com'],
@@ -69,7 +77,7 @@ export function createProductionCspConfig(config) {
         objectSrc: ["'none'"],
         baseUri: ["'none'"],
         formAction: ["'none'"],
-        frameAncestors: ["'self'"],
+        frameAncestors: [applicationOrigin],
       }),
     }) : null,
   });
