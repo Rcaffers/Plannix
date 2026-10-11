@@ -7,7 +7,7 @@ const B64URL = /^[A-Za-z0-9_-]+$/;
 const genericError = () => new Error('Session token unavailable.');
 
 function context(sessionId, purpose, version) {
-  if (!UUID.test(sessionId) || !['access', 'refresh'].includes(purpose)
+  if (!UUID.test(sessionId) || !['access', 'refresh', 'pkce'].includes(purpose)
     || !Number.isSafeInteger(version) || version < 1) throw genericError();
   return Buffer.from(`plannix-session-token:v1:${sessionId.toLowerCase()}:${purpose}:${version}`, 'utf8');
 }

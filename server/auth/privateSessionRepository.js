@@ -81,6 +81,105 @@ export function createPrivateSessionRepository({ rpc, cipher, generateSecret = (
       session_name: input.session?.name ?? null,
       provided_session_hash: input.session?.hash ?? null });
   }
+  async function resolve(header) {
+    const parsed = parsePrivateSessionCookies(header);
+    if (parsed.state !== 'parsed') return { state: 'invalid' };
+    const result = await call('plannix_auth_select', {
+      candidates: {
+        markers: parsed.markers.map(({ name, hash }) => ({ name, hash })),
+        sessions: parsed.sessions.map(({ name, hash }) => ({ name, hash })),
+      },
+    });
+    const all = [...parsed.markers, ...parsed.sessions];
+    const cleanup = Array.isArray(result.cleanup) && result.cleanup.length <= all.length
+      && result.cleanup.every(name => all.some(item => item.name === name))
+      ? result.cleanup : [];
+    if (result.state !== 'selected') return { state: result.state, cleanup };
+    const marker = parsed.markers.find(item => item.name === result.markerName);
+    const session = result.sessionName == null ? null
+      : parsed.sessions.find(item => item.name === result.sessionName);
+    if (!marker || (result.sessionName != null && !session)) throw unavailable();
+    const parts = String(header).split(';').map(part => part.trim());
+    const valueFor = name => parts.find(part => part.startsWith(`${name}=`));
+    const markerPart = valueFor(marker.name);
+    const sessionPart = session ? valueFor(session.name) : null;
+    if (!markerPart || (session && !sessionPart)) throw unavailable();
+    return { state: 'selected', header: [markerPart, sessionPart].filter(Boolean).join('; '),
+      markerName: marker.name, sessionName: session?.name ?? null, cleanup };
+  }
+  function callbackInput(header, state, kind) {
+    const input = selected(header, 'optional');
+    if (input.state !== 'selected' || !['confirmation', 'recovery'].includes(kind)) return null;
+    return { marker_name: input.marker.name, provided_marker_hash: input.marker.hash,
+      provided_state_hash: digest(state), target_kind: kind };
+  }
+  async function reserveCallback(header, { state, kind, intentId }) {
+    const input = callbackInput(header, state, kind);
+    if (!input || typeof intentId !== 'string') return { state: 'invalid' };
+    return call('plannix_auth_reserve_callback', { ...input, initiating_intent: intentId });
+  }
+  async function attachCallback(header, { state, flowId, kind, verifier }) {
+    const input = callbackInput(header, state, kind);
+    if (!input) return { state: 'invalid' };
+    const envelope = cipher.encrypt({ sessionId: state, purpose: 'pkce', version: 1, token: verifier });
+    return call('plannix_auth_attach_callback', { ...input,
+      provided_flow_id: flowId, verifier_cipher: envelope });
+  }
+  async function readyCallback(header, { state, kind }) {
+    const input = callbackInput(header, state, kind);
+    if (!input) return { state: 'invalid' };
+    return call('plannix_auth_ready_callback', input);
+  }
+  async function cancelCallback(header, { state, kind }) {
+    const input = callbackInput(header, state, kind);
+    if (!input) return { state: 'invalid' };
+    return call('plannix_auth_cancel_callback', input);
+  }
+  async function claimCallback(header, { state, flowId, kind }) {
+    const input = selected(header, 'optional');
+    if (input.state !== 'selected' || !['confirmation', 'recovery'].includes(kind)) return { state: 'invalid' };
+    const result = await call('plannix_auth_claim_callback', { marker_name: input.marker.name,
+      provided_marker_hash: input.marker.hash, provided_state_hash: digest(state),
+      provided_flow_id: flowId, target_kind: kind,
+      session_name: input.session?.name ?? null,
+      provided_session_hash: input.session?.hash ?? null });
+    if (result.state !== 'claimed') return result;
+    try {
+      return { state: 'claimed', intentId: result.intentId, verifier: cipher.decrypt({ sessionId: state,
+        purpose: 'pkce', version: 1, envelope: result.verifierEnvelope }) };
+    } catch { throw unavailable(); }
+  }
+  async function claimRefresh(header, expectedVersion) {
+    const input = selected(header, true);
+    if (input.state !== 'selected' || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+      return { state: 'invalid' };
+    }
+    const result = await call('plannix_auth_claim_refresh', { marker_name: input.marker.name,
+      marker_hash: input.marker.hash, session_name: input.session.name,
+      session_hash: input.session.hash, expected_version: expectedVersion });
+    if (result.state !== 'claimed') return result;
+    try {
+      return { state: 'claimed', claimId: result.claimId, sessionId: result.sessionId,
+        ownerId: result.ownerId, tokenVersion: result.tokenVersion,
+        accessToken: cipher.decrypt({ sessionId: result.sessionId, purpose: 'access',
+          version: expectedVersion, envelope: result.accessEnvelope }),
+        refreshToken: cipher.decrypt({ sessionId: result.sessionId, purpose: 'refresh',
+          version: expectedVersion, envelope: result.refreshEnvelope }) };
+    } catch { throw unavailable(); }
+  }
+  async function finishRefresh(claim, { accessToken, refreshToken }) {
+    const nextVersion = claim.tokenVersion + 1;
+    return call('plannix_auth_finish_refresh', { claim_id: claim.claimId,
+      target_session: claim.sessionId, expected_version: claim.tokenVersion,
+      access_cipher: cipher.encrypt({ sessionId: claim.sessionId, purpose: 'access',
+        version: nextVersion, token: accessToken }),
+      refresh_cipher: cipher.encrypt({ sessionId: claim.sessionId, purpose: 'refresh',
+        version: nextVersion, token: refreshToken }) });
+  }
+  async function releaseRefresh(claim) {
+    return call('plannix_auth_release_refresh', { claim_id: claim.claimId,
+      target_session: claim.sessionId });
+  }
   async function settle(intentId, outcome, { confirmedOwnerId, accessToken, refreshToken } = {}) {
     if (!['created', 'failed', 'cancelled', 'expired'].includes(outcome)) return { state: 'invalid' };
     let secret; let access; let refresh; let actualOutcome = outcome;
@@ -155,5 +254,7 @@ export function createPrivateSessionRepository({ rpc, cipher, generateSecret = (
       session_hash: input.session.hash, confirmed_owner: confirmedOwnerId,
       expected_version: expectedVersion, access_cipher: access, refresh_cipher: refreshCipher });
   }
-  return Object.freeze({ issueBinding, begin, settle, inspect, readTokens, logout, refresh });
+  return Object.freeze({ issueBinding, resolve, begin, settle, inspect, readTokens,
+    reserveCallback, attachCallback, readyCallback, cancelCallback, claimCallback,
+    claimRefresh, finishRefresh, releaseRefresh, logout, refresh });
 }
