@@ -36,6 +36,9 @@ export const env = Object.freeze({
   supabaseUrl: String(process.env.SUPABASE_URL || '').trim(),
   supabasePublishableKey: String(process.env.SUPABASE_PUBLISHABLE_KEY || '').trim(),
   supabaseSecretKey: String(process.env.SUPABASE_SECRET_KEY || '').trim(),
+  authMode: String(process.env.PLANNIX_AUTH_MODE || 'bearer').trim(),
+  serverAuthOrigin: String(process.env.PLANNIX_SERVER_AUTH_ORIGIN || '').trim(),
+  serverAuthCsrfKey: String(process.env.PLANNIX_SERVER_AUTH_CSRF_KEY || '').trim(),
   vapidPublicKey: String(process.env.VAPID_PUBLIC_KEY || '').trim(),
   vapidPrivateKey: String(process.env.VAPID_PRIVATE_KEY || '').trim(),
   vapidSubject: String(process.env.VAPID_SUBJECT || '').trim(),
@@ -71,6 +74,14 @@ export function requireSupabaseAdminConfig(config = env) {
 }
 
 export function validateProductionEnv(config = env) {
+  const authMode = config.authMode ?? 'bearer';
+  if (!['bearer', 'server'].includes(authMode)) throw new Error('PLANNIX_AUTH_MODE is invalid.');
+  // The Stage 3 router has only an in-process credential rate limit. The
+  // integrated path is testable locally, but must not be activated on replicas
+  // until a shared limiter is installed and reviewed.
+  if (config.nodeEnv === 'production' && authMode === 'server') {
+    throw new Error('Server-managed authentication requires distributed rate limiting before activation.');
+  }
   if (config.nodeEnv === 'production') {
     requireSupabasePublicConfig(config);
     requireSupabaseAdminConfig(config);

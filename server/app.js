@@ -25,6 +25,9 @@ import { registerTimetableLayoutRoutes } from './routes/timetable-layout-routes.
 import { registerTimetableSessionRoutes } from './routes/timetable-session-routes.js';
 import { registerPushRoutes } from './routes/push-routes.js';
 import { registerMorningSummaryRoutes } from './routes/morning-summary-routes.js';
+import { getServerAuthRuntime } from './auth/serverAuthRuntime.js';
+import { registerServerAuthMembershipRoutes } from './routes/server-auth-membership-routes.js';
+import { requireMatchingBuild } from './config/buildAuthMode.js';
 
 export const app = express();
 if (env.nodeEnv === 'production' && env.analyticsFrameOrigin
@@ -49,6 +52,11 @@ app.use(helmet({
 }));
 if (productionCsp) app.use(reportingEndpoints(productionCsp));
 app.use(cors(corsDelegate));
+if (env.authMode === 'server') {
+  // One application-wide mode. The legacy bearer middleware is not mounted in
+  // this mode, and the auth router owns its bounded parser.
+  app.use('/__stage3/auth', getServerAuthRuntime().authRouter);
+}
 
 registerCspReportRoutes({
   app,
@@ -110,10 +118,12 @@ async function fetchUkBankHolidaysForYear(year) {
 }
 
 registerContactRoutes({ app, escapeHtml, logRouteError, normalizeEmailInput });
-registerAccountRoutes({ app });
+if (env.authMode !== 'server') registerAccountRoutes({ app });
 registerAcademicYearRoutes({ app });
 registerEventRoutes({ app });
 registerClassRoutes({ app });
+if (env.authMode === 'server') registerServerAuthMembershipRoutes({ app,
+  requireAuth: getServerAuthRuntime().requireAuth });
 registerTimetableLayoutRoutes({ app });
 registerTimetableSessionRoutes({ app });
 registerHolidayRoutes({
@@ -128,6 +138,7 @@ registerHolidayRoutes({
 app.use(notFound);
 
 if (fs.existsSync(env.distDirectory)) {
+  app.use(requireMatchingBuild(env.distDirectory, env.authMode));
   app.use(express.static(env.distDirectory, { index: ['index.html'] }));
   app.get(/.*/, (_req, res, next) => {
     res.sendFile(path.join(env.distDirectory, 'index.html'), (error) => {

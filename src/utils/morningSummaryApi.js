@@ -1,4 +1,6 @@
 import { getSupabaseClient } from '../lib/supabase.js';
+import { serverManagedAuth, serverAuthFetch, serverSessionStatus,
+  captureServerOperationContext, assertServerOperationContext } from './serverAuthTransport.js';
 import { API_BASE_URL, ApiError, JSON_POST_HEADERS, parseJsonSafe } from './api.js';
 
 const TIME = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
@@ -28,19 +30,28 @@ async function currentSession() {
 
 export function createMorningSummaryApi({ fetchImpl = fetch, getSession = currentSession } = {}) {
   async function request(method, expectedUserId, value, signal) {
+    const context = serverManagedAuth ? captureServerOperationContext(expectedUserId) : null;
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     if (typeof expectedUserId !== 'string' || !UUID.test(expectedUserId)) throw new ApiError('Authentication is required.', { status: 401 });
     const requestBody = method === 'PUT' ? JSON.stringify(preferences(value)) : null;
     if (method === 'PUT' && (value.revision === Number.MAX_SAFE_INTEGER || !value.academicYearId))
       throw new ApiError('Morning summary preferences cannot be saved until reloaded.');
-    const session = await getSession();
+    const session = serverManagedAuth
+      ? { userId: (await serverSessionStatus(fetchImpl,{ signal, operationContext:context })).userId }
+      : await getSession();
+    if (context) assertServerOperationContext(context);
     if (session.userId !== expectedUserId || signal?.aborted) throw new ApiError('The signed-in account changed.', { status: 401 });
     let response;
     try {
-      response = await fetchImpl(`${API_BASE_URL}${PATH}`, { method, signal, credentials: 'omit',
-        headers: { Authorization: `Bearer ${session.token}`, ...(method === 'PUT' ? JSON_POST_HEADERS : {}) },
+      const init = { method, signal, credentials: 'omit',
+        headers: { ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.token}` }),
+          ...(method === 'PUT' ? JSON_POST_HEADERS : {}) },
         ...(method === 'PUT' ? { body: requestBody } : {}),
-      });
+      };
+      response = serverManagedAuth
+        ? await serverAuthFetch(`${API_BASE_URL}${PATH}`, init,
+          { fetchImpl, operationContext:context })
+        : await fetchImpl(`${API_BASE_URL}${PATH}`, init);
     } catch (error) {
       if (signal?.aborted || error?.name === 'AbortError') throw error;
       throw new ApiError('Could not reach morning summary preferences.');
@@ -58,16 +69,23 @@ export function createMorningSummaryApi({ fetchImpl = fetch, getSession = curren
     load: (userId, { signal } = {}) => request('GET', userId, null, signal),
     save: (userId, value, { signal } = {}) => request('PUT', userId, value, signal),
     async day(userId, summaryRef, { signal } = {}) {
+      const context = serverManagedAuth ? captureServerOperationContext(userId) : null;
       if (!UUID.test(userId) || !UUID.test(summaryRef))
         throw new ApiError('Daily summary request is invalid.');
-      const session = await getSession();
+      const session = serverManagedAuth
+        ? { userId: (await serverSessionStatus(fetchImpl,{ signal, operationContext:context })).userId }
+        : await getSession();
+      if (context) assertServerOperationContext(context);
       if (session.userId !== userId || signal?.aborted) throw new ApiError('The signed-in account changed.', { status: 401 });
       const query = new URLSearchParams({ summaryRef });
       let response;
       try {
-        response = await fetchImpl(`${API_BASE_URL}/api/notifications/morning-summary/day?${query}`, {
-          method: 'GET', credentials: 'omit', signal, headers: { Authorization: `Bearer ${session.token}` },
-        });
+        const path = `${API_BASE_URL}/api/notifications/morning-summary/day?${query}`;
+        const init = { method: 'GET', credentials: 'omit', signal,
+          headers: serverManagedAuth ? {} : { Authorization: `Bearer ${session.token}` } };
+        response = serverManagedAuth
+          ? await serverAuthFetch(path, init, { fetchImpl, operationContext:context })
+          : await fetchImpl(path, init);
       } catch (error) {
         if (signal?.aborted || error?.name === 'AbortError') throw error;
         throw new ApiError('Could not load daily summary.');

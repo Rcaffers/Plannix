@@ -127,7 +127,7 @@ const checkObservabilityScript = `
   process.env.SUPABASE_URL = 'https://project.supabase.test';
   process.env.NODE_ENV = 'production';
 
-  const { readdirSync } = await import('node:fs');
+  const { readdirSync, readFileSync } = await import('node:fs');
   const nativeFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     if (String(input) === 'https://date.nager.at/api/v3/AvailableCountries') {
@@ -279,10 +279,15 @@ const checkObservabilityScript = `
     const notFoundBody = await notFound.json();
     if (notFoundBody.message !== 'The requested resource was not found.') process.exit(28);
 
+    const buildMetadata = (() => {
+      try { return JSON.parse(readFileSync('./dist/auth-mode.json', 'utf8')); }
+      catch { return null; }
+    })();
+    const staticReady = buildMetadata?.version === 1 && buildMetadata?.authMode === 'bearer';
     for (const path of ['/', '/settings']) {
       const response = await fetch(baseUrl + path);
-      if (response.status !== 200) process.exit(22);
-      if (!(response.headers.get('content-type') || '').includes('text/html')) process.exit(23);
+      if (response.status !== (staticReady ? 200 : 503)) process.exit(22);
+      if (staticReady && !(response.headers.get('content-type') || '').includes('text/html')) process.exit(23);
       assertHardenedHeaders(response, path === '/' ? 'SPA root' : 'SPA fallback');
     }
 
@@ -290,7 +295,7 @@ const checkObservabilityScript = `
     if (!assetName) process.exit(29);
     const assetPath = '/assets/' + assetName;
     const staticAsset = await fetch(baseUrl + assetPath);
-    if (staticAsset.status !== 200) process.exit(30);
+    if (staticAsset.status !== (staticReady ? 200 : 503)) process.exit(30);
     assertHardenedHeaders(staticAsset, 'static asset');
 
     const malformedSecret = 'payload-secret-must-not-be-logged';

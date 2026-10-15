@@ -1,4 +1,6 @@
 import { getSupabaseClient } from '../lib/supabase.js';
+import { serverManagedAuth, serverAuthFetch, assertServerResponseCurrent,
+  captureServerOperationContext } from './serverAuthTransport.js';
 import { toClassRequestEntries } from './classPersistence.js';
 import { CANONICAL_UUID, editableLayout, publicLayout } from './timetableLayoutPersistence.js';
 
@@ -87,8 +89,11 @@ export function userFacingFetchErrorMessage(error, fallback) {
 
 export async function parseJsonSafe(response) {
   try {
-    return await response.json();
+    const payload = await response.json();
+    assertServerResponseCurrent(response);
+    return payload;
   } catch {
+    assertServerResponseCurrent(response);
     return null;
   }
 }
@@ -168,16 +173,21 @@ export async function fetchPublicHolidays({ countryCode, year }, { signal } = {}
   return Array.isArray(payload?.holidays) ? payload.holidays : [];
 }
 
-export async function deleteAccount({ password, accessToken, fetchImpl = fetch }) {
-  const response = await fetchImpl(`${API_BASE_URL}/account`, {
+export async function deleteAccount({ password, accessToken, expectedSessionName,
+  operationContext, fetchImpl = fetch }) {
+  const options = {
     method: 'DELETE',
     credentials: 'omit',
     headers: {
-      'Authorization': `Bearer ${accessToken}`,
+      ...(serverManagedAuth ? {} : { Authorization: `Bearer ${accessToken}` }),
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ password }),
-  });
+    body: JSON.stringify(serverManagedAuth ? { password, expectedSessionName } : { password }),
+  };
+  const response = serverManagedAuth
+    ? await serverAuthFetch('/__stage3/auth/account', options,
+      { fetchImpl, operationContext })
+    : await fetchImpl(`${API_BASE_URL}/account`, options);
   if (response.status === 204) return;
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
@@ -214,16 +224,21 @@ export function createClassApi({
   },
 } = {}) {
   async function request(path, options, fallback) {
+    const operationContext = serverManagedAuth ? captureServerOperationContext() : null;
     let response;
     try {
-      const session = await getSession();
-      if (!session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
-      response = await fetchImpl(`${API_BASE_URL}${path}`, {
+      const session = serverManagedAuth ? null : await getSession();
+      if (!serverManagedAuth && !session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
+      const init = {
         ...options,
         credentials: 'omit',
-        headers: { ...options?.headers, Authorization: `Bearer ${session.access_token}` },
-      });
+        headers: { ...options?.headers, ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.access_token}` }) },
+      };
+      response = serverManagedAuth
+        ? await serverAuthFetch(`${API_BASE_URL}${path}`, init, { fetchImpl, operationContext })
+        : await fetchImpl(`${API_BASE_URL}${path}`, init);
     } catch (error) {
+      if (error?.name === 'AbortError') throw error;
       if (error instanceof ApiError) throw error;
       throw new ApiError(fallback);
     }
@@ -290,17 +305,22 @@ export function createTimetableLayoutApi({ fetchImpl = fetch, getSession = async
   return data.session;
 } } = {}) {
   async function request(path, options, fallback) {
+    const operationContext = serverManagedAuth ? captureServerOperationContext() : null;
     try {
-      const session = await getSession();
-      const response = await fetchImpl(`${API_BASE_URL}${path}`, {
+      const session = serverManagedAuth ? null : await getSession();
+      const init = {
         ...options, credentials: 'omit',
-        headers: { ...options?.headers, Authorization: `Bearer ${session.access_token}` },
-      });
+        headers: { ...options?.headers, ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.access_token}` }) },
+      };
+      const response = serverManagedAuth
+        ? await serverAuthFetch(`${API_BASE_URL}${path}`, init, { fetchImpl, operationContext })
+        : await fetchImpl(`${API_BASE_URL}${path}`, init);
       const payload = await parseJsonSafe(response);
       const requestId = response.headers?.get?.('x-request-id');
       if (!response.ok) throw new ApiError(payload?.message || fallback, { status: response.status, requestId });
       return { layout: payload?.layout === null ? null : publicLayout(payload?.layout), requestId: CANONICAL_UUID.test(String(requestId || '')) ? requestId : null };
     } catch (error) {
+      if (error?.name === 'AbortError') throw error;
       if (error instanceof ApiError) throw error;
       throw new ApiError(fallback);
     }
@@ -376,16 +396,21 @@ export function createAcademicYearApi({
   },
 } = {}) {
   async function request(path, options, fallback) {
+    const operationContext = serverManagedAuth ? captureServerOperationContext() : null;
     let response;
     try {
-      const session = await getSession();
-      if (!session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
-      response = await fetchImpl(`${API_BASE_URL}${path}`, {
+      const session = serverManagedAuth ? null : await getSession();
+      if (!serverManagedAuth && !session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
+      const init = {
         ...options,
         credentials: 'omit',
-        headers: { ...options?.headers, Authorization: `Bearer ${session.access_token}` },
-      });
+        headers: { ...options?.headers, ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.access_token}` }) },
+      };
+      response = serverManagedAuth
+        ? await serverAuthFetch(`${API_BASE_URL}${path}`, init, { fetchImpl, operationContext })
+        : await fetchImpl(`${API_BASE_URL}${path}`, init);
     } catch (error) {
+      if (error?.name === 'AbortError') throw error;
       if (error instanceof ApiError) throw error;
       throw new ApiError(fallback);
     }

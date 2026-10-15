@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../lib/supabase.js';
+import { serverManagedAuth, serverAuthFetch, captureServerOperationContext } from './serverAuthTransport.js';
 import { API_BASE_URL, ApiError, JSON_POST_HEADERS, parseJsonSafe } from './api.js';
 import { CANONICAL_EVENT_UUID, normalizeEventFields, realEventDate } from '../../shared/personalEvent.js';
 
@@ -40,15 +41,18 @@ async function defaultSession() {
 
 export function createEventApi({ fetchImpl = fetch, getSession = defaultSession } = {}) {
   async function request(path, options, fallback) {
+    const operationContext = serverManagedAuth ? captureServerOperationContext() : null;
     if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-    const session = await getSession();
-    if (!session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
+    const session = serverManagedAuth ? null : await getSession();
+    if (!serverManagedAuth && !session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
     if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     let response;
     try {
-      response = await fetchImpl(`${API_BASE_URL}${path}`, {
-        ...options, credentials: 'omit', headers: { ...options.headers, Authorization: `Bearer ${session.access_token}` },
-      });
+      const init = { ...options, credentials: 'omit', headers: { ...options.headers,
+        ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.access_token}` }) } };
+      response = serverManagedAuth
+        ? await serverAuthFetch(`${API_BASE_URL}${path}`, init, { fetchImpl, operationContext })
+        : await fetchImpl(`${API_BASE_URL}${path}`, init);
     } catch (error) {
       if (options.signal?.aborted || error?.name === 'AbortError') throw error;
       throw new ApiError(fallback);

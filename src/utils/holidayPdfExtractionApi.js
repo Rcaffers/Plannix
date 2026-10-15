@@ -1,6 +1,7 @@
 import { holidayRateLimitMessage } from './holidayRateLimit.js';
 import { API_BASE_URL, ApiError, parseJsonSafe } from './api.js';
 import { currentSession } from './holidayExtractionApi.js';
+import { serverManagedAuth, serverAuthFetch, captureServerOperationContext } from './serverAuthTransport.js';
 import { boundaryError, exactKeys, normalizeHolidayLabel, suggestionError } from './holidayReview.js';
 
 export const MAX_HOLIDAY_PDF_BYTES = 10 * 1024 * 1024;
@@ -28,18 +29,23 @@ const safeMessages = new Set([
 const fallback = 'Could not extract PDF holidays. Please try again.';
 export function createHolidayPdfExtractionApi({ fetchImpl = fetch, getSession = currentSession } = {}) {
   return async function extract({ file, academicYearStartDate, academicYearEndDate }, { signal } = {}) {
+    const operationContext = serverManagedAuth ? captureServerOperationContext() : null;
     try {
       const invalid = pdfFileError(file) || boundaryError(academicYearStartDate, academicYearEndDate);
       if (invalid) throw new ApiError(invalid, { status: 400 });
       signal?.throwIfAborted();
-      const session = await getSession();
+      const session = serverManagedAuth ? null : await getSession();
       signal?.throwIfAborted();
-      if (!session?.access_token) throw new ApiError('Sign in again to extract holidays.', { status: 401 });
+      if (!serverManagedAuth && !session?.access_token) throw new ApiError('Sign in again to extract holidays.', { status: 401 });
       const query = new URLSearchParams({ boundaryStart: academicYearStartDate, boundaryEnd: academicYearEndDate });
-      const response = await fetchImpl(`${API_BASE_URL}/api/ai/holidays/extract-pdf?${query}`, {
+      const init = {
         method: 'POST', credentials: 'omit', cache: 'no-store', signal,
-        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/pdf' }, body: file,
-      });
+        headers: { ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.access_token}` }),
+          'Content-Type': 'application/pdf' }, body: file,
+      };
+      const response = serverManagedAuth
+        ? await serverAuthFetch(`${API_BASE_URL}/api/ai/holidays/extract-pdf?${query}`, init, { fetchImpl, operationContext })
+        : await fetchImpl(`${API_BASE_URL}/api/ai/holidays/extract-pdf?${query}`, init);
       const payload = await parseJsonSafe(response);
       signal?.throwIfAborted();
       const requestId = response.headers?.get?.('x-request-id');
@@ -57,6 +63,7 @@ export function createHolidayPdfExtractionApi({ fetchImpl = fetch, getSession = 
       return { holidays: payload.holidays.map(({ label, startDate, endDate }) => ({ label: normalizeHolidayLabel(label), startDate, endDate })), pageCount: payload.pageCount };
     } catch (error) {
       if (signal?.aborted) throw new DOMException('Holiday extraction cancelled.', 'AbortError');
+      if (error?.name === 'AbortError') throw error;
       if (error instanceof ApiError) throw error;
       throw new ApiError(fallback);
     }

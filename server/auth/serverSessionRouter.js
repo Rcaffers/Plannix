@@ -1,4 +1,4 @@
-// Stage 3 experimental boundary. Production app.js deliberately does not import it.
+// Server-session boundary mounted only in explicit server auth mode.
 import express from 'express';
 import { createHmac, randomUUID } from 'node:crypto';
 import { createSessionRequestSecurity } from './sessionRequestSecurity.js';
@@ -15,7 +15,7 @@ const only = (value, keys) => value && typeof value === 'object' && !Array.isArr
 const clearCookie = name => `${name}=; Max-Age=0; ${COOKIE_FLAGS}`;
 
 export function createServerSessionRouter({ repository, identity, origin, csrfKey,
-  providerDeadlineMs = 8000, now = () => Date.now() } = {}) {
+  providerDeadlineMs = 8000, now = () => Date.now(), requireLogoutVersion = false } = {}) {
   let target;
   try { target = new URL(origin); } catch { throw new Error('Exact application origin required.'); }
   if (!['https:', 'http:'].includes(target.protocol) || target.username || target.password
@@ -65,11 +65,28 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     })]); } finally { clearTimeout(timer); }
   }
 
+  async function boundedMutation(operation, message) {
+    const controller=new AbortController();
+    let timer;
+    try {
+      return await Promise.race([
+        Promise.resolve().then(()=>operation(controller.signal)),
+        new Promise((_,reject)=>{timer=setTimeout(()=>{
+          controller.abort();
+          reject(fail(503,message));
+        },providerDeadlineMs);}),
+      ]);
+    } finally { clearTimeout(timer); }
+  }
+
   function sendError(res,error) {
     const status = Number.isInteger(error?.status) && error.status>=400 && error.status<=599
-      ? error.status : error?.kind==='credentials' ? 401 : 503;
-    const message = status===401 ? 'Authentication was not accepted.'
-      : error?.safe ? error.message : 'Authentication service is temporarily unavailable.';
+      ? error.status : error?.kind==='credentials' ? 401
+        : error?.kind==='confirmation' || error?.kind==='password' ? 403 : 503;
+    const message = error?.kind==='confirmation' ? 'Please confirm your email before logging in.'
+      : status===401 ? 'Authentication was not accepted.'
+        : error?.kind==='password' ? 'Password verification failed.'
+          : error?.safe ? error.message : 'Authentication service is temporarily unavailable.';
     res.status(status).json({ message });
   }
 
@@ -127,7 +144,126 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     if (ordinary.state!=='current') return res.json({ authenticated:false,csrfToken:csrf(chosen.header) });
     await deadline(identity.validateAccess({ accessToken:ordinary.accessToken,
       expectedUserId:ordinary.ownerId }));
-    return res.json({ authenticated:true,userId:ordinary.ownerId,csrfToken:csrf(chosen.header) });
+    return res.json({ authenticated:true,userId:ordinary.ownerId,
+      sessionName:chosen.sessionName,csrfToken:csrf(chosen.header) });
+  }));
+
+  router.get('/me',wrap(async(req,res) => {
+    if (Object.keys(req.query).length) throw fail(400,'Authentication request is invalid.');
+    const chosen = await resolve(req,res);
+    const tokens = await repository.readTokens(chosen.header,'ordinary');
+    if (tokens.state!=='current') throw fail(401,'Authentication is required.');
+    const user = await deadline(identity.loadCurrentUser({ accessToken:tokens.accessToken,
+      expectedUserId:tokens.ownerId }));
+    if (!user || user.id !== tokens.ownerId) throw fail(503,'Authentication service is temporarily unavailable.');
+    return res.json({ user });
+  }));
+
+  router.put('/profile/name',wrap(async(req,res) => {
+    if (!only(req.body,['firstName','lastName'])
+      || ![req.body.firstName,req.body.lastName].every(value =>
+        typeof value==='string' && value.trim().length>=1 && value.trim().length<=100)) {
+      throw fail(400,'Profile details are invalid.');
+    }
+    const chosen = await resolve(req,res);
+    security.verifyExpectedSession(req,chosen.sessionName);
+    verifyCsrf(req,chosen.header);
+    const tokens = await repository.readTokens(chosen.header,'ordinary');
+    if (tokens.state!=='current') throw fail(401,'Authentication is required.');
+    const user = await boundedMutation(signal=>identity.updateProfileName({ accessToken:tokens.accessToken,
+      expectedUserId:tokens.ownerId, firstName:req.body.firstName.trim(),
+      lastName:req.body.lastName.trim(),signal }),
+    'Profile update could not be confirmed. Reload your profile before retrying.');
+    if (user?.id !== tokens.ownerId) throw fail(503,'Authentication service is temporarily unavailable.');
+    return res.json({ user });
+  }));
+
+  router.post('/profile/email',wrap(async(req,res) => {
+    if (!only(req.body,['email']) || !EMAIL.test(req.body.email || '')) {
+      throw fail(400,'Email address is invalid.');
+    }
+    rate(req,'email-change',5);
+    const emailScope = await resolve(req,res);
+    security.verifyExpectedSession(req,emailScope.sessionName);
+    const { chosen,intentId } = await start(req,res,'ordinary');
+    const tokens = await repository.readTokens(chosen.header,'ordinary');
+    if (tokens.state!=='current') {
+      await repository.settle(intentId,'failed').catch(() => {});
+      throw fail(401,'Authentication is required.');
+    }
+    let setup; let claim;
+    let providerAccepted=false;
+    try {
+      setup = await callbackSetup(chosen.header,'confirmation',intentId);
+      claim = await repository.claimRefresh(chosen.header,tokens.tokenVersion);
+      if (claim.state!=='claimed' || claim.ownerId!==tokens.ownerId) {
+        throw fail(409,'Authentication changed. Reload and try again.');
+      }
+      const result = await boundedMutation(signal=>identity.requestEmailChange({
+        accessToken:claim.accessToken, refreshToken:claim.refreshToken,
+        expectedUserId:claim.ownerId, email:req.body.email.trim().toLowerCase(),
+        ...setup,signal,
+      }), 'Email change could not be confirmed. Check your email before retrying.');
+      providerAccepted=true;
+      const refreshed = await repository.finishRefresh(claim,{ accessToken:result.session.access_token,
+        refreshToken:result.session.refresh_token });
+      if (refreshed.state!=='refreshed') throw fail(409,'Authentication changed. Reload and try again.');
+      claim=null;
+      if (result.confirmationPending) {
+        const ready = await repository.readyCallback(chosen.header,setup);
+        if (ready.state!=='ready') throw fail(409,'Authentication changed. Reload and try again.');
+        return res.json({ confirmationPending:true });
+      }
+      await repository.cancelCallback(chosen.header,setup);
+      await deadline(identity.validateAccess({ accessToken:result.session.access_token,
+        expectedUserId:tokens.ownerId }));
+      return ordinaryFinish(res,intentId,{ user:{id:tokens.ownerId},session:result.session });
+    } catch(error) {
+      if (claim?.state==='claimed') await repository.releaseRefresh(claim).catch(() => {});
+      if (setup) await repository.cancelCallback(chosen.header,setup).catch(() => {});
+      await repository.settle(intentId,'failed').catch(() => {});
+      throw providerAccepted
+        ? fail(503,'Email change could not be confirmed. Check your email before retrying.')
+        : error;
+    }
+  }));
+
+  router.post('/profile/password',wrap(async(req,res) => {
+    if (!only(req.body,['currentPassword','newPassword'])
+      || ![req.body.currentPassword,req.body.newPassword].every(value =>
+        typeof value==='string' && value.length>=8 && value.length<=128)) {
+      throw fail(400,'Password details are invalid.');
+    }
+    rate(req,'password-change',5);
+    const chosen = await resolve(req,res);
+    security.verifyExpectedSession(req,chosen.sessionName);
+    verifyCsrf(req,chosen.header);
+    const tokens = await repository.readTokens(chosen.header,'ordinary');
+    if (tokens.state!=='current') throw fail(401,'Authentication is required.');
+    const owner = await deadline(identity.validateAccess({ accessToken:tokens.accessToken,
+      expectedUserId:tokens.ownerId }));
+    const claim = await repository.claimRefresh(chosen.header,tokens.tokenVersion);
+    if (claim.state!=='claimed' || claim.ownerId!==tokens.ownerId) {
+      throw fail(409,'Authentication changed. Reload and try again.');
+    }
+    let providerAccepted=false;
+    try {
+      const updated = await boundedMutation(signal=>identity.updateOrdinaryPassword({
+        accessToken:claim.accessToken, refreshToken:claim.refreshToken,
+        expectedUserId:claim.ownerId, email:owner.email,
+        currentPassword:req.body.currentPassword, newPassword:req.body.newPassword,
+        signal }), 'Password update could not be confirmed. Try signing in or using password recovery.');
+      providerAccepted=true;
+      const finished = await repository.finishRefresh(claim,{ accessToken:updated.access_token,
+        refreshToken:updated.refresh_token });
+      if (finished.state!=='refreshed') throw fail(409,'Authentication changed. Reload and try again.');
+      return res.status(204).end();
+    } catch(error) {
+      await repository.releaseRefresh(claim).catch(() => {});
+      throw providerAccepted
+        ? fail(503,'Password update could not be confirmed. Try signing in or using password recovery.')
+        : error;
+    }
   }));
 
   async function start(req,res,kind) {
@@ -255,7 +391,8 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
         accessToken:result.session.access_token,refreshToken:result.session.refresh_token });
       if (settled.state!=='created') throw fail(409,'Authentication changed. Reload and try again.');
       res.append('Set-Cookie',settled.setCookie);
-      return res.redirect(303,result.kind==='recovery'?'/reset-password':'/settings');
+      return res.redirect(303,result.kind==='recovery'?'/reset-password'
+        : result.redirectType==='email_change'?'/profile':'/settings');
     } catch(error) { await repository.settle(claimed.intentId,'failed').catch(() => {}); throw error; }
   }));
 
@@ -293,21 +430,29 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
   }));
 
   router.post('/logout',wrap(async(req,res) => {
-    if (!only(req.body,[])) throw fail(400,'Authentication request is invalid.');
+    if (!only(req.body,requireLogoutVersion?['expectedSessionName']:[]))
+      throw fail(400,'Authentication request is invalid.');
     const chosen = await resolve(req,res);
-    verifyCsrf(req,chosen.header);
     if (!chosen.sessionName) return res.status(204).end();
+    security.verifyExpectedSession(req,chosen.sessionName);
+    verifyCsrf(req,chosen.header);
+    if (requireLogoutVersion && chosen.sessionName!==req.body.expectedSessionName)
+      throw fail(409,'Authentication changed. Reload and try again.');
     const result = await repository.logout(chosen.header);
     cleanup(res,[result.cleanup].filter(Boolean));
     return res.status(204).end();
   }));
 
   router.delete('/account',wrap(async(req,res) => {
-    if (!only(req.body,['password']) || typeof req.body.password!=='string'
+    if (!only(req.body,requireLogoutVersion?['password','expectedSessionName']:['password'])
+      || typeof req.body.password!=='string'
       || req.body.password.length<1 || req.body.password.length>128) throw fail(400,'Authentication request is invalid.');
     rate(req,'deletion',3);
     const chosen = await resolve(req,res);
+    security.verifyExpectedSession(req,chosen.sessionName);
     verifyCsrf(req,chosen.header);
+    if (requireLogoutVersion && chosen.sessionName!==req.body.expectedSessionName)
+      throw fail(409,'Authentication changed. Reload and try again.');
     const tokens = await repository.readTokens(chosen.header,'ordinary');
     if (tokens.state!=='current') throw fail(401,'Authentication is required.');
     const verified = await deadline(identity.validateAccess({accessToken:tokens.accessToken,

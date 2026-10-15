@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createAccountDeletionController } from '../utils/accountDeletion';
 import { useTimetableLayout } from '../context/TimetableLayoutContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
@@ -7,6 +7,7 @@ export default function DeleteAccountSection({
   clearAuthenticatedUser,
   getAccountDeletionSession,
   signOutAfterAccountDeletion,
+  isAccountDeletionSessionCurrent,
 }) {
   const { clearUserLayout } = useTimetableLayout();
   const { clearUserAcademicYear } = useAcademicYear();
@@ -14,32 +15,45 @@ export default function DeleteAccountSection({
   const [accountError, setAccountError] = useState('');
   const [accountErrorReference, setAccountErrorReference] = useState('');
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [needsReconciliation, setNeedsReconciliation] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const deletePasswordRef = useRef('');
+  const mountedRef = useRef(false);
 
-  const deletionController = useMemo(() => createAccountDeletionController({
-    getSession: getAccountDeletionSession,
+  const callbacks = useRef(null);
+  callbacks.current = { clearAuthenticatedUser, getAccountDeletionSession,
+    signOutAfterAccountDeletion, isAccountDeletionSessionCurrent,
+    clearUserLayout, clearUserAcademicYear };
+  const deletionControllerRef = useRef(null);
+  const makeDeletionController = () => createAccountDeletionController({
+    getSession: (...args) => callbacks.current.getAccountDeletionSession(...args),
     clearSensitiveState: () => {
       deletePasswordRef.current = '';
       setDeletePassword('');
     },
-    clearAuthenticatedUser,
+    clearAuthenticatedUser: () => callbacks.current.clearAuthenticatedUser?.(),
     clearUserCaches: () => {
-      clearUserLayout();
-      clearUserAcademicYear();
+      callbacks.current.clearUserLayout();
+      callbacks.current.clearUserAcademicYear();
     },
-    signOut: signOutAfterAccountDeletion,
+    signOut: (...args) => callbacks.current.signOutAfterAccountDeletion?.(...args),
+    isCapturedSessionCurrent: (...args) =>
+      callbacks.current.isAccountDeletionSessionCurrent?.(...args) ?? true,
     replaceLocation: (path) => window.location.replace(path),
-  }), [
-    clearAuthenticatedUser,
-    clearUserAcademicYear,
-    clearUserLayout,
-    getAccountDeletionSession,
-    signOutAfterAccountDeletion,
-  ]);
+  });
+  if (!deletionControllerRef.current) deletionControllerRef.current = makeDeletionController();
 
-  useEffect(() => () => {
-    deletePasswordRef.current = '';
+  useEffect(() => {
+    mountedRef.current = true;
+    // StrictMode replays effects without another render. Recreate only after disposal.
+    if (deletionControllerRef.current?.isDisposed) {
+      deletionControllerRef.current = makeDeletionController();
+    }
+    return () => {
+      mountedRef.current = false;
+      deletionControllerRef.current?.dispose();
+      deletePasswordRef.current = '';
+    };
   }, []);
 
   function clearDeletionForm() {
@@ -61,16 +75,39 @@ export default function DeleteAccountSection({
     setAccountError('');
     setAccountErrorReference('');
     setIsDeletingAccount(true);
+    const deletionController = deletionControllerRef.current;
     try {
       await deletionController.submit(deletePasswordRef.current);
+      if (!mountedRef.current) return;
+      setNeedsReconciliation(false);
       setIsDeleteDialogOpen(false);
     } catch (error) {
+      if (!mountedRef.current) return;
+      setNeedsReconciliation(deletionController.needsReconciliation);
       setAccountError(error.message || 'Could not delete your account. Please try again.');
       setAccountErrorReference(error.requestId || '');
     } finally {
-      clearDeletionForm();
-      setIsDeletingAccount(false);
+      if (mountedRef.current) {
+        clearDeletionForm();
+        setIsDeletingAccount(false);
+      }
     }
+  }
+
+  async function retrySessionCheck() {
+    if (isDeletingAccount) return;
+    const deletionController = deletionControllerRef.current;
+    setIsDeletingAccount(true);
+    setAccountError('');
+    try {
+      await deletionController.retryReconciliation();
+      if (!mountedRef.current) return;
+      setNeedsReconciliation(false);
+      setIsDeleteDialogOpen(false);
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setAccountError(error.message);
+    } finally { if (mountedRef.current) setIsDeletingAccount(false); }
   }
 
   return (
@@ -88,7 +125,9 @@ export default function DeleteAccountSection({
               if (window.__plannixConfirmSessionDiscard?.() === false) return;
               if (window.__plannixConfirmClassDiscard?.() === false) return;
               if (window.__plannixConfirmLayoutDiscard?.() === false) return;
-              setAccountError('');
+              setAccountError(deletionControllerRef.current.needsReconciliation
+                ? 'Your account was deleted, but the current session could not be confirmed. Retry the session check.'
+                : '');
               setAccountErrorReference('');
               setIsDeleteDialogOpen(true);
             }}
@@ -149,10 +188,17 @@ export default function DeleteAccountSection({
                 >
                   Cancel
                 </button>
+                {needsReconciliation ? (
+                  <button type="button" className="settings-reset"
+                    onClick={retrySessionCheck} disabled={isDeletingAccount}>
+                    Retry session check
+                  </button>
+                ) : null}
                 <button
                   type="submit"
                   className="settings-reset settings-reset--danger"
-                  disabled={isDeletingAccount || deletePassword.length < 8 || deletePassword.length > 128}
+                  disabled={isDeletingAccount || needsReconciliation
+                    || deletePassword.length < 8 || deletePassword.length > 128}
                 >
                   Permanently delete account
                 </button>

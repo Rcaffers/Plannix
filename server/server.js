@@ -4,9 +4,14 @@ import { env, validateProductionEnv } from './config/env.js';
 import { logRouteError } from './middleware/errorHandler.js';
 import { pilotUserFromEnvironment } from './morningSummary/pilotConfig.js';
 import { createMorningSummaryPolling } from './morningSummary/polling.js';
+import { assertBuiltAuthMode } from './config/buildAuthMode.js';
+import fs from 'node:fs';
 
 function startServer() {
   validateProductionEnv();
+  if (env.nodeEnv === 'production' || fs.existsSync(env.distDirectory)) {
+    assertBuiltAuthMode(env.distDirectory, env.authMode);
+  }
 
   const server = app.listen(env.port);
   let polling = null;

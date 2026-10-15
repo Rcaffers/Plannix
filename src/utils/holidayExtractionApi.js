@@ -1,5 +1,6 @@
 import { holidayRateLimitMessage } from './holidayRateLimit.js';
 import { getSupabaseClient } from '../lib/supabase.js';
+import { serverManagedAuth, serverAuthFetch, captureServerOperationContext } from './serverAuthTransport.js';
 import { API_BASE_URL, ApiError, parseJsonSafe } from './api.js';
 import { boundaryError, exactKeys, normalizeHolidayLabel, MAX_HOLIDAY_TEXT_BYTES, suggestionError, textBytes } from './holidayReview.js';
 
@@ -21,19 +22,24 @@ export async function currentSession() {
 }
 export function createHolidayExtractionApi({ fetchImpl = fetch, getSession = currentSession } = {}) {
   return async function extract(input, { signal } = {}) {
+    const operationContext = serverManagedAuth ? captureServerOperationContext() : null;
     try {
       if (!exactKeys(input, ['text', 'academicYearStartDate', 'academicYearEndDate']) || typeof input.text !== 'string'
         || !input.text.trim() || textBytes(input.text) > MAX_HOLIDAY_TEXT_BYTES
         || boundaryError(input.academicYearStartDate, input.academicYearEndDate)) throw new ApiError(messages[400], { status: 400 });
       signal?.throwIfAborted();
-      const session = await getSession();
+      const session = serverManagedAuth ? null : await getSession();
       signal?.throwIfAborted();
-      if (!session?.access_token) throw new ApiError(messages[401], { status: 401 });
-      const response = await fetchImpl(`${API_BASE_URL}/api/ai/holidays/extract`, {
+      if (!serverManagedAuth && !session?.access_token) throw new ApiError(messages[401], { status: 401 });
+      const init = {
         method: 'POST', credentials: 'omit', cache: 'no-store', signal,
-        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        headers: { ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.access_token}` }),
+          'Content-Type': 'application/json' },
         body: JSON.stringify({ text: input.text, academicYearStartDate: input.academicYearStartDate, academicYearEndDate: input.academicYearEndDate }),
-      });
+      };
+      const response = serverManagedAuth
+        ? await serverAuthFetch(`${API_BASE_URL}/api/ai/holidays/extract`, init, { fetchImpl, operationContext })
+        : await fetchImpl(`${API_BASE_URL}/api/ai/holidays/extract`, init);
       const payload = await parseJsonSafe(response);
       signal?.throwIfAborted();
       const requestId = response.headers?.get?.('x-request-id');
@@ -52,6 +58,7 @@ export function createHolidayExtractionApi({ fetchImpl = fetch, getSession = cur
       return payload.holidays.map(({ label, startDate, endDate }) => ({ label: normalizeHolidayLabel(label), startDate, endDate }));
     } catch (error) {
       if (signal?.aborted) throw new DOMException('Holiday extraction cancelled.', 'AbortError');
+      if (error?.name === 'AbortError') throw error;
       if (error instanceof ApiError) throw error;
       throw new ApiError(fallback);
     }

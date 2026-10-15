@@ -100,3 +100,35 @@ test('installed SDK refresh keeps owner and an explicit recovery password update
   assert.equal(updated.updated,true);
   assert.ok(calls.some(call=>call.path.endsWith('/user') && call.body?.password==='synthetic-new-password'));
 });
+
+test('Stage 4 current user and profile writes retain confirmed RLS owner',async()=>{
+  const {identity,calls}=interceptedIdentity();
+  const current=await identity.loadCurrentUser({accessToken:session.access_token,
+    expectedUserId:userId});
+  assert.equal(current.id,userId);
+  assert.equal(current.organisationId,'dd000000-0000-4000-8000-000000000078');
+  const updated=await identity.updateProfileName({accessToken:session.access_token,
+    expectedUserId:userId,firstName:'Synthetic',lastName:'Teacher'});
+  assert.equal(updated.id,userId);
+  assert.ok(calls.some(call=>call.path.endsWith('/plannix_users') && call.body?.first_name==='Synthetic'));
+  await assert.rejects(identity.loadCurrentUser({accessToken:session.access_token,
+    expectedUserId:'dd000000-0000-4000-8000-000000000099'}));
+});
+
+test('Stage 4 email and password operations keep provider tokens server-side',async()=>{
+  const {identity,calls}=interceptedIdentity();
+  const slots=[];
+  const email=await identity.requestEmailChange({accessToken:session.access_token,
+    refreshToken:session.refresh_token,expectedUserId:userId,email:'new@example.test',
+    redirectTo:'https://app.plannix.test/__stage3/auth/callback?state=synthetic',
+    onVerifier:async(flowId,verifier)=>slots.push({flowId,verifier})});
+  assert.equal(email.confirmationPending,true);
+  assert.equal(slots.length,1);
+  assert.ok(calls.some(call=>call.path.endsWith('/user') && call.body?.email==='new@example.test'));
+  const changed=await identity.updateOrdinaryPassword({accessToken:session.access_token,
+    refreshToken:session.refresh_token,expectedUserId:userId,email:user.email,
+    currentPassword:'synthetic-current',newPassword:'synthetic-new'});
+  assert.equal(changed.access_token,session.access_token);
+  assert.ok(calls.some(call=>call.path.endsWith('/user') && call.body?.password==='synthetic-new'));
+  assert.equal(JSON.stringify({email,changed}).includes('synthetic-current'),false);
+});

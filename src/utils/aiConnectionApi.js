@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../lib/supabase.js';
+import { serverManagedAuth, serverAuthFetch, captureServerOperationContext } from './serverAuthTransport.js';
 import { API_BASE_URL, ApiError, parseJsonSafe } from './api.js';
 import { aiProvider, MAX_AI_KEY_LENGTH } from '../../shared/aiProviders.js';
 
@@ -17,6 +18,7 @@ async function currentSession() {
 }
 export function createAiConnectionApi({ fetchImpl = fetch, getSession = currentSession } = {}) {
   async function request(method, value) {
+    const operationContext = serverManagedAuth ? captureServerOperationContext() : null;
     const fallback = 'Could not update or load your AI connection. Please try again.';
     try {
       let body;
@@ -26,11 +28,15 @@ export function createAiConnectionApi({ fetchImpl = fetch, getSession = currentS
         }
         body = JSON.stringify({ provider: value.provider, apiKey: value.apiKey.trim() });
       }
-      const session = await getSession();
-      if (!session?.access_token) throw new ApiError('Sign in to manage your AI connection.');
-      const response = await fetchImpl(`${API_BASE_URL}/api/ai/connection`, { method, credentials: 'omit', cache: 'no-store',
-        headers: { Authorization: `Bearer ${session.access_token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
-        ...(body ? { body } : {}) });
+      const session = serverManagedAuth ? null : await getSession();
+      if (!serverManagedAuth && !session?.access_token) throw new ApiError('Sign in to manage your AI connection.');
+      const init = { method, credentials: 'omit', cache: 'no-store',
+        headers: { ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.access_token}` }),
+          ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        ...(body ? { body } : {}) };
+      const response = serverManagedAuth
+        ? await serverAuthFetch(`${API_BASE_URL}/api/ai/connection`, init, { fetchImpl, operationContext })
+        : await fetchImpl(`${API_BASE_URL}/api/ai/connection`, init);
       const payload = await parseJsonSafe(response);
       const requestId = response.headers?.get?.('x-request-id');
       if (!response.ok) {
@@ -43,6 +49,7 @@ export function createAiConnectionApi({ fetchImpl = fetch, getSession = currentS
       }
       return connectionMetadata(payload?.connection);
     } catch (error) {
+      if (error?.name === 'AbortError') throw error;
       if (error instanceof ApiError) throw error;
       throw new ApiError(fallback);
     }

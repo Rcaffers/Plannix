@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const safeMethod = new Set(['GET', 'HEAD', 'OPTIONS']);
 const csrfHeader = 'x-plannix-csrf';
+const expectedSessionHeader = 'x-plannix-expected-session';
 const error = (status, message) => Object.assign(new Error(message), { status });
 
 function values(req, name) {
@@ -61,5 +62,14 @@ export function createSessionRequestSecurity({ origin, csrfKey }) {
     }
   }
 
-  return Object.freeze({ guard, csrfFor, verifyCsrf, origin: trusted.origin });
+  function verifyExpectedSession(req, sessionName) {
+    const supplied = values(req, expectedSessionHeader);
+    if (supplied.length !== 1 || !/^__Host-plannix-s-[1-9]\d{0,15}$/.test(supplied[0])
+      || supplied[0] !== sessionName) {
+      throw error(409, 'Authentication changed. Reload and try again.');
+    }
+  }
+
+  return Object.freeze({ guard, csrfFor, verifyCsrf, verifyExpectedSession,
+    origin: trusted.origin });
 }

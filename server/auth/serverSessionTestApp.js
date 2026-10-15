@@ -7,6 +7,7 @@ export function createServerSessionTestApp(options) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', false);
+  if (options.beforeAuth) app.use('/__stage3/auth',options.beforeAuth);
   app.use('/__stage3/auth', createServerSessionRouter(options));
   app.get('/__stage3/protected',createRequireServerSession(options),
     (req,res)=>res.json({userId:req.serverSession.userId}));

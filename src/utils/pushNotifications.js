@@ -1,4 +1,6 @@
 import { getSupabaseClient } from '../lib/supabase.js';
+import { serverManagedAuth, serverAuthFetch, serverSessionStatus,
+  captureServerOperationContext, assertServerOperationContext } from './serverAuthTransport.js';
 import { API_BASE_URL, ApiError, parseJsonSafe } from './api.js';
 import { pushCoordinationSupported, withPushDeviceLock } from './pushDeviceLock.js';
 
@@ -52,18 +54,35 @@ async function sessionToken() {
   return { accessToken: data.session.access_token, userId: checked.data.user.id };
 }
 
-async function sendPushRequest(path, body, { fetchImpl = fetch, expectedUserId, signal, sessionImpl = sessionToken } = {}) {
-  const session = await sessionImpl();
+async function sendPushRequest(path, body, { fetchImpl = fetch, expectedUserId, signal,
+  sessionImpl = sessionToken, operationContext } = {}) {
+  const context = serverManagedAuth
+    ? operationContext || captureServerOperationContext(expectedUserId) : null;
+  if (context) assertServerOperationContext(context);
+  const session = serverManagedAuth
+    ? { userId: (await serverSessionStatus(fetchImpl,{ signal, operationContext:context })).userId }
+    : await sessionImpl();
+  if (context) assertServerOperationContext(context);
+  if (context && session.userId !== context.userId)
+    throw new DOMException('Account changed.', 'AbortError');
   if (expectedUserId && session.userId !== expectedUserId) throw new ApiError('Your account changed. Please reload notification settings.');
   if (path === 'register' && signOutBlocked) throw new ApiError('Sign-out notification cleanup is in progress.');
   let response;
   try {
-    response = await fetchImpl(`${API_BASE_URL}/api/notifications/${path}`, {
+    const input = `${API_BASE_URL}/api/notifications/${path}`;
+    const init = {
       method: body === undefined ? 'GET' : 'POST', credentials: 'omit',
-      headers: { Authorization: `Bearer ${session.accessToken}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      headers: { ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.accessToken}` }),
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal,
-    });
-  } catch { throw new ApiError('Could not reach the notification service.'); }
+    };
+    response = serverManagedAuth
+      ? await serverAuthFetch(input, init, { fetchImpl, operationContext:context })
+      : await fetchImpl(input, init);
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    throw new ApiError('Could not reach the notification service.');
+  }
   const result = await parseJsonSafe(response);
   if (!response.ok) {
     const safe = typeof result?.message === 'string' && result.message.length <= 180
@@ -103,7 +122,13 @@ class SubscriptionChangedError extends Error {
 
 export async function disableCurrentDevice({ browser = globalThis, request = pushRequest,
   expectedUserId, isCurrent = () => true,
-  subscriptionSnapshot } = {}) {
+  subscriptionSnapshot, operationContext } = {}) {
+  const context = serverManagedAuth
+    ? operationContext || captureServerOperationContext(expectedUserId) : null;
+  const scopedRequest = (path, body) => {
+    if (context) assertServerOperationContext(context);
+    return request(path, body, { expectedUserId, operationContext:context });
+  };
   reconciliationGeneration++;
   if (!pushCoordinationSupported(browser)) {
     // Without cross-tab coordination, only an atomic server removal is safe.
@@ -113,16 +138,17 @@ export async function disableCurrentDevice({ browser = globalThis, request = pus
     if (!isCurrent()) throw new Error('Notification account changed.');
     const keys = subscription.toJSON?.().keys;
     const endpoint = subscription.endpoint;
-    const claim = await request('claim', { subscription: { endpoint, keys } }, { expectedUserId });
+    const claim = await scopedRequest('claim', { subscription: { endpoint, keys } });
     if (!isCurrent()) throw new Error('Notification account changed.');
     if (claim?.state === 'absent') return { state: 'absent' };
     if (claim?.state !== 'current' || typeof claim.version !== 'string') throw new SubscriptionChangedError();
-    const response = await request('remove', { endpoint, version: claim.version }, { expectedUserId });
+    const response = await scopedRequest('remove', { endpoint, version: claim.version });
     if (!isCurrent()) throw new Error('Notification account changed.');
     if (response?.removed !== true) throw new SubscriptionChangedError();
     return { state: 'removed' };
   }
   return withPushDeviceLock(async () => {
+    if (context) assertServerOperationContext(context);
     const subscription = await currentPushSubscription(browser);
     if (!subscription) return { state: 'absent' };
     if (subscriptionSnapshot !== undefined) {
@@ -132,9 +158,9 @@ export async function disableCurrentDevice({ browser = globalThis, request = pus
     if (!isCurrent()) throw new Error('Notification account changed.');
     const details = subscription.toJSON?.();
     // Unknown ownership is never permission to unsubscribe a shared device.
-    const claim = await request('claim', { subscription: {
+    const claim = await scopedRequest('claim', { subscription: {
       endpoint: subscription.endpoint, keys: details?.keys,
-    } }, { expectedUserId });
+    } });
     if (!isCurrent()) throw new Error('Notification account changed.');
     if (claim?.state === 'absent') return { state: 'absent' };
     if (claim?.state === 'superseded') throw new SubscriptionChangedError();
@@ -143,8 +169,8 @@ export async function disableCurrentDevice({ browser = globalThis, request = pus
     }
     let removed = false;
     try {
-      const response = await request('remove', { endpoint: subscription.endpoint,
-        version: claim.version }, { expectedUserId });
+      const response = await scopedRequest('remove', { endpoint: subscription.endpoint,
+        version: claim.version });
       if (response?.removed === false) throw new SubscriptionChangedError();
       removed = response?.removed === true;
     } catch (error) {
@@ -165,13 +191,18 @@ export async function disableCurrentDevice({ browser = globalThis, request = pus
 }
 
 export function reconcilePushAccount({ browser = globalThis, request = pushRequest } = {}) {
+  let context;
+  try { context = serverManagedAuth ? captureServerOperationContext() : null; }
+  catch (error) { return Promise.reject(error); }
   const generation = ++reconciliationGeneration;
   const work = Promise.allSettled([...registrations]).then(() => withPushDeviceLock(async () => {
+    if (context) assertServerOperationContext(context);
     if (generation !== reconciliationGeneration) return { state: 'stale' };
     const subscription = await currentPushSubscription(browser);
     if (!subscription) return { state: 'absent' };
     try {
-      const status = await request('status', { endpoint: subscription.endpoint });
+      const status = await request('status', { endpoint: subscription.endpoint },
+        { operationContext:context });
       if (generation !== reconciliationGeneration) return { state: 'stale' };
       if (status?.registered === true) return { state: 'current' };
     } catch { /* Unknown ownership remains non-destructive. */ }

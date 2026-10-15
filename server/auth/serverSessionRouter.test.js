@@ -152,8 +152,10 @@ async function fixture({identity=fakeIdentity(),repository=fakeRepository(),prov
   const server=app.listen(port,'localhost');
   await new Promise(resolve=>server.once('listening',resolve));
   async function request(path,{method='GET',body,cookie,csrf,originHeader=origin,headers={},absolute=false}={}) {
+    const expectedSession=cookie?.match(/__Host-plannix-s-[1-9]\d*/)?.[0];
     const response=await fetch(`${origin}${absolute?'':'/__stage3/auth'}${path}`,{method,redirect:'manual',
       headers:{...(originHeader?{Origin:originHeader}:{}),...(cookie?{Cookie:cookie}:{}),
+        ...(expectedSession?{'X-Plannix-Expected-Session':expectedSession}:{}),
         ...(csrf?{'X-Plannix-CSRF':csrf}:{}),...(body?{'Content-Type':'application/json'}:{}),...headers},
       body:body?JSON.stringify(body):undefined});
     const raw=await response.text();

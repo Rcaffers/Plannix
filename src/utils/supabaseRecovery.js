@@ -1,4 +1,6 @@
 import { createSupabaseAuthAdapter } from './supabaseAuth.js';
+import { serverManagedAuth } from './serverAuthTransport.js';
+import { createServerRecoveryController } from './serverRecoveryController.js';
 
 export const RECOVERY_ACKNOWLEDGEMENT =
   'If an account exists for that email, you will receive a password reset link shortly.';
@@ -100,7 +102,8 @@ export function createSupabaseRecoveryController({
 
 let defaultController;
 function getDefaultController() {
-  defaultController ||= createSupabaseRecoveryController();
+  defaultController ||= serverManagedAuth
+    ? createServerRecoveryController() : createSupabaseRecoveryController();
   return defaultController;
 }
 
