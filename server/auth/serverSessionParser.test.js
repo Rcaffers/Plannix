@@ -11,7 +11,8 @@ const childSource = `
   await new Promise(resolve=>listener.once('listening',resolve));
   const origin='http://127.0.0.1:'+listener.address().port;
   server.use('/auth',createServerSessionRouter({origin,csrfKey:Buffer.alloc(32,1),
-    repository:{resolve:async()=>({state:'missing'})},identity:{login:async()=>{}}}));
+    repository:{resolve:async()=>({state:'missing'})},identity:{login:async()=>{}},
+    limiter:{check:async()=>{}}}));
   const cases=[
     ['application/json','{"password":"'+marker+'"'],
     ['application/json',JSON.stringify({password:marker.repeat(800)})],

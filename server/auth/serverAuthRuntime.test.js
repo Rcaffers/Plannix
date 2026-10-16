@@ -6,21 +6,31 @@ import { validateProductionEnv } from '../config/env.js';
 const config={authMode:'server',nodeEnv:'test',supabaseUrl:'https://synthetic.supabase.test',
   supabasePublishableKey:'synthetic-public',supabaseSecretKey:'synthetic-service',
   serverAuthOrigin:'https://app.plannix.test',
+  serverAuthRateKey:Buffer.alloc(32,5).toString('base64url'),
   serverAuthCsrfKey:Buffer.alloc(32,3).toString('base64url')};
 const environment={PLANNIX_SESSION_TOKEN_KEYS_JSON:JSON.stringify({test:Buffer.alloc(32,4).toString('base64url')}),
   PLANNIX_SESSION_TOKEN_ACTIVE_KEY_ID:'test'};
 
 test('server mode fails closed without its private configuration',()=>{
   assert.throws(()=>createServerAuthRuntime({config:{...config,authMode:'bearer'}}),/disabled/);
+  assert.throws(()=>createServerAuthRuntime({config:{...config,serverAuthRateKey:''}}),/Shared auth limiter/);
   assert.throws(()=>createServerAuthRuntime({config:{...config,supabaseSecretKey:''}}),/unavailable/);
   assert.throws(()=>createServerAuthRuntime({config:{...config,serverAuthCsrfKey:'bad'},
     environment}),/CSRF key/);
   assert.throws(()=>createServerAuthRuntime({config,environment:{}}),/Session token unavailable/);
 });
 
-test('production cookie mode remains blocked until shared auth rate limiting exists',()=>{
+test('production cookie mode requires shared limiter and trusted ingress configuration',()=>{
   assert.throws(()=>createServerAuthRuntime({config:{...config,nodeEnv:'production'}}),
-    /Distributed auth rate limiting/);
+    /Shared auth limiter/);
   assert.throws(()=>validateProductionEnv({...config,nodeEnv:'production'}),
-    /distributed rate limiting/);
+    /shared rate-limit/);
+  const configured={...config,nodeEnv:'production',
+    serverAuthRateKey:Buffer.alloc(32,5).toString('base64url'),
+    serverAuthTrustedProxyCidrs:'loopback'};
+  assert.doesNotThrow(()=>validateProductionEnv(configured));
+  assert.doesNotThrow(()=>createServerAuthRuntime({config:configured,environment,
+    createClientImpl:()=>({rpc:async()=>({data:{allowed:true,retry_after:30}})})}));
+  assert.throws(()=>createServerAuthRuntime({config:{...configured,serverAuthTrustedProxyCidrs:'bad-cidr'},
+    environment}),/Trusted proxy configuration/);
 });

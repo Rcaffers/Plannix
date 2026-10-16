@@ -1,6 +1,6 @@
 // Server-session boundary mounted only in explicit server auth mode.
 import express from 'express';
-import { createHmac, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { createSessionRequestSecurity } from './sessionRequestSecurity.js';
 
 const COOKIE_FLAGS = 'Path=/; Secure; HttpOnly; SameSite=Lax';
@@ -15,7 +15,7 @@ const only = (value, keys) => value && typeof value === 'object' && !Array.isArr
 const clearCookie = name => `${name}=; Max-Age=0; ${COOKIE_FLAGS}`;
 
 export function createServerSessionRouter({ repository, identity, origin, csrfKey,
-  providerDeadlineMs = 8000, now = () => Date.now(), requireLogoutVersion = false } = {}) {
+  limiter, providerDeadlineMs = 8000, requireLogoutVersion = false } = {}) {
   let target;
   try { target = new URL(origin); } catch { throw new Error('Exact application origin required.'); }
   if (!['https:', 'http:'].includes(target.protocol) || target.username || target.password
@@ -23,24 +23,16 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     || (target.protocol === 'http:' && !['localhost','127.0.0.1'].includes(target.hostname))
     || !Buffer.isBuffer(csrfKey) || csrfKey.length < 32
     || !Number.isInteger(providerDeadlineMs) || providerDeadlineMs < 1
-    || !repository?.resolve || !identity?.login) throw new Error('Stage 3 boundary is not configured.');
+    || !repository?.resolve || !identity?.login || typeof limiter?.check !== 'function')
+    throw new Error('Stage 3 boundary is not configured.');
   const router = express.Router();
   const security = createSessionRequestSecurity({ origin, csrfKey });
-  const limits = new Map();
   const guard = security.guard;
   const csrf = security.csrfFor;
   const verifyCsrf = security.verifyCsrf;
 
-  function rate(req, category, maximum) {
-    const key = `${category}:${createHmac('sha256',csrfKey).update(req.socket?.remoteAddress || '').digest('hex')}`;
-    const current = now();
-    for (const [name, entry] of limits) if (entry.until<=current) limits.delete(name);
-    const entry = limits.get(key) || { count: 0, until: current+60000 };
-    entry.count += 1;
-    limits.set(key,entry);
-    if (limits.size>10000) limits.delete(limits.keys().next().value);
-    if (entry.count>maximum) throw fail(429,'Too many authentication attempts. Please wait before trying again.');
-  }
+  const rate = (req,category,chosen,extra) => limiter.check(req,category,
+    { bindingName:chosen?.markerName, ...extra });
 
   function cleanup(res, names) {
     for (const name of names || []) {
@@ -87,6 +79,7 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
       : status===401 ? 'Authentication was not accepted.'
         : error?.kind==='password' ? 'Password verification failed.'
           : error?.safe ? error.message : 'Authentication service is temporarily unavailable.';
+    if (status===429) res.set('Retry-After',String(error.retryAfter || 60));
     res.status(status).json({ message });
   }
 
@@ -122,9 +115,9 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
 
   router.get('/bootstrap',wrap(async(req,res) => {
     if (Object.keys(req.query).length) throw fail(400,'Authentication request is invalid.');
+    await rate(req,'bootstrap');
     const chosen = await resolve(req,res,{allowMissing:true});
     if (chosen.state==='selected') return res.json({ ready:true, csrfToken:csrf(chosen.header) });
-    rate(req,'bootstrap',15);
     const issued = await repository.issueBinding();
     if (issued.state!=='issued') throw fail(503,'Authentication service is temporarily unavailable.');
     res.append('Set-Cookie',issued.setCookie);
@@ -134,6 +127,7 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
   router.get('/status',wrap(async(req,res) => {
     if (Object.keys(req.query).length) throw fail(400,'Authentication request is invalid.');
     const chosen = await resolve(req,res);
+    await rate(req,'status',chosen);
     if (!chosen.sessionName) return res.json({ authenticated:false, csrfToken:csrf(chosen.header) });
     const ordinary = await repository.readTokens(chosen.header,'ordinary');
     if (ordinary.state==='wrong-kind') {
@@ -151,6 +145,7 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
   router.get('/me',wrap(async(req,res) => {
     if (Object.keys(req.query).length) throw fail(400,'Authentication request is invalid.');
     const chosen = await resolve(req,res);
+    await rate(req,'me',chosen);
     const tokens = await repository.readTokens(chosen.header,'ordinary');
     if (tokens.state!=='current') throw fail(401,'Authentication is required.');
     const user = await deadline(identity.loadCurrentUser({ accessToken:tokens.accessToken,
@@ -166,6 +161,7 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
       throw fail(400,'Profile details are invalid.');
     }
     const chosen = await resolve(req,res);
+    await rate(req,'profileName',chosen);
     security.verifyExpectedSession(req,chosen.sessionName);
     verifyCsrf(req,chosen.header);
     const tokens = await repository.readTokens(chosen.header,'ordinary');
@@ -182,10 +178,10 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     if (!only(req.body,['email']) || !EMAIL.test(req.body.email || '')) {
       throw fail(400,'Email address is invalid.');
     }
-    rate(req,'email-change',5);
     const emailScope = await resolve(req,res);
+    await rate(req,'emailChange',emailScope);
     security.verifyExpectedSession(req,emailScope.sessionName);
-    const { chosen,intentId } = await start(req,res,'ordinary');
+    const { chosen,intentId } = await start(req,res,'ordinary',emailScope);
     const tokens = await repository.readTokens(chosen.header,'ordinary');
     if (tokens.state!=='current') {
       await repository.settle(intentId,'failed').catch(() => {});
@@ -234,8 +230,8 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
         typeof value==='string' && value.length>=8 && value.length<=128)) {
       throw fail(400,'Password details are invalid.');
     }
-    rate(req,'password-change',5);
     const chosen = await resolve(req,res);
+    await rate(req,'passwordChange',chosen);
     security.verifyExpectedSession(req,chosen.sessionName);
     verifyCsrf(req,chosen.header);
     const tokens = await repository.readTokens(chosen.header,'ordinary');
@@ -266,8 +262,8 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     }
   }));
 
-  async function start(req,res,kind) {
-    const chosen = await resolve(req,res);
+  async function start(req,res,kind,chosen = null) {
+    chosen ||= await resolve(req,res);
     verifyCsrf(req,chosen.header);
     const started = await repository.begin(chosen.header,kind);
     if (started.state!=='started') throw fail(409,'Authentication changed. Reload and try again.');
@@ -287,8 +283,9 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     if (!only(req.body,['email','password']) || !EMAIL.test(req.body.email || '')
       || typeof req.body.password!=='string' || req.body.password.length<1
       || req.body.password.length>128) throw fail(400,'Authentication request is invalid.');
-    rate(req,'credential',8);
-    const { intentId } = await start(req,res,'ordinary');
+    const chosen = await resolve(req,res);
+    await rate(req,'login',chosen,{email:req.body.email});
+    const { intentId } = await start(req,res,'ordinary',chosen);
     try {
       const result = await deadline(identity.login({ email:req.body.email.trim().toLowerCase(),
         password:req.body.password }));
@@ -321,8 +318,9 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
         typeof value==='string' && value.trim().length>=1 && value.trim().length<=100)) {
       throw fail(400,'Authentication request is invalid.');
     }
-    rate(req,'credential',8);
-    const { chosen,intentId } = await start(req,res,'ordinary');
+    const chosen = await resolve(req,res);
+    await rate(req,'signup',chosen,{email:req.body.email});
+    const { intentId } = await start(req,res,'ordinary',chosen);
     let setup;
     try {
       setup = await callbackSetup(chosen.header,'confirmation',intentId);
@@ -347,8 +345,8 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     if (!only(req.body,['email']) || !EMAIL.test(req.body.email || '')) {
       throw fail(400,'Authentication request is invalid.');
     }
-    rate(req,'recovery',5);
     const chosen = await resolve(req,res);
+    await rate(req,'recovery',chosen,{email:req.body.email});
     verifyCsrf(req,chosen.header);
     const started = await repository.begin(chosen.header,'recovery');
     if (started.state!=='started') throw fail(409,'Authentication changed. Reload and try again.');
@@ -376,8 +374,8 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
       || !['confirmation','recovery'].includes(pairs.get('kind'))) {
       throw fail(400,'Authentication callback is invalid.');
     }
-    rate(req,'callback',10);
     const chosen = await resolve(req,res);
+    await rate(req,'callback',chosen);
     const kind = pairs.get('kind');
     const claimed = await repository.claimCallback(chosen.header,{ state:pairs.get('state'),
       flowId:pairs.get('sb_flow_id'),kind });
@@ -399,8 +397,8 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
   router.post('/recovery/password',wrap(async(req,res) => {
     if (!only(req.body,['password']) || typeof req.body.password!=='string'
       || req.body.password.length<8 || req.body.password.length>128) throw fail(400,'Authentication request is invalid.');
-    rate(req,'recovery-update',5);
     const chosen = await resolve(req,res);
+    await rate(req,'recoveryUpdate',chosen);
     verifyCsrf(req,chosen.header);
     const tokens = await repository.readTokens(chosen.header,'recovery');
     if (tokens.state!=='current') throw fail(401,'Recovery session is required.');
@@ -414,6 +412,7 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
   router.post('/refresh',wrap(async(req,res) => {
     if (!only(req.body,[])) throw fail(400,'Authentication request is invalid.');
     const chosen = await resolve(req,res);
+    await rate(req,'refresh',chosen);
     verifyCsrf(req,chosen.header);
     const current = await repository.inspect(chosen.header,'ordinary');
     if (current.state!=='current') throw fail(401,'Authentication is required.');
@@ -433,6 +432,7 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     if (!only(req.body,requireLogoutVersion?['expectedSessionName']:[]))
       throw fail(400,'Authentication request is invalid.');
     const chosen = await resolve(req,res);
+    await rate(req,'logout',chosen);
     if (!chosen.sessionName) return res.status(204).end();
     security.verifyExpectedSession(req,chosen.sessionName);
     verifyCsrf(req,chosen.header);
@@ -447,8 +447,8 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     if (!only(req.body,requireLogoutVersion?['password','expectedSessionName']:['password'])
       || typeof req.body.password!=='string'
       || req.body.password.length<1 || req.body.password.length>128) throw fail(400,'Authentication request is invalid.');
-    rate(req,'deletion',3);
     const chosen = await resolve(req,res);
+    await rate(req,'deletion',chosen);
     security.verifyExpectedSession(req,chosen.sessionName);
     verifyCsrf(req,chosen.header);
     if (requireLogoutVersion && chosen.sessionName!==req.body.expectedSessionName)

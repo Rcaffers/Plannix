@@ -8,7 +8,8 @@ export function createServerSessionTestApp(options) {
   app.disable('x-powered-by');
   app.set('trust proxy', false);
   if (options.beforeAuth) app.use('/__stage3/auth',options.beforeAuth);
-  app.use('/__stage3/auth', createServerSessionRouter(options));
+  app.use('/__stage3/auth', createServerSessionRouter({ ...options,
+    limiter:options.limiter || { check:async () => {} } }));
   app.get('/__stage3/protected',createRequireServerSession(options),
     (req,res)=>res.json({userId:req.serverSession.userId}));
   app.post('/__stage3/protected',createRequireServerSession(options),

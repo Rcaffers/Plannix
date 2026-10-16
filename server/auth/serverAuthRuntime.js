@@ -5,6 +5,7 @@ import { createSessionTokenCipherFromEnvironment } from './sessionTokenCrypto.js
 import { createServerSupabaseIdentity } from './serverSupabaseIdentity.js';
 import { createRequireServerSession } from './requireServerSession.js';
 import { createServerSessionRouter } from './serverSessionRouter.js';
+import { createDistributedAuthLimiter } from './distributedAuthLimiter.js';
 
 function csrfKey(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{43,}$/.test(value)) throw new Error('Server auth CSRF key is unavailable.');
@@ -16,7 +17,9 @@ function csrfKey(value) {
 export function createServerAuthRuntime({ config = env, environment = process.env,
   createClientImpl = createClient } = {}) {
   if (config.authMode !== 'server') throw new Error('Server auth mode is disabled.');
-  if (config.nodeEnv === 'production') throw new Error('Distributed auth rate limiting is required.');
+  if (!config.serverAuthRateKey
+    || (config.nodeEnv === 'production' && !config.serverAuthTrustedProxyCidrs))
+    throw new Error('Shared auth limiter configuration is required.');
   if (!config.supabaseUrl || !config.supabasePublishableKey || !config.supabaseSecretKey) {
     throw new Error('Server auth provider configuration is unavailable.');
   }
@@ -27,10 +30,16 @@ export function createServerAuthRuntime({ config = env, environment = process.en
     rpc: (name, args) => service.rpc(name, args),
     cipher: createSessionTokenCipherFromEnvironment(environment),
   });
+  const limiterKey = csrfKey(config.serverAuthRateKey);
+  const limiter = createDistributedAuthLimiter({
+    rpc:(name,args) => service.rpc(name,args), key:limiterKey,
+    trustedProxyCidrs:config.serverAuthTrustedProxyCidrs
+      ? config.serverAuthTrustedProxyCidrs.split(',').map(value=>value.trim()).filter(Boolean) : [],
+  });
   const identity = createServerSupabaseIdentity({ url: config.supabaseUrl,
     publishableKey: config.supabasePublishableKey, secretKey: config.supabaseSecretKey });
   const options = { repository, identity, origin: config.serverAuthOrigin,
-    csrfKey: csrfKey(config.serverAuthCsrfKey), requireLogoutVersion: true };
+    csrfKey: csrfKey(config.serverAuthCsrfKey), limiter, requireLogoutVersion: true };
   const sessionGuard = createRequireServerSession(options);
   return Object.freeze({
     authRouter: createServerSessionRouter(options),
