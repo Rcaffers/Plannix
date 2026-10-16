@@ -14,17 +14,21 @@ select extensions.ok(not has_function_privilege('anon','public.plannix_auth_rate
   'anonymous clients cannot claim rate buckets');
 select extensions.ok(not has_function_privilege('authenticated','public.plannix_auth_rate_attempt(jsonb)','EXECUTE'),
   'authenticated clients cannot claim rate buckets');
-select extensions.ok(has_function_privilege('service_role','public.plannix_auth_rate_attempt(jsonb)','EXECUTE'),
-  'service role may claim rate buckets');
+select extensions.ok(has_function_privilege('service_role','public.plannix_auth_rate_attempt(jsonb,bigint,text)','EXECUTE'),
+  'service role may claim epoch-checked rate buckets');
+
+select private.plannix_auth_rate_prepare_epoch(repeat('a',64));
+update private.plannix_auth_rate_control set paused_at=clock_timestamp()-interval '61 seconds';
+select private.plannix_auth_rate_resume(1);
 
 set local role service_role;
-select extensions.is((public.plannix_auth_rate_attempt('[{"key":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","maximum":1}]'::jsonb)->>'allowed')::boolean,
+select extensions.is((public.plannix_auth_rate_attempt('[{"key":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","maximum":1}]'::jsonb,1,repeat('a',64))->>'allowed')::boolean,
   true,'first atomic attempt is allowed');
-select extensions.is((public.plannix_auth_rate_attempt('[{"key":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","maximum":1}]'::jsonb)->>'allowed')::boolean,
+select extensions.is((public.plannix_auth_rate_attempt('[{"key":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","maximum":1}]'::jsonb,1,repeat('a',64))->>'allowed')::boolean,
   false,'second attempt is denied');
-select extensions.is(public.plannix_auth_rate_attempt('[{"key":"bad","maximum":1}]'::jsonb)->>'state',
+select extensions.is(public.plannix_auth_rate_attempt('[{"key":"bad","maximum":1}]'::jsonb,1,repeat('a',64))->>'state',
   'invalid','malformed key is rejected');
-select extensions.is(public.plannix_auth_rate_attempt('[{"key":null,"maximum":1}]'::jsonb)->>'state',
+select extensions.is(public.plannix_auth_rate_attempt('[{"key":null,"maximum":1}]'::jsonb,1,repeat('a',64))->>'state',
   'invalid','null key is rejected');
 reset role;
 
@@ -37,7 +41,7 @@ insert into private.plannix_auth_rate_counters(key_hash,window_number,attempts,e
 values (repeat('c',64),floor(extract(epoch from clock_timestamp())/60)::bigint-1,
   100,clock_timestamp()+interval '1 minute');
 set local role service_role;
-select extensions.is((public.plannix_auth_rate_attempt('[{"key":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","maximum":1}]'::jsonb)->>'allowed')::boolean,
+select extensions.is((public.plannix_auth_rate_attempt('[{"key":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","maximum":1}]'::jsonb,1,repeat('a',64))->>'allowed')::boolean,
   true,'prior fixed window cannot block a new window');
 reset role;
 update private.plannix_auth_rate_counters set expires_at=clock_timestamp()-interval '1 second'

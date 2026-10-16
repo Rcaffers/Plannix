@@ -1,14 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { createServerSessionTestApp } from './serverSessionTestApp.js';
 import { createDistributedAuthLimiter } from './distributedAuthLimiter.js';
 
 test('two independent Express instances share claims; rejected login has no auth side effect',async()=>{
   const counters=new Map();
   let storeFails=false;
-  const rpc=async(_name,{attempts})=>{
+  let paused=false;
+  let activeEpoch=1;
+  const rpc=async(_name,{attempts,expected_epoch})=>{
     if (storeFails) throw Error('synthetic store secret');
+    if (paused || expected_epoch!==activeEpoch) return {data:{state:'unavailable'}};
     let allowed=true;
     for (const item of attempts) {
       const value=(counters.get(item.key)||0)+1;
@@ -18,7 +21,7 @@ test('two independent Express instances share claims; rejected login has no auth
     return {data:{allowed,retry_after:17}};
   };
   const limiters=Array.from({length:2},()=>createDistributedAuthLimiter({
-    rpc,key:Buffer.alloc(32,9),
+    rpc,key:Buffer.alloc(32,9),epoch:1,
   }));
   assert.notStrictEqual(limiters[0],limiters[1]);
   let began=0;let providerCalls=0;
@@ -62,9 +65,42 @@ test('two independent Express instances share claims; rejected login has no auth
     const failed=await login(0);
     assert.equal(failed.status,503);
     assert.doesNotMatch(await failed.text(),/synthetic store secret/);
+    storeFails=false;
+    paused=true;
+    assert.equal((await login(0)).status,503);
+    paused=false;
+    activeEpoch=2;
+    assert.equal((await login(1)).status,503);
     assert.equal(began,0);
     assert.equal(providerCalls,0);
   } finally {
     await Promise.all(servers.map(({server})=>new Promise(resolve=>server.close(resolve))));
   }
+});
+
+test('real HTTP duplicate and conflicting ingress headers fail before a claim',async()=>{
+  let claims=0;
+  const limiter=createDistributedAuthLimiter({key:Buffer.alloc(32,9),epoch:1,
+    trustedPeerCidrs:['127.0.0.0/24'],trustedIngressCidrs:['127.0.0.0/24'],
+    rpc:async()=>{claims++;return {data:{allowed:true,retry_after:20}};}});
+  const server=createServer((req,res)=>{
+    limiter.check(req,'login').then(()=>{res.statusCode=204;res.end();},error=>{
+      res.statusCode=error.status;res.end();
+    });
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const send=headers=>new Promise((resolve,reject)=>{
+    const req=httpRequest({host:'127.0.0.1',port:server.address().port,
+      method:'POST',path:'/',headers},res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});
+    req.once('error',reject);req.end();
+  });
+  try {
+    assert.equal(await send({'Do-Connecting-IP':'198.51.100.10',
+      'X-Forwarded-For':'127.0.0.2'}),204);
+    assert.equal(await send({'Do-Connecting-IP':['198.51.100.10','198.51.100.11'],
+      'X-Forwarded-For':'127.0.0.2'}),503);
+    assert.equal(await send({'Do-Connecting-IP':'198.51.100.10',
+      'X-Forwarded-For':'198.51.100.10'}),503);
+    assert.equal(claims,1);
+  } finally { await new Promise(resolve=>server.close(resolve)); }
 });

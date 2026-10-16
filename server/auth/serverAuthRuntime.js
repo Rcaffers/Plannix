@@ -18,7 +18,10 @@ export function createServerAuthRuntime({ config = env, environment = process.en
   createClientImpl = createClient } = {}) {
   if (config.authMode !== 'server') throw new Error('Server auth mode is disabled.');
   if (!config.serverAuthRateKey
-    || (config.nodeEnv === 'production' && !config.serverAuthTrustedProxyCidrs))
+    || !/^[1-9][0-9]*$/.test(config.serverAuthRateEpoch || '')
+    || !Number.isSafeInteger(Number(config.serverAuthRateEpoch))
+    || (config.nodeEnv === 'production'
+      && (!config.serverAuthTrustedProxyCidrs || !config.serverAuthIngressCidrs)))
     throw new Error('Shared auth limiter configuration is required.');
   if (!config.supabaseUrl || !config.supabasePublishableKey || !config.supabaseSecretKey) {
     throw new Error('Server auth provider configuration is unavailable.');
@@ -33,8 +36,11 @@ export function createServerAuthRuntime({ config = env, environment = process.en
   const limiterKey = csrfKey(config.serverAuthRateKey);
   const limiter = createDistributedAuthLimiter({
     rpc:(name,args) => service.rpc(name,args), key:limiterKey,
-    trustedProxyCidrs:config.serverAuthTrustedProxyCidrs
-      ? config.serverAuthTrustedProxyCidrs.split(',').map(value=>value.trim()).filter(Boolean) : [],
+    epoch:Number(config.serverAuthRateEpoch),
+    trustedPeerCidrs:config.serverAuthTrustedProxyCidrs
+      ? config.serverAuthTrustedProxyCidrs.split(',').map(value=>value.trim()) : [],
+    trustedIngressCidrs:config.serverAuthIngressCidrs
+      ? config.serverAuthIngressCidrs.split(',').map(value=>value.trim()) : [],
   });
   const identity = createServerSupabaseIdentity({ url: config.supabaseUrl,
     publishableKey: config.supabasePublishableKey, secretKey: config.supabaseSecretKey });

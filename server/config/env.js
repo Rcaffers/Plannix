@@ -40,7 +40,9 @@ export const env = Object.freeze({
   serverAuthOrigin: String(process.env.PLANNIX_SERVER_AUTH_ORIGIN || '').trim(),
   serverAuthCsrfKey: String(process.env.PLANNIX_SERVER_AUTH_CSRF_KEY || '').trim(),
   serverAuthRateKey: String(process.env.PLANNIX_AUTH_RATE_KEY || '').trim(),
+  serverAuthRateEpoch: String(process.env.PLANNIX_AUTH_RATE_EPOCH || '').trim(),
   serverAuthTrustedProxyCidrs: String(process.env.PLANNIX_AUTH_TRUSTED_PROXY_CIDRS || '').trim(),
+  serverAuthIngressCidrs: String(process.env.PLANNIX_AUTH_INGRESS_CIDRS || '').trim(),
   vapidPublicKey: String(process.env.VAPID_PUBLIC_KEY || '').trim(),
   vapidPrivateKey: String(process.env.VAPID_PRIVATE_KEY || '').trim(),
   vapidSubject: String(process.env.VAPID_SUBJECT || '').trim(),
@@ -83,7 +85,10 @@ export function validateProductionEnv(config = env) {
     const decoded = typeof key === 'string' ? Buffer.from(key,'base64url') : Buffer.alloc(0);
     if (!key || !/^[A-Za-z0-9_-]{43,}$/.test(key) || decoded.length < 32
       || decoded.toString('base64url') !== key
-      || !config.serverAuthTrustedProxyCidrs) {
+      || !config.serverAuthTrustedProxyCidrs
+      || !config.serverAuthIngressCidrs
+      || !/^[1-9][0-9]*$/.test(config.serverAuthRateEpoch || '')
+      || !Number.isSafeInteger(Number(config.serverAuthRateEpoch))) {
       throw new Error('Server-managed authentication requires shared rate-limit and trusted-proxy configuration.');
     }
   }
