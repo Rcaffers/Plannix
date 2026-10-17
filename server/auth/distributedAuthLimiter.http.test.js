@@ -21,7 +21,7 @@ test('two independent Express instances share claims; rejected login has no auth
     return {data:{allowed,retry_after:17}};
   };
   const limiters=Array.from({length:2},()=>createDistributedAuthLimiter({
-    rpc,key:Buffer.alloc(32,9),epoch:1,
+    rpc,key:Buffer.alloc(32,9),epoch:1,mode:'direct',
   }));
   assert.notStrictEqual(limiters[0],limiters[1]);
   let began=0;let providerCalls=0;
@@ -78,11 +78,13 @@ test('two independent Express instances share claims; rejected login has no auth
   }
 });
 
-test('real HTTP duplicate and conflicting ingress headers fail before a claim',async()=>{
+test('real HTTP managed header duplicates fail and forged forwarding cannot change the bucket',async()=>{
   let claims=0;
+  const keys=[];
   const limiter=createDistributedAuthLimiter({key:Buffer.alloc(32,9),epoch:1,
-    trustedPeerCidrs:['127.0.0.0/24'],trustedIngressCidrs:['127.0.0.0/24'],
-    rpc:async()=>{claims++;return {data:{allowed:true,retry_after:20}};}});
+    mode:'digitalocean-managed',
+    rpc:async(_name,args)=>{claims++;keys.push(args.attempts[0].key);
+      return {data:{allowed:true,retry_after:20}};}});
   const server=createServer((req,res)=>{
     limiter.check(req,'login').then(()=>{res.statusCode=204;res.end();},error=>{
       res.statusCode=error.status;res.end();
@@ -97,10 +99,49 @@ test('real HTTP duplicate and conflicting ingress headers fail before a claim',a
   try {
     assert.equal(await send({'Do-Connecting-IP':'198.51.100.10',
       'X-Forwarded-For':'127.0.0.2'}),204);
+    assert.equal(await send({'do-connecting-ip':'198.51.100.10',
+      'X-Forwarded-For':'203.0.113.200'}),204);
+    assert.equal(keys[0],keys[1]);
     assert.equal(await send({'Do-Connecting-IP':['198.51.100.10','198.51.100.11'],
       'X-Forwarded-For':'127.0.0.2'}),503);
-    assert.equal(await send({'Do-Connecting-IP':'198.51.100.10',
-      'X-Forwarded-For':'198.51.100.10'}),503);
-    assert.equal(claims,1);
+    assert.equal(await send({'Do-Connecting-IP':'198.51.100.10, 198.51.100.11'}),503);
+    assert.equal(await send({'X-Forwarded-For':'198.51.100.10'}),503);
+    assert.equal(claims,2);
+  } finally { await new Promise(resolve=>server.close(resolve)); }
+});
+
+test('rejected managed identity reaches no claim, transition or provider call',async()=>{
+  let claims=0; let began=0; let providerCalls=0;
+  const limiter=createDistributedAuthLimiter({key:Buffer.alloc(32,9),epoch:1,
+    mode:'digitalocean-managed',rpc:async()=>{
+      claims++;return {data:{allowed:true,retry_after:20}};
+    }});
+  const repository={
+    async resolve(){return {state:'selected',header:'__Host-plannix-b-1=synthetic',
+      markerName:'__Host-plannix-b-1',sessionName:null,cleanup:[]};},
+    async begin(){began++;return {state:'started',intentId:'synthetic'};},
+    async readTokens(){return {state:'missing'};},
+  };
+  const identity={async login(){providerCalls++;throw Error('must not run');},
+    async validateAccess(){throw Error('must not run');}};
+  const probe=createServer().listen(0,'127.0.0.1');
+  await new Promise(resolve=>probe.once('listening',resolve));
+  const port=probe.address().port;
+  await new Promise(resolve=>probe.close(resolve));
+  const origin=`http://127.0.0.1:${port}`;
+  const app=createServerSessionTestApp({origin,repository,identity,
+    csrfKey:Buffer.alloc(32,1),limiter});
+  const server=app.listen(port,'127.0.0.1');
+  await new Promise(resolve=>server.once('listening',resolve));
+  try {
+    const login=headers=>fetch(`${origin}/__stage3/auth/login`,{method:'POST',
+      headers:{Origin:origin,'Content-Type':'application/json',...headers},
+      body:JSON.stringify({email:'synthetic@example.test',password:'synthetic'})});
+    assert.equal((await login({})).status,503);
+    assert.equal((await login({'do-connecting-ip':'198.51.100.1, 198.51.100.2',
+      'X-Forwarded-For':'192.0.2.1'})).status,503);
+    assert.equal(claims,0);
+    assert.equal(began,0);
+    assert.equal(providerCalls,0);
   } finally { await new Promise(resolve=>server.close(resolve)); }
 });

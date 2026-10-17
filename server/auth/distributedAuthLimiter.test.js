@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import proxyaddr from 'proxy-addr';
 import { createDistributedAuthLimiter } from './distributedAuthLimiter.js';
 
 const key=Buffer.alloc(32,7);
 const request=(peer='127.0.0.1',headers={}) => ({
   socket:{remoteAddress:peer}, headers,
 });
-const create=(options={})=>createDistributedAuthLimiter({epoch:1,...options});
+const create=(options={})=>createDistributedAuthLimiter({epoch:1,mode:'direct',...options});
+const rawRequest=(peer,headers)=>({socket:{remoteAddress:peer},
+  rawHeaders:headers.flatMap(([name,value])=>[name,value]),headers:{}});
 
 test('shared claims use opaque, separate network, binding and network-email keys',async()=>{
   const calls=[];
@@ -29,104 +30,85 @@ test('shared claims use opaque, separate network, binding and network-email keys
     'verified binding follows the device across networks');
 });
 
-test('proxy headers cannot evade or poison network identity',async()=>{
-  assert.throws(()=>create({key,rpc:async()=>({}),
-    trustedPeerCidrs:['0.0.0.0/0']}),/Trusted proxy/);
-  assert.throws(()=>create({key,rpc:async()=>({}),
-    trustedPeerCidrs:['loopback']}),/Trusted proxy/);
+test('missing and invalid identity modes fail at construction',()=>{
+  for (const mode of [undefined,'','auto','proxy','DIGITALOCEAN-MANAGED'])
+    assert.throws(()=>createDistributedAuthLimiter({key,epoch:1,rpc:async()=>({}),mode}),
+      /not configured/);
+});
+
+test('managed mode requires one valid raw platform address before any claim',async()=>{
   const calls=[];
-  const limiter=create({key,trustedPeerCidrs:['127.0.0.0/24'],
-    trustedIngressCidrs:['127.0.0.0/24'],
+  const limiter=create({key,mode:'digitalocean-managed',
     rpc:async(_name,args)=>{calls.push(args);return {data:{allowed:true,retry_after:30}};}});
-  await limiter.check(request('127.0.0.1',{'do-connecting-ip':'198.51.100.1',
-    'x-forwarded-for':'127.0.0.2'}),'login');
-  assert.equal(calls.length,1);
-  for (const value of ['198.51.100.1, 203.0.113.5','not-an-ip',''])
-    await assert.rejects(limiter.check(request('127.0.0.1',{'do-connecting-ip':value,
-      'x-forwarded-for':'127.0.0.2'}),'login'),
-      error=>error.status===503);
-  for (const headers of [{'do-connecting-ip':'198.51.100.1'},
-    {'x-forwarded-for':'127.0.0.2'},
-    {'do-connecting-ip':'198.51.100.1','x-forwarded-for':'127.0.0.2',
-      'forwarded':'for=203.0.113.9'},
-    {'do-connecting-ip':'198.51.100.1','x-forwarded-for':'127.0.0.2',
-      'x-real-ip':'203.0.113.9'},
-    {'do-connecting-ip':'198.51.100.1','x-forwarded-for':'203.0.113.5'},
-    {'do-connecting-ip':'127.0.0.2','x-forwarded-for':'127.0.0.2'}])
-    await assert.rejects(limiter.check(request('127.0.0.1',headers),'login'),
-      error=>error.status===503);
-  await assert.rejects(limiter.check(request('198.51.100.8',
-    {'do-connecting-ip':'198.51.100.1','x-forwarded-for':'127.0.0.2'}),'login'),
-    error=>error.status===503);
-  await assert.rejects(limiter.check({socket:{remoteAddress:'127.0.0.1'},
-    headers:{'do-connecting-ip':'198.51.100.1','x-forwarded-for':'127.0.0.2'},
-    rawHeaders:['Do-Connecting-IP','198.51.100.1','do-connecting-ip','198.51.100.2',
-      'X-Forwarded-For','127.0.0.2']},'login'),error=>error.status===503);
-  assert.equal(calls.length,1);
-});
-
-test('both proxy allowlists reject broad, aggregate-broad and noncanonical CIDRs before claims',()=>{
-  let claims=0;
-  const rpc=async()=>{claims++;return {data:{allowed:true,retry_after:1}};};
-  const invalid=[
-    '0.0.0.0/1','128.0.0.0/1','::/1','8000::/1',
-    '0.0.0.0/0','::/0','192.0.2.4/24','2001:db8::1/64',
-    '192.0.2.0/33','2001:db8::/129','192.0.2.0/024',
-    '192.0.2.0/24,','fe80::%eth0/64',
-    '::ffff:192.0.2.0/120','::ffff:c000:200/120',
-    '::ffff:0:0/96','::ffff:0:0/128','::ffff:ffff:ffff/128',
-    '::/64','::fffe:0:0/95',
+  const valid=rawRequest('not-a-peer',[
+    ['Do-Connecting-IP','198.51.100.10'],['X-Forwarded-For','forged']]);
+  await limiter.check(valid,'login');
+  const invalid=[[],[['do-connecting-ip','']],
+    [['DO-CONNECTING-IP','198.51.100.10'],['do-connecting-ip','198.51.100.11']],
+    ...['198.51.100.10, 203.0.113.1','198.51.100.10 ','[2001:db8::1]',
+      'fe80::1%eth0','not-an-ip','192.0.2.01','0.0.0.0','::',
+      '::ffff:0.0.0.0','255.255.255.255',
+      '::ffff:192.0.2.1, 192.0.2.2']
+      .map(value=>[['do-connecting-ip',value]]),
   ];
-  for (const cidr of invalid) for (const field of ['trustedPeerCidrs','trustedIngressCidrs'])
-    assert.throws(()=>create({key,rpc,[field]:[cidr]}),/Trusted proxy/,
-      `${field}: ${cidr}`);
-  for (const entries of [
-    ['10.0.0.0/24','10.0.1.0/24'], // adjacent: together a forbidden /23
-    ['2001:db8:1::/64','2001:db8:1:1::/64'],
-    ['192.0.2.0/24','192.0.2.0/25'], // overlap is ambiguous
-    Array.from({length:33},(_,i)=>`198.51.${i}.0/24`),
-  ]) for (const field of ['trustedPeerCidrs','trustedIngressCidrs'])
-    assert.throws(()=>create({key,rpc,[field]:entries}),/Trusted proxy/);
-  assert.equal(claims,0);
-  assert.equal(proxyaddr.compile(['::ffff:0:0/96'])('198.51.100.10'),true,
-    'the installed matcher treats the hex mapped range as all IPv4 peers');
-  assert.equal(proxyaddr.compile(['::/64'])('198.51.100.10'),true,
-    'an intersecting IPv6 supernet would also match an IPv4 peer');
-  assert.doesNotThrow(()=>create({key,rpc,
-    trustedPeerCidrs:['192.0.2.0/25','192.0.2.128/25'],
-    trustedIngressCidrs:['2001:db8:1::/65','2001:db8:1:0:8000::/65']}));
-  assert.doesNotThrow(()=>create({key,rpc,
-    trustedPeerCidrs:['::fffe:ffff:ffff/128'],
-    trustedIngressCidrs:['::1:0:0:0/128']}),
-  'ranges immediately beside mapped space remain valid');
+  for (const headers of invalid)
+    await assert.rejects(limiter.check(rawRequest('127.0.0.1',headers),'login'),
+      error=>error.status===503);
+  await assert.rejects(limiter.check({headers:{'do-connecting-ip':'198.51.100.10'},
+    socket:{remoteAddress:'127.0.0.1'}},'login'),error=>error.status===503);
+  await assert.rejects(limiter.check({rawHeaders:['do-connecting-ip'],
+    socket:{remoteAddress:'127.0.0.1'}},'login'),error=>error.status===503);
+  assert.equal(calls.length,1);
 });
 
-test('independent replicas key the documented visitor header, not the ingress address',async()=>{
+test('managed mode normalizes equivalent IPv4, IPv6 and mapped forms',async()=>{
+  const calls=[];
+  const limiter=create({key,mode:'digitalocean-managed',rpc:async(_name,args)=>{
+    calls.push(args);return {data:{allowed:true,retry_after:30}};}});
+  const check=value=>limiter.check(rawRequest('203.0.113.200',[
+    ['do-connecting-ip',value]]),'login');
+  for (const value of ['192.0.2.1','::ffff:192.0.2.1','::ffff:c000:201']) await check(value);
+  assert.equal(calls[0].attempts[0].key,calls[1].attempts[0].key);
+  assert.equal(calls[0].attempts[0].key,calls[2].attempts[0].key);
+  await check('2001:0db8:0:0:0:0:0:1');
+  await check('2001:db8::1');
+  assert.equal(calls[3].attempts[0].key,calls[4].attempts[0].key);
+  assert.notEqual(calls[0].attempts[0].key,calls[3].attempts[0].key);
+});
+
+test('managed mode ignores forged forwarding and socket identity',async()=>{
   const first=[]; const second=[];
-  const make=(calls)=>create({key,trustedPeerCidrs:['127.0.0.0/24'],
-    trustedIngressCidrs:['127.0.0.0/24'],
+  const make=(calls)=>create({key,mode:'digitalocean-managed',
     rpc:async(_name,args)=>{calls.push(args);return {data:{allowed:true,retry_after:20}};}});
   const a=make(first); const b=make(second);
-  await a.check(request('127.0.0.1',{'do-connecting-ip':'198.51.100.10',
-    'x-forwarded-for':'127.0.0.2'}),'login');
-  await b.check(request('127.0.0.3',{'do-connecting-ip':'198.51.100.10',
-    'x-forwarded-for':'127.0.0.4'}),'login');
+  await a.check(rawRequest('127.0.0.1',[
+    ['do-connecting-ip','198.51.100.10'],['x-forwarded-for','127.0.0.2']]),'login');
+  await b.check(rawRequest('203.0.113.9',[
+    ['DO-CONNECTING-IP','198.51.100.10'],['X-Forwarded-For','203.0.113.8'],
+    ['Forwarded','for=192.0.2.100'],['X-Real-IP','192.0.2.101']]),'login');
   assert.equal(first[0].attempts[0].key,second[0].attempts[0].key);
   assert.equal(first[0].expected_key_tag,second[0].expected_key_tag);
-  await b.check(request('127.0.0.3',{'do-connecting-ip':'198.51.100.11',
-    'x-forwarded-for':'127.0.0.4'}),'login');
+  await b.check(rawRequest('127.0.0.1',[
+    ['do-connecting-ip','198.51.100.11'],['x-forwarded-for','127.0.0.2']]),'login');
   assert.notEqual(first[0].attempts[0].key,second[1].attempts[0].key);
 });
 
-test('an ingress address is not implicitly an authorized direct peer',async()=>{
-  const limiter=create({key,trustedPeerCidrs:['127.0.0.0/24'],
-    trustedIngressCidrs:['192.0.2.0/24'],
-    rpc:async()=>({data:{allowed:true,retry_after:20}})});
-  await limiter.check(request('127.0.0.1',{'do-connecting-ip':'198.51.100.1',
-    'x-forwarded-for':'192.0.2.5'}),'login');
-  await assert.rejects(limiter.check(request('192.0.2.5',
-    {'do-connecting-ip':'198.51.100.1','x-forwarded-for':'192.0.2.5'}),'login'),
-    error=>error.status===503);
+test('direct mode normalizes socket addresses and rejects proxy identity headers',async()=>{
+  const calls=[];
+  const limiter=create({key,rpc:async(_name,args)=>{
+    calls.push(args);return {data:{allowed:true,retry_after:20}};}});
+  await limiter.check(request('192.0.2.1'),'login');
+  await limiter.check(request('::ffff:192.0.2.1'),'login');
+  assert.equal(calls[0].attempts[0].key,calls[1].attempts[0].key);
+  await limiter.check(request('2001:0db8::1'),'login');
+  await limiter.check(request('2001:db8::1'),'login');
+  assert.equal(calls[2].attempts[0].key,calls[3].attempts[0].key);
+  for (const name of ['do-connecting-ip','x-forwarded-for','forwarded',
+    'x-real-ip','cf-connecting-ip','true-client-ip','x-client-ip'])
+    await assert.rejects(limiter.check(request('192.0.2.1',{[name]:'198.51.100.1'}),
+      'login'),error=>error.status===503);
+  await assert.rejects(limiter.check(request('not-an-ip'),'login'),error=>error.status===503);
+  assert.equal(calls.length,4);
 });
 
 test('store failure and malformed responses fail closed; 429 is bounded',async()=>{

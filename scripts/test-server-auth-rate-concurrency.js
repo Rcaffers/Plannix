@@ -137,7 +137,7 @@ const createRpc=()=>async(_name,{attempts,expected_epoch,expected_key_tag})=>{
   return {data:JSON.parse(data)};
 };
 const limiters=[0,1].map(()=>createDistributedAuthLimiter({
-  rpc:createRpc(),key:limiterKey,epoch:1,
+  rpc:createRpc(),key:limiterKey,epoch:1,mode:'direct',
 }));
 assert.notStrictEqual(limiters[0],limiters[1]);
 const seconds=Number(await query('select extract(second from clock_timestamp());'));
@@ -171,8 +171,10 @@ await query(`update private.plannix_auth_rate_control
   set paused_at=clock_timestamp()-interval '61 seconds';
   select private.plannix_auth_rate_resume(2);`);
 await assert.rejects(limiters[1].check(request,'login'),error=>error.status===503);
-const nextLimiter=createDistributedAuthLimiter({rpc:createRpc(),key:nextLimiterKey,epoch:2});
+const nextLimiter=createDistributedAuthLimiter({rpc:createRpc(),key:nextLimiterKey,
+  epoch:2,mode:'direct'});
 await nextLimiter.check(request,'login');
-const wronglyUpdatedEpoch=createDistributedAuthLimiter({rpc:createRpc(),key:limiterKey,epoch:2});
+const wronglyUpdatedEpoch=createDistributedAuthLimiter({rpc:createRpc(),key:limiterKey,
+  epoch:2,mode:'direct'});
 await assert.rejects(wronglyUpdatedEpoch.check(request,'login'),error=>error.status===503);
 process.stdout.write('Independent limiters and PostgreSQL connections shared the atomic limit; cleanup passed.\n');

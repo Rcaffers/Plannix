@@ -20,8 +20,7 @@ export function createServerAuthRuntime({ config = env, environment = process.en
   if (!config.serverAuthRateKey
     || !/^[1-9][0-9]*$/.test(config.serverAuthRateEpoch || '')
     || !Number.isSafeInteger(Number(config.serverAuthRateEpoch))
-    || (config.nodeEnv === 'production'
-      && (!config.serverAuthTrustedProxyCidrs || !config.serverAuthIngressCidrs)))
+    || !['digitalocean-managed','direct'].includes(config.serverAuthNetworkIdentityMode))
     throw new Error('Shared auth limiter configuration is required.');
   if (!config.supabaseUrl || !config.supabasePublishableKey || !config.supabaseSecretKey) {
     throw new Error('Server auth provider configuration is unavailable.');
@@ -37,10 +36,7 @@ export function createServerAuthRuntime({ config = env, environment = process.en
   const limiter = createDistributedAuthLimiter({
     rpc:(name,args) => service.rpc(name,args), key:limiterKey,
     epoch:Number(config.serverAuthRateEpoch),
-    trustedPeerCidrs:config.serverAuthTrustedProxyCidrs
-      ? config.serverAuthTrustedProxyCidrs.split(',').map(value=>value.trim()) : [],
-    trustedIngressCidrs:config.serverAuthIngressCidrs
-      ? config.serverAuthIngressCidrs.split(',').map(value=>value.trim()) : [],
+    mode:config.serverAuthNetworkIdentityMode,
   });
   const identity = createServerSupabaseIdentity({ url: config.supabaseUrl,
     publishableKey: config.supabasePublishableKey, secretKey: config.supabaseSecretKey });
