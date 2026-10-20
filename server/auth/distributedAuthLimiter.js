@@ -44,7 +44,7 @@ function header(req, name) {
   return value;
 }
 
-function normalizedIp(value) {
+export function normalizedIp(value) {
   if (typeof value !== 'string' || value !== value.trim() || value.length > 64
     || /[,\s%\[\]]/.test(value)) return null;
   const family = isIP(value);

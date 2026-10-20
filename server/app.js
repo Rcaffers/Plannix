@@ -8,6 +8,7 @@ import { env } from './config/env.js';
 import { corsDelegate } from './config/cors.js';
 import { createProductionCspConfig, reportingEndpoints } from './config/csp.js';
 import { analyticsHostBoundary } from './config/analyticsHost.js';
+import { registerIngressDiagnostic } from './config/ingressDiagnostic.js';
 import { errorHandler, logRouteError, sendError } from './middleware/errorHandler.js';
 import { notFound } from './middleware/notFound.js';
 import { requestId } from './middleware/requestId.js';
@@ -51,6 +52,8 @@ app.use(helmet({
   },
 }));
 if (productionCsp) app.use(reportingEndpoints(productionCsp));
+registerIngressDiagnostic({ app, enabled: env.ingressDiagnosticEnabled,
+  token: env.ingressDiagnosticToken, authMode: env.authMode });
 app.use(cors(corsDelegate));
 if (env.authMode === 'server') {
   // One application-wide mode. The legacy bearer middleware is not mounted in
