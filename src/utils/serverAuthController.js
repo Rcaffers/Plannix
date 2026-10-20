@@ -105,7 +105,8 @@ export function createServerAuthController() {
       if (result?.confirmationPending) return { authenticated:false, confirmationPending:true, user:null };
       const resultAfter = await readCurrent();
       if (resultAfter.state !== 'authenticated') throw resultAfter.error || unavailable();
-      notifyServerSessionChange();
+      // readCurrent already verified this tab; only other tabs need restoration.
+      notifyServerSessionChange({ reconcileThisTab:false });
       currentGeneration = serverSessionGeneration();
       return { authenticated:true, confirmationPending:false, user:resultAfter.user };
     },
@@ -114,7 +115,8 @@ export function createServerAuthController() {
       await mutate('/login', input);
       const resultAfter = await readCurrent();
       if (resultAfter.state !== 'authenticated') throw resultAfter.error || unavailable();
-      notifyServerSessionChange();
+      // Avoid suspending the planner after this tab's validated login.
+      notifyServerSessionChange({ reconcileThisTab:false });
       currentGeneration = serverSessionGeneration();
       return resultAfter.user;
     },

@@ -3,6 +3,9 @@ import Timetable from '../pages/Timetable.jsx';
 import { TimetableSessionProvider as RealTimetableSessionProvider,
   useTimetableSessions } from '../context/TimetableSessionContext.jsx';
 import { captureServerOperationContext } from '../utils/serverAuthTransport.js';
+import { useAcademicYear } from '../context/AcademicYearContext.jsx';
+import { useClasses } from '../context/ClassContext.jsx';
+import { useTimetableLayout } from '../context/TimetableLayoutContext.jsx';
 import { abandonPending, collectCommittedIds } from '../utils/timetableCommitAttribution.js';
 
 let nextId = 0;
@@ -16,12 +19,28 @@ export function TimetableSessionProvider(props) {
 }
 export default function TimetableObserved(props) {
   const current = useTimetableSessions();
+  const academic = useAcademicYear();
+  const classes = useClasses();
+  const layout = useTimetableLayout();
   const mountId = useRef(null);
   if (mountId.current === null) mountId.current = ++nextId;
   const state = () => ({ dated: current.dated?.weekStartDate,
     sessions: current.dated?.sessions, revision: current.revision,
     isSaving: current.isSaving, saved: current.saved, error: current.error,
     unsaved: current.unsaved });
+  useLayoutEffect(() => {
+    window.__firstLoginPlannerState = {
+      yearId: academic.selectedAcademicYearId,
+      yearError: academic.error,
+      classNames: classes.entries.map(entry => entry.name),
+      classError: classes.error,
+      timetableId: layout.timetableId,
+      layoutError: layout.error,
+      lessonTitle: current.dated?.sessions?.[0]?.title,
+      sessionError: current.error,
+    };
+    return () => { delete window.__firstLoginPlannerState; };
+  });
   useLayoutEffect(() => {
     window.__timetableDisplayedObserverId = mountId.current;
     return () => {

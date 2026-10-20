@@ -60,11 +60,12 @@ export function assertServerResponseCurrent(response) {
     throw new DOMException('Account changed.', 'AbortError');
   }
 }
-export function notifyServerSessionChange() {
+export function notifyServerSessionChange({ reconcileThisTab = true } = {}) {
   csrfToken = null;
   accountGeneration += 1;
   channel?.postMessage({ changed: true });
-  globalThis.dispatchEvent?.(new Event('plannix-server-session-change'));
+  if (reconcileThisTab)
+    globalThis.dispatchEvent?.(new Event('plannix-server-session-change'));
 }
 
 function sameOriginUrl(input) {

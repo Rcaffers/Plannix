@@ -21,9 +21,12 @@ async function fixture() {
   globalThis.location={origin:'https://app.plannix.test'};
   globalThis.BroadcastChannel=undefined;
   const source=async name=>readFile(new URL(`./${name}`,import.meta.url),'utf8');
+  await writeFile(path.join(root,'serverAuthTestObserver.mjs'),
+    await source('serverAuthTestObserver.js'));
   await writeFile(path.join(root,'transport.mjs'),(await source('serverAuthTransport.js'))
     .replace('import.meta.env?.VITE_PLANNIX_AUTH_MODE',
-      `({VITE_PLANNIX_AUTH_MODE:'server'}).VITE_PLANNIX_AUTH_MODE`));
+      `({VITE_PLANNIX_AUTH_MODE:'server'}).VITE_PLANNIX_AUTH_MODE`)
+    .replace("'./serverAuthTestObserver.js'","'./serverAuthTestObserver.mjs'"));
   await writeFile(path.join(root,'supabase.mjs'),
     'export const getSupabaseClient=()=>{throw Error("No provider access in server mode.");};');
   await writeFile(path.join(root,'api.mjs'),`export const API_BASE_URL='';
@@ -40,6 +43,7 @@ async function fixture() {
     await writeFile(path.join(root,`${name}.mjs`),(await source(`${name}.js`))
       .replace("'../lib/supabase.js'","'./supabase.mjs'")
       .replace("'./serverAuthTransport.js'","'./transport.mjs'")
+      .replace("'./serverAuthTestObserver.js'","'./serverAuthTestObserver.mjs'")
       .replace("'./api.js'","'./api.mjs'")
       .replace("'./pushDeviceLock.js'","'./pushDeviceLock.mjs'"));
   }

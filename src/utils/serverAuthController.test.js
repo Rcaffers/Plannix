@@ -112,7 +112,9 @@ test('stale restore and subscription results never announce sign-out after login
     export const invalidateServerSessionContext=()=>0;
     export const bootstrapServerSession=async()=>({});
     export const serverSessionGeneration=()=>0;
-    export const notifyServerSessionChange=()=>listener?.();
+    export const notifyServerSessionChange=({reconcileThisTab=true}={})=>{
+      if(reconcileThisTab)listener?.();
+    };
     export const onChange=fn=>{listener=fn;};
     export const deferStatus=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});
       waiting.push(promise);return resolve;};
@@ -136,8 +138,8 @@ test('stale restore and subscription results never announce sign-out after login
     const {createServerAuthController}=await import(`file://${directory}/controller.mjs`);
     const transport=await import(`file://${directory}/transport.mjs`);
     const controller=createServerAuthController();
-    let signedOut=0; let authenticatedCount=0;
-    controller.subscribe({onUser:()=>{authenticatedCount++;
+    let signedOut=0; let authenticatedCount=0; let pendingCount=0;
+    controller.subscribe({onPending:()=>{pendingCount++;},onUser:()=>{authenticatedCount++;
       observedEvents.push({kind:'subscriber-callback',outcome:'authenticated'});},
       onSignedOut:()=>{signedOut++;
         observedEvents.push({kind:'subscriber-callback',outcome:'signed-out'});}});
@@ -146,6 +148,7 @@ test('stale restore and subscription results never announce sign-out after login
     const initial=controller.restoreSession();
     await new Promise(resolve=>setImmediate(resolve));
     assert.equal((await controller.login({email:'synthetic@example.test',password:'synthetic'})).id,ownerA);
+    assert.equal(pendingCount,0,'validated same-tab login does not suspend its own planner');
     releaseInitial({authenticated:false});
     assert.equal((await initial).state,'stale');
     await new Promise(resolve=>setImmediate(resolve));
@@ -158,7 +161,8 @@ test('stale restore and subscription results never announce sign-out after login
     releaseOldFocus({authenticated:false});
     await new Promise(resolve=>setImmediate(resolve));
     assert.equal(signedOut,0);
-    assert.ok(authenticatedCount>=2);
+    assert.ok(authenticatedCount>=1,
+      'explicit reconciliation remains available without a login-triggered local restore');
     const subscriberTerminals=observedEvents.filter(event=>event.kind==='subscription-terminal');
     assert.ok(subscriberTerminals.some(event=>event.outcome==='ignored'));
     for (const terminal of subscriberTerminals) {

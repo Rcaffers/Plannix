@@ -26,8 +26,11 @@ let server,chrome,socket;
 let failure;
 const requests=[];const reads=[];const writes=[];const heldReads=[];const heldWrites=[];
 const heldRecurring=[];
+const heldLoginRestores=[];
 const routeErrors=[];
 let heldSnapshotDate=null,holdSave=false,failNextSave=false,holdInitialRecurring=false,failNextRecurring=false;
+let holdPostLoginBootstrap=false,postLoginBootstrapCount=0,holdFirstMembership=false;
+const heldMemberships=[];
 const records=new Map([[A,{revision:1,title:'Initial A'}],[B,{revision:1,title:'Initial B'}]]);
 const waitForServer=async (predicate,label) => {
   const deadline=Date.now()+10000;
@@ -119,6 +122,9 @@ try {
   };
   const identity={
     async login({email}){const id=email.startsWith('other')?B:A;
+      if(email==='synthetic@example.test' && holdFirstMembership) {
+        holdPostLoginBootstrap=true;postLoginBootstrapCount=0;
+      }
       return {user:{id},session:{access_token:`synthetic-access-${id}`,
         refresh_token:`synthetic-refresh-${id}`}};},
     async validateAccess({expectedUserId}){return {userId:expectedUserId,email:'synthetic@example.test'};},
@@ -129,7 +135,14 @@ try {
   };
   let authClockOffset=0;
   const boundary={repository,identity,origin,csrfKey:Buffer.alloc(32,8),requireLogoutVersion:true,
-    now:()=>Date.now()+authClockOffset};
+    now:()=>Date.now()+authClockOffset,
+    beforeAuth(req,_res,next){
+      if(req.path==='/bootstrap' && holdPostLoginBootstrap) {
+        postLoginBootstrapCount+=1;
+        heldLoginRestores.push({release:next});return;
+      }
+      next();
+    }};
   const app=createServerSessionTestApp(boundary);
   app.use(express.json({limit:'8kb'}));
   const guard=createRequireServerSession(boundary);
@@ -187,7 +200,11 @@ try {
   app.get('/api/timetable/layout',requireAuth,(_req,res)=>res.json({layout}));
   app.get('/api/classes',requireAuth,(_req,res)=>res.json({revision:1,
     entries:[{id:ids.class,name:'Synthetic Class',frequency:5}]}));
-  app.get('/api/memberships',requireAuth,(_req,res)=>res.json({memberships:[]}));
+  app.get('/api/memberships',requireAuth,(_req,res)=>{
+    if(holdFirstMembership){holdFirstMembership=false;
+      heldMemberships.push({release:()=>res.json({memberships:[]})});return;}
+    res.json({memberships:[]});
+  });
   let initialWeek;
   registerTimetableSessionRoutes({app,requireAuth,createRequestClient(auth){return {
     rpc(name,args){
@@ -302,6 +319,40 @@ try {
     return {userId:status.userId,sessionName:status.sessionName};
   };
   await waitFor("Boolean(document.querySelector('.nav-login') && !document.querySelector('.nav-login').disabled)",'App signed-out bootstrap');
+  holdFirstMembership=true;
+  await evaluate("document.querySelector('.nav-login').click()");
+  await waitFor("Boolean(document.querySelector('#login-email'))",'login form');
+  await evaluate(`(() => {
+    for(const [id,value] of [['login-email','synthetic@example.test'],
+      ['login-password','synthetic-password']]) {
+      const input=document.getElementById(id);
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);
+      input.dispatchEvent(new Event('input',{bubbles:true}));
+    }
+    document.querySelector('.login-form .login-submit').click();
+  })()`);
+  await waitFor("location.pathname==='/timetable'",'first validated login navigation');
+  try { await waitForServer(()=>heldMemberships.length===1,'delayed first-login membership request'); }
+  catch (error) { console.error('First-login membership diagnostic',
+    { postLoginBootstrapCount,restores:heldLoginRestores.length,
+      planner:await evaluate('window.__firstLoginPlannerState') });
+    throw error; }
+  await waitFor(`window.__firstLoginPlannerState?.yearId===${JSON.stringify(ids.year)}
+    &&window.__firstLoginPlannerState.classNames.includes('Synthetic Class')
+    &&window.__firstLoginPlannerState.timetableId===${JSON.stringify(ids.timetable)}
+    &&window.__firstLoginPlannerState.lessonTitle==='Initial A'`, 'existing planner after first login');
+  assert.equal(heldLoginRestores.length,0,
+    'validated same-tab login does not start a redundant restoration');
+  assert.equal(postLoginBootstrapCount,0,
+    'the same-tab login sends no second bootstrap request');
+  heldMemberships.shift().release();
+  holdPostLoginBootstrap=false;
+  current=null;
+  await evaluate("window.dispatchEvent(new Event('focus'))");
+  await waitFor("Boolean(document.querySelector('.nav-login') && !document.querySelector('.nav-login').disabled)",
+    'fixture signed-out reset before existing account-switch scenarios');
+  const firstLoginDatedReads=reads.filter(item=>item.owner===A
+    && item.name==='plannix_get_dated_timetable_sessions').length;
   holdInitialRecurring=true;
   const a=await issueLogin('synthetic@example.test');
   await evaluate("window.dispatchEvent(new Event('focus'))");
@@ -310,13 +361,13 @@ try {
   await waitFor("location.pathname==='/timetable'",'navigate while recurring readiness is pending');
   const firstRecurring=await lastOperation('recurring-start');
   assert.equal(reads.filter(item=>item.owner===A
-    && item.name==='plannix_get_dated_timetable_sessions').length,0,
+    && item.name==='plannix_get_dated_timetable_sessions').length,firstLoginDatedReads,
     'dated load waits for authoritative recurring readiness');
   failNextRecurring=true;heldRecurring.shift().release();
   await awaitTerminal(firstRecurring.id,'recurring-terminal','failed recurring handler settled');
   assert.equal(await evaluate("window.__timetableOperations.find(event=>event.kind==='recurring-terminal'&&event.id==='"+firstRecurring.id+"')?.outcome"),'error');
   assert.equal(reads.filter(item=>item.owner===A
-    && item.name==='plannix_get_dated_timetable_sessions').length,0,
+    && item.name==='plannix_get_dated_timetable_sessions').length,firstLoginDatedReads,
     'failed recurring load does not start a dated read');
   await waitFor("Boolean(document.querySelector('.schedule-titlebar-actions button') && document.body.textContent.includes('Synthetic route failure.'))",'visible recurring error');
   await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Reload').click()");
@@ -553,6 +604,8 @@ try {
   const cleanupErrors=[];
   const cleanup=async work=>{try{await work();}catch(error){cleanupErrors.push(error);}};
   await cleanup(async()=>{heldReads.splice(0).forEach(item=>item.release());
+    heldLoginRestores.splice(0).forEach(item=>item.release());
+    heldMemberships.splice(0).forEach(item=>item.release());
     heldRecurring.splice(0).forEach(item=>item.release());
     heldWrites.splice(0).forEach(item=>item.release());});
   await cleanup(async()=>socket?.close());
