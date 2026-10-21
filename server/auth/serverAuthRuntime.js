@@ -6,6 +6,7 @@ import { createServerSupabaseIdentity } from './serverSupabaseIdentity.js';
 import { createRequireServerSession } from './requireServerSession.js';
 import { createServerSessionRouter } from './serverSessionRouter.js';
 import { createDistributedAuthLimiter } from './distributedAuthLimiter.js';
+import { measureAuth, measureAuthMethods, measureAuthSync } from '../observability/authPerformance.js';
 
 function csrfKey(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{43,}$/.test(value)) throw new Error('Server auth CSRF key is unavailable.');
@@ -28,20 +29,30 @@ export function createServerAuthRuntime({ config = env, environment = process.en
   const service = createClientImpl(config.supabaseUrl, config.supabaseSecretKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
-  const repository = createPrivateSessionRepository({
+  const cipher = createSessionTokenCipherFromEnvironment(environment);
+  const repository = measureAuthMethods(createPrivateSessionRepository({
     rpc: (name, args) => service.rpc(name, args),
-    cipher: createSessionTokenCipherFromEnvironment(environment),
-  });
+    cipher: { ...cipher, decrypt: args => measureAuthSync('auth.tokenDecrypt',
+      () => cipher.decrypt(args)) },
+  }), 'auth.repository');
   const limiterKey = csrfKey(config.serverAuthRateKey);
   const limiter = createDistributedAuthLimiter({
     rpc:(name,args) => service.rpc(name,args), key:limiterKey,
     epoch:Number(config.serverAuthRateEpoch),
     mode:config.serverAuthNetworkIdentityMode,
   });
-  const identity = createServerSupabaseIdentity({ url: config.supabaseUrl,
+  const rawIdentity = createServerSupabaseIdentity({ url: config.supabaseUrl,
     publishableKey: config.supabasePublishableKey, secretKey: config.supabaseSecretKey });
+  const identity = Object.freeze({ ...rawIdentity,
+    login: args => measureAuth('auth.identity.login', () => rawIdentity.login(args)),
+    validateAccess: args => measureAuth('auth.identity.validateAccess',
+      () => rawIdentity.validateAccess(args)),
+    loadCurrentUser: args => measureAuth('auth.identity.loadCurrentUser',
+      () => rawIdentity.loadCurrentUser(args)) });
   const options = { repository, identity, origin: config.serverAuthOrigin,
-    csrfKey: csrfKey(config.serverAuthCsrfKey), limiter, requireLogoutVersion: true };
+    csrfKey: csrfKey(config.serverAuthCsrfKey),
+    limiter: { check: (...args) => measureAuth('auth.limiter', () => limiter.check(...args)) },
+    requireLogoutVersion: true };
   const sessionGuard = createRequireServerSession(options);
   return Object.freeze({
     authRouter: createServerSessionRouter(options),

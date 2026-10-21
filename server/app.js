@@ -12,6 +12,7 @@ import { registerIngressDiagnostic } from './config/ingressDiagnostic.js';
 import { errorHandler, logRouteError, sendError } from './middleware/errorHandler.js';
 import { notFound } from './middleware/notFound.js';
 import { requestId } from './middleware/requestId.js';
+import { createAuthPerformance } from './observability/authPerformance.js';
 import { registerAiHolidayExtractionRoutes } from './routes/ai-holiday-extraction-routes.js';
 import { registerAiImportPreviewRoutes } from './routes/ai-import-preview-routes.js';
 import { registerAiConnectionRoutes } from './routes/ai-connection-routes.js';
@@ -43,6 +44,8 @@ app.use(analyticsHostBoundary({ analyticsFrameOrigin: productionCsp?.analyticsFr
   applicationOrigin: productionCsp?.applicationOrigin, measurementId: env.gaMeasurementId,
   frameCsp: productionCsp?.analyticsFrameContentSecurityPolicy }));
 app.use(requestId);
+app.use(createAuthPerformance({ enabled: env.authMode === 'server'
+  && env.serverAuthPerformanceEnabled }).middleware);
 app.use(helmet({
   contentSecurityPolicy: productionCsp?.contentSecurityPolicy || false,
   strictTransportSecurity: {

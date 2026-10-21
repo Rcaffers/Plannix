@@ -1,6 +1,7 @@
 // Request-local Supabase identity adapter for explicit server auth mode.
 import { createClient } from '@supabase/supabase-js';
 import { mapSupabaseUser } from '../../src/utils/supabaseAuth.js';
+import { measureAuth } from '../observability/authPerformance.js';
 
 const FLOW_SLOT = /-flow-([0-9a-f]{32})-code-verifier$/;
 const PROFILE_COLUMNS = 'id, first_name, last_name, initials';
@@ -60,7 +61,8 @@ export function createServerSupabaseIdentity({ url, publishableKey, secretKey,
 
   async function confirmed(session, suppliedUser) {
     if (!session?.access_token || !session?.refresh_token) throw timeoutError();
-    const result = await client().auth.getUser(session.access_token);
+    const result = await measureAuth('auth.identity.userValidation',
+      () => client().auth.getUser(session.access_token));
     const user = result?.data?.user;
     if (result?.error || !user?.id || user.id !== suppliedUser?.id || !user.email
       || !user.email_confirmed_at || user.is_anonymous) throw timeoutError();
@@ -70,9 +72,11 @@ export function createServerSupabaseIdentity({ url, publishableKey, secretKey,
   async function prepareOrdinary(session, suppliedUser) {
     const user = await confirmed(session, suppliedUser);
     const scoped = client({ bearer: session.access_token });
-    const setup = await scoped.rpc('plannix_ensure_personal_organisation');
+    const setup = await measureAuth('auth.identity.organisationSetup',
+      () => scoped.rpc('plannix_ensure_personal_organisation'));
     if (setup.error || !setup.data) throw timeoutError();
-    const profile = await scoped.from('plannix_users').select(PROFILE_COLUMNS).eq('id',user.id).maybeSingle();
+    const profile = await measureAuth('auth.identity.profileRead',
+      () => scoped.from('plannix_users').select(PROFILE_COLUMNS).eq('id',user.id).maybeSingle());
     if (profile.error) throw timeoutError();
     const row = Array.isArray(setup.data) ? setup.data[0] : setup.data;
     if (!row?.organisation_id) throw timeoutError();
@@ -82,21 +86,25 @@ export function createServerSupabaseIdentity({ url, publishableKey, secretKey,
 
   return Object.freeze({
     async loadCurrentUser({ accessToken, expectedUserId }) {
-      const checked = await client().auth.getUser(accessToken);
+      const checked = await measureAuth('auth.identity.userValidation',
+        () => client().auth.getUser(accessToken));
       const user = checked?.data?.user;
       if (checked.error || !user?.id || user.id !== expectedUserId
         || !user.email_confirmed_at || user.is_anonymous) throw timeoutError();
       const scoped = client({ bearer: accessToken });
       const [profile, setup] = await Promise.all([
-        scoped.from('plannix_users').select(PROFILE_COLUMNS).eq('id', user.id).maybeSingle(),
-        scoped.rpc('plannix_ensure_personal_organisation'),
+        measureAuth('auth.identity.profileRead', () => scoped.from('plannix_users')
+          .select(PROFILE_COLUMNS).eq('id', user.id).maybeSingle()),
+        measureAuth('auth.identity.organisationSetup',
+          () => scoped.rpc('plannix_ensure_personal_organisation')),
       ]);
       const row = Array.isArray(setup.data) ? setup.data[0] : setup.data;
       if (profile.error || !profile.data || setup.error || !row?.organisation_id) throw timeoutError();
       return { ...mapSupabaseUser(user, profile.data), organisationId: row.organisation_id };
     },
     async updateProfileName({ accessToken, expectedUserId, firstName, lastName, signal }) {
-      const checked = await client({operationSignal:signal}).auth.getUser(accessToken);
+      const checked = await measureAuth('auth.identity.userValidation',
+        () => client({operationSignal:signal}).auth.getUser(accessToken));
       if (checked.error || checked.data?.user?.id !== expectedUserId
         || !checked.data.user.email_confirmed_at) throw timeoutError();
       const scoped = client({ bearer: accessToken, operationSignal:signal });

@@ -42,6 +42,7 @@ export const env = Object.freeze({
   serverAuthRateKey: String(process.env.PLANNIX_AUTH_RATE_KEY || '').trim(),
   serverAuthRateEpoch: String(process.env.PLANNIX_AUTH_RATE_EPOCH || '').trim(),
   serverAuthNetworkIdentityMode: String(process.env.PLANNIX_AUTH_NETWORK_IDENTITY_MODE || '').trim(),
+  serverAuthPerformanceEnabled: process.env.PLANNIX_AUTH_PERFORMANCE_ENABLED === 'true',
   ingressDiagnosticEnabled: String(process.env.PLANNIX_INGRESS_DIAGNOSTIC_ENABLED || 'false').trim(),
   ingressDiagnosticToken: String(process.env.PLANNIX_INGRESS_DIAGNOSTIC_TOKEN || '').trim(),
   vapidPublicKey: String(process.env.VAPID_PUBLIC_KEY || '').trim(),
