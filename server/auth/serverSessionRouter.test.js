@@ -160,7 +160,7 @@ async function fixture({identity=fakeIdentity(),repository=fakeRepository(),prov
   const server=app.listen(port,'localhost');
   await new Promise(resolve=>server.once('listening',resolve));
   async function request(path,{method='GET',body,cookie,csrf,originHeader=origin,headers={},absolute=false}={}) {
-    const expectedSession=cookie?.match(/__Host-plannix-s-[1-9]\d*/)?.[0];
+    const expectedSession=cookie?.match(/__Host-plannix-[sr]-[1-9]\d*/)?.[0];
     const response=await fetch(`${origin}${absolute?'':'/__stage3/auth'}${path}`,{method,redirect:'manual',
       headers:{...(originHeader?{Origin:originHeader}:{}),...(cookie?{Cookie:cookie}:{}),
         ...(expectedSession?{'X-Plannix-Expected-Session':expectedSession}:{}),
@@ -171,6 +171,7 @@ async function fixture({identity=fakeIdentity(),repository=fakeRepository(),prov
       ? JSON.parse(raw):null,
       cookies:response.headers.getSetCookie(),location:response.headers.get('location'),
       cache:response.headers.get('cache-control'),
+      recoveryOutcome:response.headers.get('x-plannix-recovery-outcome'),
       diagnosticId:response.headers.get('x-plannix-callback-diagnostic-id')};
   }
   return {request,repository,identity,origin,close:()=>new Promise(resolve=>server.close(resolve))};
@@ -490,11 +491,25 @@ test('confirmation callback is one-use and recovery cookie cannot authorize ordi
     const recoveryStatus=await ctx.request('/status',{cookie:`${marker}; ${recoveryCookie}`});
     assert.equal(recoveryStatus.body.authenticated,false);
     assert.equal(recoveryStatus.body.recovery,true);
+    assert.equal(recoveryStatus.body.sessionName,recoveryCookie.split('=')[0]);
     assert.equal((await ctx.request('/__stage3/protected',{cookie:`${marker}; ${recoveryCookie}`,
       absolute:true})).status,401);
+    const updatesBefore=ctx.identity.calls.filter(call=>call[0]==='update-password').length;
+    for (const headers of [{ 'X-Plannix-Expected-Session':'' },
+      { 'X-Plannix-Expected-Session':'__Host-plannix-r-999' },
+      { 'X-Plannix-Expected-Session':'__Host-plannix-s-2' }]) {
+      const rejected=await ctx.request('/recovery/password',{method:'POST',
+        cookie:`${marker}; ${recoveryCookie}`,csrf:recoveryStatus.body.csrfToken,
+        body:{password:'new-synthetic-password'},headers});
+      assert.equal(rejected.status,409);
+      assert.equal(rejected.recoveryOutcome,'invalid-session');
+    }
+    assert.equal(ctx.identity.calls.filter(call=>call[0]==='update-password').length,updatesBefore);
     const updated=await ctx.request('/recovery/password',{method:'POST',cookie:`${marker}; ${recoveryCookie}`,
       csrf:recoveryStatus.body.csrfToken,body:{password:'new-synthetic-password'}});
     assert.equal(updated.status,204);
+    assert.equal(updated.recoveryOutcome,null);
+    assert.equal(ctx.identity.calls.filter(call=>call[0]==='update-password').length,updatesBefore+1);
   } finally { await ctx.close(); }
 });
 

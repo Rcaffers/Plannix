@@ -33,7 +33,9 @@ try {
   for (const marker of ['__plannixTimetableOperationObserver',
     '__plannixAuthTestObserver', '__timetablePendingUpdateIds',
     'profile-gate-terminal', 'deletion-reconcile-terminal',
-    'subscription-terminal', 'save-update-start', 'testCommitIds']) {
+    'subscription-terminal', 'recovery-verification-terminal',
+    'recovery-verification-disposed',
+    'save-update-start', 'testCommitIds']) {
     assert.equal(text.includes(marker), false, `Test observer remains in server bundle: ${marker}`);
   }
   process.stdout.write('Server-auth browser bundle excludes Supabase session storage and refresh code.\n');
@@ -56,7 +58,9 @@ try {
   for (const marker of ['__plannixTimetableOperationObserver',
     '__plannixAuthTestObserver', '__timetablePendingUpdateIds',
     'profile-gate-terminal', 'deletion-reconcile-terminal',
-    'subscription-terminal', 'save-update-start', 'testCommitIds']) {
+    'subscription-terminal', 'recovery-verification-terminal',
+    'recovery-verification-disposed',
+    'save-update-start', 'testCommitIds']) {
     assert.equal(bearerText.includes(marker), false, `Test observer remains in bearer bundle: ${marker}`);
   }
   process.stdout.write('Both production auth modes exclude Stage 4 test observers.\n');

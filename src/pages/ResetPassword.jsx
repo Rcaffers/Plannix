@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { dispatchOpenLoginModal } from '../utils/plannixEvents';
 import { INVALID_RECOVERY_MESSAGE, MAX_PASSWORD_LENGTH, supabaseRecovery, validateRecoveryPasswords } from '../utils/supabaseRecovery';
@@ -11,14 +11,22 @@ export default function ResetPassword() {
   const [confirm, setConfirm] = useState('');
   const [status, setStatus] = useState('checking');
   const [error, setError] = useState('');
+  const verificationRef = useRef(null);
 
   const isSubmitting = status === 'submitting';
   const isReady = status === 'ready';
 
-  useEffect(() => supabaseRecovery.subscribe({
-    onReady: () => { setStatus('ready'); setError(''); },
-    onInvalid: (message) => { setStatus('invalid'); setError(message); },
-  }), []);
+  useEffect(() => {
+    const cleanup = supabaseRecovery.subscribe({
+      onReady: () => { setStatus('ready'); setError(''); },
+      onInvalid: (message) => { setStatus('invalid'); setError(message);
+        setPassword(''); setConfirm(''); },
+      onUnavailable: () => { setStatus('verification-unavailable'); setError('');
+        setPassword(''); setConfirm(''); },
+    });
+    verificationRef.current = cleanup;
+    return () => { verificationRef.current = null; cleanup?.(); };
+  }, []);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -30,17 +38,23 @@ export default function ResetPassword() {
     }
 
     setStatus('submitting');
+    let outcome;
     try {
-      await supabaseRecovery.update(password, confirm);
-      setPassword('');
-      setConfirm('');
-      setStatus('done');
-      navigate('/', { replace: true });
-      dispatchOpenLoginModal();
+      outcome = await supabaseRecovery.update(password, confirm);
     } catch (err) {
-      setStatus('ready');
+      if (err.code === 'recovery_invalid' || err.code === 'recovery_unconfirmed') {
+        setStatus(err.code === 'recovery_invalid' ? 'invalid' : 'uncertain');
+        setPassword(''); setConfirm('');
+      } else setStatus('ready');
       setError(err.message || 'Your password could not be updated. Please request a new reset link and try again.');
+      return;
     }
+    setPassword('');
+    setConfirm('');
+    setStatus('done');
+    if (outcome?.sessionChanged) return;
+    navigate('/', { replace: true });
+    dispatchOpenLoginModal();
   }
 
   return (
@@ -82,6 +96,14 @@ export default function ResetPassword() {
             <h1 className="reset-password-title">Choose a new password</h1>
             {status === 'checking' ? (
               <p className="reset-password-lead visually-hidden" role="status">Checking your password reset link…</p>
+            ) : status === 'verification-unavailable' ? (
+              <p className="reset-password-lead reset-password-lead--warn" role="alert">
+                We could not verify this reset link right now. Your password has not been submitted. Retry verification to check this link again.
+              </p>
+            ) : status === 'uncertain' ? (
+              <p className="reset-password-lead reset-password-lead--warn" role="alert">
+                We could not confirm whether your password changed. Try signing in with the new password before requesting another reset link.
+              </p>
             ) : !isReady ? (
               <p className="reset-password-lead reset-password-lead--warn" role="alert">
                 This reset link is missing or invalid. Request a new link from the log in screen.
@@ -136,6 +158,27 @@ export default function ResetPassword() {
                 Save new password
               </button>
             </form>
+
+            {status === 'verification-unavailable' && (
+              <div className="reset-password-actions">
+                <button type="button" className="reset-password-primary" onClick={() => {
+                  setStatus('checking');
+                  verificationRef.current?.retry?.();
+                }}>
+                  Retry verification
+                </button>
+              </div>
+            )}
+
+            {(status === 'invalid' || status === 'uncertain') && (
+              <div className="reset-password-actions">
+                <button type="button" className="reset-password-primary" onClick={() => {
+                  navigate('/', { replace: true }); dispatchOpenLoginModal();
+                }}>
+                  {status === 'invalid' ? 'Request a new reset link' : 'Go to log in'}
+                </button>
+              </div>
+            )}
 
             <p className="reset-password-foot">
               <Link to="/">Return to home</Link>

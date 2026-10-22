@@ -158,7 +158,7 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     if (ordinary.state==='wrong-kind') {
       const recovery = await repository.inspect(chosen.header,'recovery');
       if (recovery.state==='current') return res.json({ authenticated:false, recovery:true,
-        csrfToken:csrf(chosen.header) });
+        sessionName:chosen.sessionName,csrfToken:csrf(chosen.header) });
     }
     if (ordinary.state!=='current') return res.json({ authenticated:false,csrfToken:csrf(chosen.header) });
     await deadline(identity.validateAccess({ accessToken:ordinary.accessToken,
@@ -430,11 +430,20 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
   router.post('/recovery/password',wrap(async(req,res) => {
     if (!only(req.body,['password']) || typeof req.body.password!=='string'
       || req.body.password.length<8 || req.body.password.length>128) throw fail(400,'Authentication request is invalid.');
-    const chosen = await resolve(req,res);
-    await rate(req,'recoveryUpdate',chosen);
-    verifyCsrf(req,chosen.header);
-    const tokens = await repository.readTokens(chosen.header,'recovery');
-    if (tokens.state!=='current') throw fail(401,'Recovery session is required.');
+    let tokens;
+    let chosen;
+    try {
+      chosen = await resolve(req,res);
+      await rate(req,'recoveryUpdate',chosen);
+      security.verifyExpectedRecoverySession(req,chosen.sessionName);
+      verifyCsrf(req,chosen.header);
+      tokens = await repository.readTokens(chosen.header,'recovery');
+      if (tokens.state!=='current') throw fail(401,'Recovery session is required.');
+    } catch(error) {
+      if ([401,403,409].includes(error?.status))
+        res.set('X-Plannix-Recovery-Outcome','invalid-session');
+      throw error;
+    }
     await deadline(identity.updateRecoveryPassword({ accessToken:tokens.accessToken,
       refreshToken:tokens.refreshToken,password:req.body.password,expectedUserId:tokens.ownerId }));
     const loggedOut = await repository.logout(chosen.header);

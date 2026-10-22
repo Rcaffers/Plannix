@@ -70,6 +70,15 @@ export function createSessionRequestSecurity({ origin, csrfKey }) {
     }
   }
 
+  function verifyExpectedRecoverySession(req, sessionName) {
+    const supplied = values(req, expectedSessionHeader);
+    if (supplied.length !== 1 || !/^__Host-plannix-r-[1-9]\d{0,15}$/.test(supplied[0])
+      || supplied[0] !== sessionName) {
+      throw error(409, 'Authentication changed. Reload and try again.');
+    }
+  }
+
   return Object.freeze({ guard, csrfFor, verifyCsrf, verifyExpectedSession,
+    verifyExpectedRecoverySession,
     origin: trusted.origin });
 }

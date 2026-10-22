@@ -9,12 +9,21 @@ let displayedSessionName = null;
 let displayedUserId = null;
 let pendingMismatch = false;
 let accountGeneration = 0;
+let recoveryContext = null;
+let statusSequence = 0;
+let appliedStatusSequence = 0;
 let channel;
+function clearRecoveryContext(expected = recoveryContext) {
+  if (!expected || recoveryContext !== expected) return;
+  recoveryContext = null;
+  try { globalThis.dispatchEvent?.(new Event('plannix-recovery-session-invalidated')); }
+  catch { /* A listener cannot change session verification. */ }
+}
 const responseGenerations = new WeakMap();
 if (serverManagedAuth && typeof BroadcastChannel !== 'undefined') {
   try {
     channel = new BroadcastChannel('plannix-server-session');
-    channel.onmessage = () => { csrfToken = null; accountGeneration += 1;
+    channel.onmessage = () => { csrfToken = null; clearRecoveryContext(); accountGeneration += 1;
       globalThis.dispatchEvent?.(new Event('plannix-server-session-change')); };
   } catch { /* Server verification still owns authentication. */ }
 }
@@ -22,6 +31,7 @@ if (serverManagedAuth && typeof BroadcastChannel !== 'undefined') {
 export function serverSessionGeneration() { return accountGeneration; }
 export function invalidateServerSessionContext() {
   csrfToken = null;
+  clearRecoveryContext();
   accountGeneration += 1;
   pendingMismatch = true;
   return accountGeneration;
@@ -34,6 +44,7 @@ export function setServerSessionContext(sessionName, token, userId = null) {
   displayedSessionName = sessionName;
   displayedUserId = userId;
   csrfToken = token || null;
+  if (sessionName) clearRecoveryContext();
   pendingMismatch = false;
 }
 export function captureServerOperationContext(expectedUserId) {
@@ -49,6 +60,17 @@ export function assertServerOperationContext(context) {
     || context.userId !== displayedUserId || context.generation !== accountGeneration
     || pendingMismatch) throw new DOMException('Account changed.', 'AbortError');
 }
+export function captureServerRecoveryContext(sessionName) {
+  if (!serverManagedAuth || !recoveryContext || recoveryContext.sessionName !== sessionName)
+    throw new DOMException('Recovery session changed.', 'AbortError');
+  return recoveryContext;
+}
+function assertServerRecoveryContext(context) {
+  if (!context || context !== recoveryContext || context.generation !== accountGeneration
+    || displayedSessionName || pendingMismatch) {
+    throw new DOMException('Recovery session changed.', 'AbortError');
+  }
+}
 function reportSessionMismatch() {
   if (pendingMismatch) return;
   invalidateServerSessionContext();
@@ -62,10 +84,14 @@ export function assertServerResponseCurrent(response) {
 }
 export function notifyServerSessionChange({ reconcileThisTab = true } = {}) {
   csrfToken = null;
+  clearRecoveryContext();
   accountGeneration += 1;
-  channel?.postMessage({ changed: true });
-  if (reconcileThisTab)
-    globalThis.dispatchEvent?.(new Event('plannix-server-session-change'));
+  try { channel?.postMessage({ changed: true }); }
+  catch { /* The next server verification still owns session authority. */ }
+  if (reconcileThisTab) {
+    try { globalThis.dispatchEvent?.(new Event('plannix-server-session-change')); }
+    catch { /* Notification failure cannot undo a completed session change. */ }
+  }
 }
 
 function sameOriginUrl(input) {
@@ -102,12 +128,13 @@ async function performStatus(fetchImpl = fetch, { signal, allowTransition = fals
   operationContext, verificationPurpose, testOperationId } = {}) {
   if (operationContext) assertServerOperationContext(operationContext);
   const generation = accountGeneration;
+  const sequence = ++statusSequence;
   const response = await fetchImpl(sameOriginUrl('/__stage3/auth/status'), {
     method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal,
-    ...(['profile-entry','deletion-initial','deletion-reconcile'].includes(verificationPurpose)
+    ...(['profile-entry','deletion-initial','deletion-reconcile','recovery-entry'].includes(verificationPurpose)
       || (import.meta.env?.MODE === 'stage4-app-browser-test' && testOperationId)
       ? { headers: {
-        ...(['profile-entry','deletion-initial','deletion-reconcile'].includes(verificationPurpose)
+        ...(['profile-entry','deletion-initial','deletion-reconcile','recovery-entry'].includes(verificationPurpose)
           ? { 'X-Plannix-Verification': verificationPurpose } : {}),
         ...(import.meta.env?.MODE === 'stage4-app-browser-test' && testOperationId
           ? { 'X-Plannix-Test-Operation': testOperationId } : {}) } } : {}),
@@ -121,13 +148,33 @@ async function performStatus(fetchImpl = fetch, { signal, allowTransition = fals
   if (typeof result.csrfToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(result.csrfToken)) {
     throw new Error('Session verification is unavailable.');
   }
+  const recovery = result.recovery === true && result.authenticated === false;
+  if (recovery && (typeof result.sessionName !== 'string'
+    || !/^__Host-plannix-r-[1-9]\d{0,15}$/.test(result.sessionName))) {
+    throw new Error('Session verification is unavailable.');
+  }
+  if (sequence < appliedStatusSequence
+    && (result.sessionName !== (recoveryContext?.sessionName || displayedSessionName)
+      || (recovery && result.csrfToken !== recoveryContext?.csrfToken))) {
+    throw new DOMException('Session verification was superseded.', 'AbortError');
+  }
+  appliedStatusSequence = Math.max(appliedStatusSequence, sequence);
   if (!allowTransition && displayedSessionName && (!result.authenticated
     || result.sessionName !== displayedSessionName)) {
     reportSessionMismatch();
     throw new DOMException('Account changed.', 'AbortError');
   } else if (!displayedSessionName || result.sessionName === displayedSessionName) {
-    csrfToken = result.csrfToken;
+    if (!recovery) csrfToken = result.csrfToken;
   }
+  if (recovery && !displayedSessionName) {
+    if (recoveryContext?.sessionName !== result.sessionName
+      || recoveryContext.csrfToken !== result.csrfToken
+      || recoveryContext.generation !== accountGeneration) {
+      clearRecoveryContext();
+      recoveryContext = Object.freeze({sessionName:result.sessionName,
+        csrfToken:result.csrfToken,generation:accountGeneration});
+    }
+  } else if (!recovery) clearRecoveryContext();
   return result;
 }
 
@@ -159,7 +206,7 @@ export async function bootstrapServerSession(fetchImpl = fetch, { signal } = {})
 }
 
 export async function serverAuthFetch(input, options = {}, { fetchImpl = fetch,
-  unauthenticated = false, operationContext } = {}) {
+  unauthenticated = false, operationContext, recoveryOperationContext } = {}) {
   if (!serverManagedAuth) throw new Error('Cookie authentication is disabled.');
   const method = String(options.method || 'GET').toUpperCase();
   const unsafe = !['GET', 'HEAD', 'OPTIONS'].includes(method);
@@ -171,6 +218,8 @@ export async function serverAuthFetch(input, options = {}, { fetchImpl = fetch,
   const bootstrapOrRecoveryMutation = ['/__stage3/auth/login','/__stage3/auth/signup',
     '/__stage3/auth/recover','/__stage3/auth/recovery/password',
     '/__stage3/auth/refresh'].includes(new URL(url).pathname);
+  const recoveryMutation = new URL(url).pathname === '/__stage3/auth/recovery/password';
+  if (recoveryMutation) assertServerRecoveryContext(recoveryOperationContext);
   if (unsafe && !bootstrapOrRecoveryMutation && !operationContext) {
     throw new DOMException('Session operation context is required.', 'AbortError');
   }
@@ -178,7 +227,7 @@ export async function serverAuthFetch(input, options = {}, { fetchImpl = fetch,
   if ((!authPath || ordinaryAuthMutation) && !displayedSessionName) {
     throw new DOMException('Your session must be confirmed before continuing.', 'AbortError');
   }
-  if (unsafe && !csrfToken) {
+  if (unsafe && !csrfToken && !recoveryMutation) {
     if (unauthenticated) await bootstrapServerSession(fetchImpl);
     else {
       const current = await status(fetchImpl,{ operationContext });
@@ -188,18 +237,28 @@ export async function serverAuthFetch(input, options = {}, { fetchImpl = fetch,
     }
   }
   if (operationContext) assertServerOperationContext(operationContext);
+  if (recoveryMutation) assertServerRecoveryContext(recoveryOperationContext);
   const generation = accountGeneration;
   const headers = new Headers(options.headers || {});
   headers.delete('Authorization');
   if (!authPath || ordinaryAuthMutation) headers.set('X-Plannix-Expected-Session',
     operationContext?.sessionName || displayedSessionName);
-  if (unsafe) headers.set('X-Plannix-CSRF', operationContext?.csrfToken || csrfToken);
+  if (recoveryMutation) headers.set('X-Plannix-Expected-Session',
+    recoveryOperationContext.sessionName);
+  if (unsafe) headers.set('X-Plannix-CSRF', recoveryMutation
+    ? recoveryOperationContext.csrfToken : operationContext?.csrfToken || csrfToken);
   const response = await fetchImpl(url, { ...options, method, headers,
     credentials: 'same-origin', cache: 'no-store', redirect: options.redirect || 'error' });
   responseGenerations.set(response, generation);
-  if (generation !== accountGeneration) throw new DOMException('Account changed.', 'AbortError');
+  // A confirmed password response is an irreversible provider result. A later local
+  // session change must not turn that confirmation into a reported update failure.
+  if (generation !== accountGeneration && !(recoveryMutation && response.status === 204))
+    throw new DOMException('Account changed.', 'AbortError');
   if (response.status === 409 && (!authPath || ordinaryAuthMutation)) reportSessionMismatch();
-  if (response.status === 401 || response.status === 403) csrfToken = null;
+  if (recoveryMutation && response.headers.get('X-Plannix-Recovery-Outcome') === 'invalid-session')
+    clearRecoveryContext(recoveryOperationContext);
+  if ((response.status === 401 || response.status === 403) && !recoveryMutation)
+    csrfToken = null;
   return response;
 }
 

@@ -6,6 +6,7 @@ import path from 'node:path';
 
 const csrf='a'.repeat(43);
 const session='__Host-plannix-s-2';
+const recoverySession='__Host-plannix-r-3';
 const owner='dd000000-0000-4000-8000-000000000001';
 async function loadServerMode() {
   const directory=await mkdtemp(path.join(tmpdir(),'plannix-server-auth-transport-'));
@@ -50,6 +51,186 @@ test('cookie transport uses same-origin credentials and session-bound CSRF witho
     assert.equal(calls.length,2);
   } finally { globalThis.location=previousLocation; globalThis.BroadcastChannel=previousChannel;
     await cleanup(); }
+});
+
+test('recovery status survives ordinary signed-out reconciliation and sends one scoped password request',async()=>{
+  const previousLocation=globalThis.location;
+  const previousChannel=globalThis.BroadcastChannel;
+  globalThis.BroadcastChannel=undefined;
+  globalThis.location={origin:'https://app.plannix.test'};
+  const {module,cleanup}=await loadServerMode();
+  const sends=[];
+  const fetchImpl=async(input,init)=>{
+    sends.push({input,init});
+    return input.endsWith('/status')
+      ? Response.json({authenticated:false,recovery:true,sessionName:recoverySession,csrfToken:csrf})
+      : new Response(null,{status:204});
+  };
+  try {
+    const status=await module.serverSessionStatus(fetchImpl);
+    assert.equal(status.authenticated,false);
+    const captured=module.captureServerRecoveryContext(status.sessionName);
+    module.setServerSessionContext(null);
+    assert.equal(module.captureServerRecoveryContext(status.sessionName),captured);
+    await module.serverAuthFetch('/__stage3/auth/recovery/password',
+      {method:'POST',body:'{}'},{fetchImpl,recoveryOperationContext:captured});
+    assert.equal(sends.length,2);
+    assert.equal(sends[1].init.headers.get('X-Plannix-Expected-Session'),recoverySession);
+    assert.equal(sends[1].init.headers.get('X-Plannix-CSRF'),csrf);
+    await assert.rejects(module.serverAuthFetch('/api/events',{method:'POST',body:'{}'},
+      {fetchImpl}),error=>error.name==='AbortError');
+    assert.equal(sends.length,2);
+    await module.serverSessionStatus(async()=>Response.json({authenticated:false,csrfToken:csrf}));
+    assert.throws(()=>module.captureServerRecoveryContext(recoverySession),
+      error=>error.name==='AbortError');
+  } finally {globalThis.location=previousLocation;globalThis.BroadcastChannel=previousChannel;
+    await cleanup();}
+});
+
+test('definitive recovery rejection invalidates only its captured context; provider uncertainty does not',async()=>{
+  const previousLocation=globalThis.location;
+  const previousChannel=globalThis.BroadcastChannel;
+  const previousDispatch=globalThis.dispatchEvent;
+  const events=[];
+  globalThis.BroadcastChannel=undefined;
+  globalThis.location={origin:'https://app.plannix.test'};
+  globalThis.dispatchEvent=event=>{events.push(event.type);return true;};
+  const {module,cleanup}=await loadServerMode();
+  try {
+    await module.serverSessionStatus(async()=>Response.json({authenticated:false,recovery:true,
+      sessionName:recoverySession,csrfToken:csrf}));
+    const captured=module.captureServerRecoveryContext(recoverySession);
+    const uncertain=await module.serverAuthFetch('/__stage3/auth/recovery/password',
+      {method:'POST',body:'{}'},{recoveryOperationContext:captured,
+        fetchImpl:async()=>new Response(null,{status:403})});
+    assert.equal(uncertain.status,403);
+    assert.equal(module.captureServerRecoveryContext(recoverySession),captured);
+    const rejected=await module.serverAuthFetch('/__stage3/auth/recovery/password',
+      {method:'POST',body:'{}'},{recoveryOperationContext:captured,
+        fetchImpl:async()=>new Response(null,{status:409,
+          headers:{'X-Plannix-Recovery-Outcome':'invalid-session'}})});
+    assert.equal(rejected.status,409);
+    assert.deepEqual(events,['plannix-recovery-session-invalidated']);
+    assert.throws(()=>module.captureServerRecoveryContext(recoverySession),
+      error=>error.name==='AbortError');
+  } finally {globalThis.location=previousLocation;globalThis.BroadcastChannel=previousChannel;
+    globalThis.dispatchEvent=previousDispatch;await cleanup();}
+});
+
+test('two successful bootstraps and four signed-out recovery statuses still allow exactly one reset POST',async()=>{
+  const previousLocation=globalThis.location;
+  const previousChannel=globalThis.BroadcastChannel;
+  globalThis.BroadcastChannel=undefined;
+  globalThis.location={origin:'https://app.plannix.test'};
+  const {module,cleanup}=await loadServerMode();
+  const requests=[];
+  const fetchImpl=async(input,init)=>{
+    const route=new URL(input).pathname;
+    requests.push({route,method:init.method,headers:init.headers});
+    if(route.endsWith('/bootstrap')) return Response.json({ready:true,csrfToken:csrf});
+    if(route.endsWith('/status')) return Response.json({authenticated:false,
+      recovery:true,sessionName:recoverySession,csrfToken:csrf});
+    return new Response(null,{status:204});
+  };
+  try {
+    // The live recording had this read pattern before Save. HTTP 200 is not
+    // sufficient: each status must explicitly select the recovery session.
+    for(const route of ['status','bootstrap','status','bootstrap','status','status']){
+      if(route==='bootstrap') await module.bootstrapServerSession(fetchImpl);
+      else {
+        const result=await module.serverSessionStatus(fetchImpl);
+        assert.equal(result.authenticated,false);
+        assert.equal(result.recovery,true);
+        assert.equal(result.sessionName,recoverySession);
+        module.setServerSessionContext(null);
+      }
+    }
+    const captured=module.captureServerRecoveryContext(recoverySession);
+    const response=await module.serverAuthFetch('/__stage3/auth/recovery/password',
+      {method:'POST',body:'{}'},{fetchImpl,recoveryOperationContext:captured});
+    assert.equal(response.status,204);
+    assert.deepEqual(requests.map(request=>request.route.split('/').at(-1)),
+      ['status','bootstrap','status','bootstrap','status','status','password']);
+    assert.equal(requests.filter(request=>request.method==='POST').length,1);
+    assert.equal(requests.at(-1).headers.get('X-Plannix-CSRF'),csrf);
+    assert.equal(requests.at(-1).headers.get('X-Plannix-Expected-Session'),recoverySession);
+  } finally {globalThis.location=previousLocation;globalThis.BroadcastChannel=previousChannel;
+    await cleanup();}
+});
+
+test('HTTP 200 status without recovery eligibility cannot authorize password transport',async()=>{
+  const previousLocation=globalThis.location;
+  const previousChannel=globalThis.BroadcastChannel;
+  globalThis.BroadcastChannel=undefined;
+  globalThis.location={origin:'https://app.plannix.test'};
+  const {module,cleanup}=await loadServerMode();
+  let sends=0;
+  try {
+    const result=await module.serverSessionStatus(async()=>Response.json({
+      authenticated:false,csrfToken:csrf}));
+    assert.equal(result.recovery,undefined);
+    assert.throws(()=>module.captureServerRecoveryContext(recoverySession),
+      error=>error.name==='AbortError');
+    await assert.rejects(module.serverAuthFetch('/__stage3/auth/recovery/password',
+      {method:'POST',body:'{}'},{fetchImpl:()=>{sends+=1;return new Response(null,{status:204});}}),
+    error=>error.name==='AbortError');
+    assert.equal(sends,0);
+  } finally {globalThis.location=previousLocation;globalThis.BroadcastChannel=previousChannel;
+    await cleanup();}
+});
+
+test('late recovery status and replaced recovery context cannot restore an old CSRF token',async()=>{
+  const previousLocation=globalThis.location;
+  const previousChannel=globalThis.BroadcastChannel;
+  globalThis.BroadcastChannel=undefined;
+  globalThis.location={origin:'https://app.plannix.test'};
+  const {module,cleanup}=await loadServerMode();
+  const nextSession='__Host-plannix-r-4';
+  const nextCsrf='b'.repeat(43);
+  let releaseOld;
+  const old=()=>new Promise(resolve=>{releaseOld=resolve;});
+  try {
+    const pending=module.serverSessionStatus(old);
+    await Promise.resolve();
+    const newer=await module.serverSessionStatus(async()=>Response.json({authenticated:false,
+      recovery:true,sessionName:nextSession,csrfToken:nextCsrf}));
+    const captured=module.captureServerRecoveryContext(newer.sessionName);
+    releaseOld(Response.json({authenticated:false,recovery:true,
+      sessionName:recoverySession,csrfToken:csrf}));
+    await assert.rejects(pending,error=>error.name==='AbortError');
+    assert.equal(module.captureServerRecoveryContext(nextSession),captured);
+    module.setServerSessionContext(session,csrf,owner);
+    assert.throws(()=>module.captureServerRecoveryContext(nextSession),
+      error=>error.name==='AbortError');
+    module.notifyServerSessionChange();
+    await assert.rejects(module.serverAuthFetch('/__stage3/auth/recovery/password',
+      {method:'POST',body:'{}'},{fetchImpl:()=>{throw Error('network was reached');},
+        recoveryOperationContext:captured}),error=>error.name==='AbortError');
+  } finally {globalThis.location=previousLocation;globalThis.BroadcastChannel=previousChannel;
+    await cleanup();}
+});
+
+test('a confirmed recovery response remains confirmed after a later cross-tab change',async()=>{
+  const previousLocation=globalThis.location;
+  const previousChannel=globalThis.BroadcastChannel;
+  globalThis.BroadcastChannel=undefined;
+  globalThis.location={origin:'https://app.plannix.test'};
+  const {module,cleanup}=await loadServerMode();
+  let release;
+  const fetchImpl=()=>new Promise(resolve=>{release=resolve;});
+  try {
+    await module.serverSessionStatus(async()=>Response.json({authenticated:false,recovery:true,
+      sessionName:recoverySession,csrfToken:csrf}));
+    const captured=module.captureServerRecoveryContext(recoverySession);
+    const pending=module.serverAuthFetch('/__stage3/auth/recovery/password',
+      {method:'POST',body:'{}'},{fetchImpl,recoveryOperationContext:captured});
+    module.notifyServerSessionChange();
+    release(new Response(null,{status:204}));
+    assert.equal((await pending).status,204);
+    assert.throws(()=>module.captureServerRecoveryContext(recoverySession),
+      error=>error.name==='AbortError');
+  } finally {globalThis.location=previousLocation;globalThis.BroadcastChannel=previousChannel;
+    await cleanup();}
 });
 
 test('authenticated mutation without captured context fails before status or write transport',async()=>{
