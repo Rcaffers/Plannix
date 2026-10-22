@@ -13,9 +13,21 @@ const noCache = res => { res.set('Cache-Control','no-store'); res.set('Referrer-
 const only = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
   && Object.keys(value).sort().join(',') === [...keys].sort().join(',');
 const clearCookie = name => `${name}=; Max-Age=0; ${COOKIE_FLAGS}`;
+const CALLBACK_KEYS = ['code','kind','sb_flow_id','state'];
+const CALLBACK_CLAIM_OUTCOMES = new Set(['invalid','ambiguous','expired','unavailable']);
+
+function callbackQueryReason(pairs) {
+  const keys = [...pairs.keys()];
+  if (CALLBACK_KEYS.some(key => !pairs.has(key))) return 'missing_key';
+  if (keys.some(key => !CALLBACK_KEYS.includes(key))) return 'unexpected_key';
+  if (keys.length !== CALLBACK_KEYS.length) return 'duplicate_key';
+  return 'invalid_format';
+}
 
 export function createServerSessionRouter({ repository, identity, origin, csrfKey,
-  limiter, providerDeadlineMs = 8000, requireLogoutVersion = false } = {}) {
+  limiter, providerDeadlineMs = 8000, requireLogoutVersion = false,
+  callbackDiagnosticsEnabled = false,
+  callbackDiagnosticWrite = line => process.stdout.write(`${line}\n`) } = {}) {
   let target;
   try { target = new URL(origin); } catch { throw new Error('Exact application origin required.'); }
   if (!['https:', 'http:'].includes(target.protocol) || target.username || target.password
@@ -30,6 +42,19 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
   const guard = security.guard;
   const csrf = security.csrfFor;
   const verifyCsrf = security.verifyCsrf;
+
+  function callbackDiagnostic(res) {
+    if (!callbackDiagnosticsEnabled) return () => {};
+    let correlationId;
+    try { correlationId = randomUUID(); } catch { return () => {}; }
+    return (outcome, reason) => {
+      try {
+        res.set('X-Plannix-Callback-Diagnostic-ID',correlationId);
+        const record = { correlationId, outcome, reason };
+        Promise.resolve(callbackDiagnosticWrite(JSON.stringify(record))).catch(() => {});
+      } catch { /* Diagnostics must not change callback results. */ }
+    };
+  }
 
   const rate = (req,category,chosen,extra) => limiter.check(req,category,
     { bindingName:chosen?.markerName, ...extra });
@@ -366,12 +391,13 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
   }));
 
   router.get('/callback',wrap(async(req,res) => {
+    const diagnostic = callbackDiagnostic(res);
     const pairs = new URL(req.originalUrl,target).searchParams;
-    const expected = ['code','kind','sb_flow_id','state'];
-    if ([...pairs.keys()].sort().join(',')!==expected.join(',')
+    if ([...pairs.keys()].sort().join(',')!==CALLBACK_KEYS.join(',')
       || !UUID.test(pairs.get('state') || '') || !FLOW_ID.test(pairs.get('sb_flow_id') || '')
       || !AUTH_CODE.test(pairs.get('code') || '')
       || !['confirmation','recovery'].includes(pairs.get('kind'))) {
+      diagnostic('query_invalid',callbackQueryReason(pairs));
       throw fail(400,'Authentication callback is invalid.');
     }
     const chosen = await resolve(req,res);
@@ -379,11 +405,18 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     const kind = pairs.get('kind');
     const claimed = await repository.claimCallback(chosen.header,{ state:pairs.get('state'),
       flowId:pairs.get('sb_flow_id'),kind });
-    if (claimed.state!=='claimed') throw fail(400,'Authentication callback is invalid.');
+    if (claimed.state!=='claimed') {
+      diagnostic('claim_rejected',CALLBACK_CLAIM_OUTCOMES.has(claimed.state)
+        ? claimed.state : 'other');
+      throw fail(400,'Authentication callback is invalid.');
+    }
     try {
       const result = await deadline(identity.exchange({ code:pairs.get('code'),
         flowId:pairs.get('sb_flow_id'),verifier:claimed.verifier }));
-      if (result.kind!==(kind==='recovery'?'recovery':'ordinary')) throw fail(400,'Authentication callback is invalid.');
+      if (result.kind!==(kind==='recovery'?'recovery':'ordinary')) {
+        diagnostic('exchange_kind_mismatch','kind_mismatch');
+        throw fail(400,'Authentication callback is invalid.');
+      }
       const settled = await repository.settle(claimed.intentId,'created',{
         confirmedOwnerId:result.kind==='recovery'?result.userId:result.user.id,
         accessToken:result.session.access_token,refreshToken:result.session.refresh_token });

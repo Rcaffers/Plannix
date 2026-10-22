@@ -147,14 +147,16 @@ function fakeIdentity() {
   return service;
 }
 
-async function fixture({identity=fakeIdentity(),repository=fakeRepository(),providerDeadlineMs=1000}={}) {
+async function fixture({identity=fakeIdentity(),repository=fakeRepository(),providerDeadlineMs=1000,
+  callbackDiagnosticsEnabled=false,callbackDiagnosticWrite}={}) {
   const portServer=createServer().listen(0,'localhost');
   await new Promise(resolve=>portServer.once('listening',resolve));
   const port=portServer.address().port;
   await new Promise(resolve=>portServer.close(resolve));
   const origin=`http://localhost:${port}`;
   const app=createServerSessionTestApp({identity,repository,origin,
-    csrfKey:Buffer.alloc(32,1),providerDeadlineMs});
+    csrfKey:Buffer.alloc(32,1),providerDeadlineMs,
+    callbackDiagnosticsEnabled,callbackDiagnosticWrite});
   const server=app.listen(port,'localhost');
   await new Promise(resolve=>server.once('listening',resolve));
   async function request(path,{method='GET',body,cookie,csrf,originHeader=origin,headers={},absolute=false}={}) {
@@ -168,10 +170,119 @@ async function fixture({identity=fakeIdentity(),repository=fakeRepository(),prov
     return {status:response.status,body:raw && response.headers.get('content-type')?.includes('json')
       ? JSON.parse(raw):null,
       cookies:response.headers.getSetCookie(),location:response.headers.get('location'),
-      cache:response.headers.get('cache-control')};
+      cache:response.headers.get('cache-control'),
+      diagnosticId:response.headers.get('x-plannix-callback-diagnostic-id')};
   }
   return {request,repository,identity,origin,close:()=>new Promise(resolve=>server.close(resolve))};
 }
+
+test('callback diagnostics default off and classify query shape without values',async()=>{
+  const disabled=[];
+  const off=await fixture({callbackDiagnosticWrite:line=>disabled.push(line)});
+  try {
+    const response=await off.request('/callback?code=synthetic-code-secret');
+    assert.equal(response.status,400);
+    assert.deepEqual(response.body,{message:'Authentication callback is invalid.'});
+    assert.equal(response.diagnosticId,null);
+    assert.deepEqual(disabled,[]);
+  } finally { await off.close(); }
+
+  const records=[];
+  const on=await fixture({callbackDiagnosticsEnabled:true,
+    callbackDiagnosticWrite:line=>records.push(line)});
+  try {
+    const base=`code=synthetic-code-secret&kind=confirmation&sb_flow_id=${flowId}`
+      + '&state=dd000000-0000-4000-8000-000000000088';
+    const cases=[
+      [`/callback?code=synthetic-code-secret`,'missing_key'],
+      [`/callback?${base}&unexpected=private-content`,'unexpected_key'],
+      [`/callback?${base}&code=another-secret`,'duplicate_key'],
+      [`/callback?${base.replace(flowId,'malformed-flow')}`,'invalid_format'],
+    ];
+    for (const [path,reason] of cases) {
+      const response=await on.request(path);
+      assert.equal(response.status,400);
+      assert.deepEqual(response.body,{message:'Authentication callback is invalid.'});
+      const record=JSON.parse(records.at(-1));
+      assert.deepEqual(Object.keys(record),['correlationId','outcome','reason']);
+      assert.match(record.correlationId,/^[0-9a-f]{8}-[0-9a-f-]{27,}$/);
+      assert.equal(record.correlationId,response.diagnosticId);
+      assert.equal(record.outcome,'query_invalid');
+      assert.equal(record.reason,reason);
+      assert.doesNotMatch(records.at(-1),/synthetic-code-secret|another-secret|private-content|malformed-flow/);
+    }
+    assert.equal(records.length,cases.length);
+  } finally { await on.close(); }
+});
+
+test('callback claim rejection logs only an existing safe outcome',async()=>{
+  const records=[];
+  const repository=fakeRepository();
+  repository.claimCallback=async()=>({state:'expired',raw:'private-content'});
+  const ctx=await fixture({repository,callbackDiagnosticsEnabled:true,
+    callbackDiagnosticWrite:line=>records.push(line)});
+  try {
+    const response=await ctx.request('/callback?code=synthetic-code-secret&kind=confirmation'
+      + `&sb_flow_id=${flowId}&state=dd000000-0000-4000-8000-000000000088`,
+    {cookie:marker});
+    assert.equal(response.status,400);
+    assert.deepEqual(response.body,{message:'Authentication callback is invalid.'});
+    assert.deepEqual(JSON.parse(records[0]),{
+      correlationId:response.diagnosticId,outcome:'claim_rejected',reason:'expired' });
+    assert.doesNotMatch(records[0],/private-content|synthetic-code-secret/);
+    repository.claimCallback=async()=>({state:'private-content'});
+    const unknown=await ctx.request('/callback?code=synthetic-code-secret&kind=confirmation'
+      + `&sb_flow_id=${flowId}&state=dd000000-0000-4000-8000-000000000088`,
+    {cookie:marker});
+    assert.equal(unknown.status,400);
+    assert.equal(JSON.parse(records[1]).reason,'other');
+    assert.doesNotMatch(records[1],/private-content|synthetic-code-secret/);
+    assert.equal(ctx.identity.calls.length,0);
+  } finally { await ctx.close(); }
+});
+
+test('callback exchange-kind mismatch remains generic and logs no provider data',async()=>{
+  const records=[];
+  const identity=fakeIdentity();
+  identity.exchange=async()=>({kind:'recovery',userId:ownerA,session:tokens(ownerA),
+    raw:'private-provider-error'});
+  const ctx=await fixture({identity,callbackDiagnosticsEnabled:true,
+    callbackDiagnosticWrite:line=>records.push(line)});
+  try {
+    const boot=await ctx.request('/bootstrap');
+    const signup=await ctx.request('/signup',{method:'POST',cookie:marker,
+      csrf:boot.body.csrfToken,body:{firstName:'Synthetic',lastName:'Teacher',
+        email:'teacher@example.test',password:'synthetic-password'}});
+    assert.equal(signup.status,200);
+    const state=new URL(identity.calls.find(item=>item[0]==='signup')[1]).searchParams.get('state');
+    const response=await ctx.request(`/callback?code=synthetic-code-secret&kind=confirmation`
+      + `&sb_flow_id=${flowId}&state=${state}`,{cookie:marker});
+    assert.equal(response.status,400);
+    assert.deepEqual(response.body,{message:'Authentication callback is invalid.'});
+    assert.equal(response.cookies.length,0);
+    assert.deepEqual(JSON.parse(records[0]),{
+      correlationId:response.diagnosticId,outcome:'exchange_kind_mismatch',reason:'kind_mismatch' });
+    assert.doesNotMatch(records[0],/private-provider-error|synthetic-code-secret|teacher@example.test/);
+  } finally { await ctx.close(); }
+});
+
+test('callback diagnostic writer failures cannot change either rejection path',async()=>{
+  for (const callbackDiagnosticWrite of [() => { throw Error('private-writer-error'); },
+    () => Promise.reject(Error('private-writer-error'))]) {
+    const ctx=await fixture({callbackDiagnosticsEnabled:true,callbackDiagnosticWrite});
+    try {
+      const query=await ctx.request('/callback?code=synthetic-code-secret');
+      const claim=await ctx.request('/callback?code=synthetic-code-secret&kind=confirmation'
+        + `&sb_flow_id=${flowId}&state=dd000000-0000-4000-8000-000000000088`,
+      {cookie:marker});
+      assert.equal(query.status,400);
+      assert.equal(claim.status,400);
+      assert.deepEqual(query.body,{message:'Authentication callback is invalid.'});
+      assert.deepEqual(claim.body,query.body);
+      await new Promise(resolve=>setImmediate(resolve));
+    } finally { await ctx.close(); }
+  }
+});
 
 test('bootstrap and signed-in login require exact origin and session-bound CSRF',async()=>{
   const ctx=await fixture();
