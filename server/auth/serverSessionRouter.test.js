@@ -55,6 +55,12 @@ function fakeRepository() {
       return {state:'current',ownerId:current.ownerId,accessToken:current.accessToken,
         refreshToken:current.refreshToken,tokenVersion:version};
     },
+    async resolveForApplication(header) {
+      const selected=await this.resolve(header);
+      if (selected.state!=='selected' || !selected.sessionName) return selected;
+      const tokens=await this.readTokens(selected.header,'ordinary');
+      return tokens.state==='current'?{...selected,...tokens}:tokens;
+    },
     async inspect(header,kind) {
       const found=await this.readTokens(header,kind);
       return found.state==='current'?{state:'current',tokenVersion:version,ownerId:found.ownerId}:found;

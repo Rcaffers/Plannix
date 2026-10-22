@@ -4,23 +4,20 @@ import { createSessionRequestSecurity } from './sessionRequestSecurity.js';
 export function createRequireServerSession({ repository, identity, origin, csrfKey,
   providerDeadlineMs = 8000 }) {
   const security = createSessionRequestSecurity({ origin, csrfKey });
-  if (!repository?.resolve || !repository?.readTokens || !identity?.validateAccess
+  if (!repository?.resolveForApplication || !identity?.validateAccess
     || !Number.isInteger(providerDeadlineMs) || providerDeadlineMs < 1)
     throw new Error('Server session unavailable.');
   return async function requireServerSession(req,res,next) {
     res.set('Cache-Control','no-store');
     try {
       const header=security.guard(req);
-      const selected=await repository.resolve(header);
-      if (selected.state!=='selected' || !selected.sessionName) {
+      const selected=await repository.resolveForApplication(header);
+      if (selected.state!=='current' || !selected.sessionName) {
         res.status(401).json({message:'Authentication is required.'});return;
       }
       security.verifyCsrf(req,selected.header);
-      const tokens=await repository.readTokens(selected.header,'ordinary');
-      if (tokens.state!=='current') {
-        res.status(401).json({message:'Authentication is required.'});return;
-      }
       security.verifyExpectedSession(req,selected.sessionName);
+      const tokens=selected;
       const bounded = async work => {
         let timer;
         try {

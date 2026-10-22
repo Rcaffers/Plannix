@@ -81,10 +81,10 @@ export function createPrivateSessionRepository({ rpc, cipher, generateSecret = (
       session_name: input.session?.name ?? null,
       provided_session_hash: input.session?.hash ?? null });
   }
-  async function resolve(header) {
+  async function selectCookies(header, rpcName) {
     const parsed = parsePrivateSessionCookies(header);
     if (parsed.state !== 'parsed') return { state: 'invalid' };
-    const result = await call('plannix_auth_select', {
+    const result = await call(rpcName, {
       candidates: {
         markers: parsed.markers.map(({ name, hash }) => ({ name, hash })),
         sessions: parsed.sessions.map(({ name, hash }) => ({ name, hash })),
@@ -94,7 +94,10 @@ export function createPrivateSessionRepository({ rpc, cipher, generateSecret = (
     const cleanup = Array.isArray(result.cleanup) && result.cleanup.length <= all.length
       && result.cleanup.every(name => all.some(item => item.name === name))
       ? result.cleanup : [];
-    if (result.state !== 'selected') return { state: result.state, cleanup };
+    const expectedState = rpcName === 'plannix_auth_select_application' ? 'current' : 'selected';
+    if (result.state !== 'selected' && result.state !== expectedState) {
+      return { state: result.state, cleanup };
+    }
     const marker = parsed.markers.find(item => item.name === result.markerName);
     const session = result.sessionName == null ? null
       : parsed.sessions.find(item => item.name === result.sessionName);
@@ -104,8 +107,25 @@ export function createPrivateSessionRepository({ rpc, cipher, generateSecret = (
     const markerPart = valueFor(marker.name);
     const sessionPart = session ? valueFor(session.name) : null;
     if (!markerPart || (session && !sessionPart)) throw unavailable();
-    return { state: 'selected', header: [markerPart, sessionPart].filter(Boolean).join('; '),
+    const selection = { header: [markerPart, sessionPart].filter(Boolean).join('; '),
       markerName: marker.name, sessionName: session?.name ?? null, cleanup };
+    return rpcName === 'plannix_auth_select_application'
+      ? { ...result, ...selection } : { state: 'selected', ...selection };
+  }
+  async function resolve(header) {
+    return selectCookies(header, 'plannix_auth_select');
+  }
+  async function resolveForApplication(header) {
+    const result = await selectCookies(header, 'plannix_auth_select_application');
+    if (result.state !== 'current') return result;
+    try {
+      const { accessEnvelope, refreshEnvelope, ...safeResult } = result;
+      return { ...safeResult,
+        accessToken: cipher.decrypt({ sessionId: result.sessionId, purpose: 'access',
+          version: result.tokenVersion, envelope: accessEnvelope }),
+        refreshToken: cipher.decrypt({ sessionId: result.sessionId, purpose: 'refresh',
+          version: result.tokenVersion, envelope: refreshEnvelope }) };
+    } catch { throw unavailable(); }
   }
   function callbackInput(header, state, kind) {
     const input = selected(header, 'optional');
@@ -254,7 +274,7 @@ export function createPrivateSessionRepository({ rpc, cipher, generateSecret = (
       session_hash: input.session.hash, confirmed_owner: confirmedOwnerId,
       expected_version: expectedVersion, access_cipher: access, refresh_cipher: refreshCipher });
   }
-  return Object.freeze({ issueBinding, resolve, begin, settle, inspect, readTokens,
+  return Object.freeze({ issueBinding, resolve, resolveForApplication, begin, settle, inspect, readTokens,
     reserveCallback, attachCallback, readyCallback, cancelCallback, claimCallback,
     claimRefresh, finishRefresh, releaseRefresh, logout, refresh });
 }

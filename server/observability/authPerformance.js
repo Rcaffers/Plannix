@@ -7,6 +7,7 @@ const requests = new AsyncLocalStorage();
 const labels = new Set([
   'auth.limiter', 'auth.repository.issueBinding', 'auth.repository.resolve',
   'auth.repository.begin', 'auth.repository.settle', 'auth.repository.readTokens',
+  'auth.repository.resolveForApplication',
   'auth.repository.inspect', 'auth.repository.claimRefresh',
   'auth.repository.finishRefresh', 'auth.repository.releaseRefresh',
   'auth.repository.reserveCallback', 'auth.repository.attachCallback',

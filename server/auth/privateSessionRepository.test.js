@@ -87,3 +87,46 @@ test('transport failures are generic and expose no diagnostics', async () => {
   const repo = createPrivateSessionRepository({ rpc: async () => { throw Error('private diagnostic synthetic-secret'); }, cipher });
   await assert.rejects(repo.begin(marker), error => error.message === 'Session service unavailable.');
 });
+
+test('application read selects and decrypts through one combined RPC', async () => {
+  const calls = [];
+  const rpc = async (name, args) => {
+    calls.push([name, args]);
+    return { data: { state: 'current', markerName: '__Host-plannix-b-1',
+      sessionName: '__Host-plannix-s-2', cleanup: [], ownerId: sessionId,
+      sessionId, tokenVersion: 3,
+      accessEnvelope: cipher.encrypt({ sessionId, purpose: 'access', version: 3,
+        token: 'synthetic-access' }),
+      refreshEnvelope: cipher.encrypt({ sessionId, purpose: 'refresh', version: 3,
+        token: 'synthetic-refresh' }) } };
+  };
+  const repo = createPrivateSessionRepository({ rpc, cipher });
+  const result = await repo.resolveForApplication(`${marker}; ${session}`);
+  assert.equal(result.state, 'current');
+  assert.equal(result.accessToken, 'synthetic-access');
+  assert.equal(result.refreshToken, 'synthetic-refresh');
+  assert.equal(result.header, `${marker}; ${session}`);
+  assert.equal('accessEnvelope' in result, false);
+  assert.deepEqual(calls.map(([name]) => name), ['plannix_auth_select_application']);
+  assert.equal(calls[0][1].candidates.markers.length, 1);
+  assert.equal(calls[0][1].candidates.sessions.length, 1);
+  assert.doesNotMatch(JSON.stringify(calls), /synthetic-access|synthetic-refresh|=a{43}/);
+});
+
+test('ambiguous application cookies fail locally without an RPC or cleanup', async () => {
+  let calls = 0;
+  const repo = createPrivateSessionRepository({ rpc: async () => { calls += 1; return {}; }, cipher });
+  const result = await repo.resolveForApplication(`${marker}; ${session}; ${session}`);
+  assert.deepEqual(result, { state: 'invalid' });
+  assert.equal(calls, 0);
+});
+
+test('combined read fails closed on an invalid encrypted envelope', async () => {
+  const repo = createPrivateSessionRepository({ rpc: async () => ({ data: {
+    state: 'current', markerName: '__Host-plannix-b-1', sessionName: '__Host-plannix-s-2',
+    sessionId, tokenVersion: 1, ownerId: sessionId, cleanup: [],
+    accessEnvelope: { invalid: true }, refreshEnvelope: { invalid: true },
+  } }), cipher });
+  await assert.rejects(repo.resolveForApplication(`${marker}; ${session}`),
+    error => error.message === 'Session service unavailable.');
+});

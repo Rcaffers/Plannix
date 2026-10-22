@@ -35,6 +35,12 @@ const repo={
     if (kind!=='ordinary' || !current || !header.includes(current.cookie)) return {state:'absent'};
     return {state:'current',ownerId:current.ownerId,accessToken:current.accessToken,tokenVersion:1};
   },
+  async resolveForApplication(header) {
+    const selected=await this.resolve(header);
+    if(selected.state!=='selected'||!selected.sessionName)return selected;
+    const tokens=await this.readTokens(selected.header,'ordinary');
+    return tokens.state==='current'?{...selected,...tokens}:tokens;
+  },
   async inspect(header,kind) {
     const found=await repo.readTokens(header,kind);
     return found.state==='current'?{state:'current',ownerId:found.ownerId,tokenVersion:1}:found;

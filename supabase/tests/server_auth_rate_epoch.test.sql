@@ -30,6 +30,12 @@ set local role service_role;
 select extensions.is(public.plannix_auth_rate_attempt('[{"key":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","maximum":1}]'::jsonb,1,repeat('a',64))->>'state',
   'unavailable','paused claim fails closed');
 reset role;
+-- The migration's paused_at may be hours old when this test runs. Establish
+-- this test's own pause instant inside its rollback-only transaction before
+-- asserting the full database-clock wait.
+update private.plannix_auth_rate_control
+  set active=false, paused_at=pg_catalog.clock_timestamp()
+  where singleton and not active;
 select extensions.is(private.plannix_auth_rate_prepare_epoch(repeat('a',64)),1::bigint,
   'first prepared epoch is one');
 select extensions.is(private.plannix_auth_rate_resume(1),false,

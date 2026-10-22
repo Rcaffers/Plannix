@@ -115,6 +115,10 @@ try {
     async readTokens(header,kind){return kind==='ordinary'&&current&&header.includes(current.cookie)
       ? {state:'current',ownerId:current.ownerId,accessToken:current.accessToken,tokenVersion:1}
       : {state:'absent'};},
+    async resolveForApplication(header){const selected=await this.resolve(header);
+      if(selected.state!=='selected'||!selected.sessionName)return selected;
+      const tokens=await this.readTokens(selected.header,'ordinary');
+      return tokens.state==='current'?{...selected,...tokens}:tokens;},
     async inspect(header,kind){const found=await this.readTokens(header,kind);
       return found.state==='current'?{state:'current',ownerId:current.ownerId,tokenVersion:1}:found;},
     async logout(header){if(!current||!header.includes(current.cookie))return {state:'absent'};

@@ -30,6 +30,7 @@ test('two independent Express instances share claims; rejected login has no auth
       markerName:'__Host-plannix-b-1',sessionName:null,cleanup:[]};},
     async begin(){began++;return {state:'started',intentId:'synthetic'};},
     async readTokens(){return {state:'missing'};},
+    async resolveForApplication(){return {state:'missing'};},
   };
   const identity={async login(){providerCalls++;throw Error('should not run');},
     async validateAccess(){throw Error('should not run');}};
@@ -121,6 +122,7 @@ test('rejected managed identity reaches no claim, transition or provider call',a
       markerName:'__Host-plannix-b-1',sessionName:null,cleanup:[]};},
     async begin(){began++;return {state:'started',intentId:'synthetic'};},
     async readTokens(){return {state:'missing'};},
+    async resolveForApplication(){return {state:'missing'};},
   };
   const identity={async login(){providerCalls++;throw Error('must not run');},
     async validateAccess(){throw Error('must not run');}};

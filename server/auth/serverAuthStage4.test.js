@@ -37,6 +37,12 @@ function syntheticBoundary() {
       return { state:'current',ownerId:current.ownerId,accessToken:current.accessToken,
         refreshToken:current.refreshToken,tokenVersion:current.tokenVersion };
     },
+    async resolveForApplication(header) {
+      const selected = await repository.resolve(header);
+      if (selected.state !== 'selected' || !selected.sessionName) return selected;
+      const tokens = await repository.readTokens(selected.header, 'ordinary');
+      return tokens.state === 'current' ? { ...selected, ...tokens } : tokens;
+    },
     async inspect(header,kind) {
       const result=await repository.readTokens(header,kind);
       return result.state==='current'?{state:'current',ownerId:result.ownerId,
