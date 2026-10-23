@@ -6,20 +6,37 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import { build } from 'vite';
+import react from '@vitejs/plugin-react';
 import { createServerSessionRouter } from '../server/auth/serverSessionRouter.js';
 import { createRequireServerSession } from '../server/auth/requireServerSession.js';
+import { registerTimetableSessionRoutes } from '../server/routes/timetable-session-routes.js';
 
 const markerName='__Host-plannix-b-1';
 const markerValue='a'.repeat(43);
 const marker=`${markerName}=${markerValue}`;
 const owner='dd000000-0000-4000-8000-000000000001';
+const otherOwner='dd000000-0000-4000-8000-000000000002';
+const ids={ organisation:'dd000000-0000-4000-8000-000000000003',
+  year:'dd000000-0000-4000-8000-000000000004',timetable:'dd000000-0000-4000-8000-000000000005',
+  week:'dd000000-0000-4000-8000-000000000006',collection:'dd000000-0000-4000-8000-000000000007',
+  period:'dd000000-0000-4000-8000-000000000008',class:'dd000000-0000-4000-8000-000000000009',
+  lesson:'dd000000-0000-4000-8000-000000000010' };
 const work=await mkdtemp(path.join(tmpdir(),'plannix-recovery-browser-'));
 let server;let chrome;let socket;let failure;
 let held=[];let holdApp=false;let holdForm=false;
 let holdPasswordResponse=false;let heldPasswordResponse=null;
 let failNextFormStatus=0;let formStatusGets=0;let recoveryEmails=0;let callbackGets=0;
 let current={number:3,value:'b'.repeat(43)};
+let ordinaryMode=false;
+let ordinaryOwner=owner;
+let ordinaryVersion=20;
+const ordinaryCookie=()=>`__Host-plannix-s-${ordinaryVersion}=${'m'.repeat(43)}`;
 let passwordPosts=0;let providerUpdates=0;let failProvider=false;
+let holdPlannerSave=false;
+const heldPlannerSaves=[];const plannerWrites=[];
+const plannerRecords=new Map([[owner,{title:'A private lesson',revision:1}],
+  [otherOwner,{title:'B lesson',revision:1}]]);
 const cookie=()=>`__Host-plannix-r-${current.number}=${current.value}`;
 const waitUntil=async(predicate,label,timeout=10000)=>{
   const deadline=Date.now()+timeout;
@@ -34,19 +51,30 @@ try {
   const port=probe.address().port;
   await new Promise(resolve=>probe.close(resolve));
   const origin=`http://localhost:${port}`;
-  await new Promise((resolve,reject)=>{
-    const child=spawn(process.execPath,['node_modules/vite/bin/vite.js','build',
-      '--mode','stage4-app-browser-test','--outDir',path.join(work,'dist'),'--emptyOutDir'],{
-      cwd:process.cwd(),env:{...process.env,VITE_PLANNIX_AUTH_MODE:'server',
-        VITE_API_BASE_URL:origin},stdio:['ignore','ignore','pipe']});
-    child.stderr.resume();child.once('error',reject);
-    child.once('exit',code=>code===0?resolve():reject(Error('Recovery browser build failed.')));
-  });
+  const previousMode=process.env.VITE_PLANNIX_AUTH_MODE;
+  const previousApi=process.env.VITE_API_BASE_URL;
+  process.env.VITE_PLANNIX_AUTH_MODE='server';process.env.VITE_API_BASE_URL=origin;
+  try {
+    await build({configFile:false,mode:'stage4-app-browser-test',logLevel:'error',
+      build:{outDir:path.join(work,'dist'),emptyOutDir:true},plugins:[react(),
+        {name:'recovery-real-provider-probe',enforce:'pre',resolveId(source,importer){
+          if(importer?.endsWith('/App.jsx')&&source==='./context/TimetableSessionContext')
+            return path.resolve('src/components/RecoveryPlannerProbe.browser-test.jsx');
+          return null;
+        }}]});
+  } finally {
+    if(previousMode===undefined)delete process.env.VITE_PLANNIX_AUTH_MODE;
+    else process.env.VITE_PLANNIX_AUTH_MODE=previousMode;
+    if(previousApi===undefined)delete process.env.VITE_API_BASE_URL;
+    else process.env.VITE_API_BASE_URL=previousApi;
+  }
   const htmlPath=path.join(work,'dist','index.html');
   const html=await readFile(htmlPath,'utf8');
   await writeFile(htmlPath,html.replace('<script type="module"',
     `<script>window.__authTestOperations=[];
       window.__plannixAuthTestObserver=event=>window.__authTestOperations.push(event);
+      window.__timetableOperations=[];
+      window.__plannixTimetableOperationObserver=event=>window.__timetableOperations.push(event);
       const recoveryFixtureFetch=window.fetch.bind(window);
       // Let only the identified recovery-entry read finish after controller disposal.
       window.fetch=(input,init)=>{
@@ -64,27 +92,42 @@ try {
     async issueBinding(){return {state:'issued',setCookie:`${marker}; Path=/; Secure; HttpOnly; SameSite=Lax`};},
     async resolve(header){
       if(!header?.includes(marker))return {state:header?'invalid':'missing'};
-      const selected=header.includes(cookie())?cookie():null;
+      const selected=ordinaryMode
+        ? (header.includes(ordinaryCookie())?ordinaryCookie():null)
+        : (header.includes(cookie())?cookie():null);
       return {state:'selected',header:[marker,selected].filter(Boolean).join('; '),
         markerName,sessionName:selected?.split('=')[0]||null,cleanup:[]};
     },
     async readTokens(header,kind){
-      if(!header?.includes(cookie()))return {state:'absent'};
-      if(kind!=='recovery')return {state:'wrong-kind'};
-      return {state:'current',ownerId:owner,accessToken:'synthetic-access',
+      if(ordinaryMode){
+        if(!header?.includes(ordinaryCookie()))return {state:'absent'};
+        if(kind!=='ordinary')return {state:'wrong-kind'};
+      } else {
+        if(!header?.includes(cookie()))return {state:'absent'};
+        if(kind!=='recovery')return {state:'wrong-kind'};
+      }
+      return {state:'current',ownerId:ordinaryMode?ordinaryOwner:owner,accessToken:'synthetic-access',
         refreshToken:'synthetic-refresh',tokenVersion:1};
     },
     async inspect(header,kind){const found=await this.readTokens(header,kind);
       return found.state==='current'?{state:'current',ownerId:owner}:found;},
     async resolveForApplication(header){const selected=await this.resolve(header);
-      return selected.state==='selected'&&selected.sessionName?{state:'wrong-kind'}:selected;},
+      if(selected.state!=='selected'||!selected.sessionName)return selected;
+      if(!ordinaryMode)return {state:'wrong-kind'};
+      const tokens=await this.readTokens(selected.header,'ordinary');
+      return tokens.state==='current'?{...selected,...tokens}:tokens;},
     async logout(header){if(!header?.includes(cookie()))return {state:'absent'};
       const name=cookie().split('=')[0];current={number:0,value:''};
       return {state:'revoked',cleanup:name};},
   };
   const identity={
     async login(){throw Error('Unexpected provider login');},
-    async validateAccess(){throw Error('Recovery must not validate as ordinary access');},
+    async validateAccess(){if(!ordinaryMode)throw Error('Recovery must not validate as ordinary access');
+      return {userId:ordinaryOwner};},
+    async loadCurrentUser(){if(!ordinaryMode)throw Error('Recovery cannot load an ordinary profile');
+      return {id:ordinaryOwner,organisationId:ids.organisation,
+        name:ordinaryOwner===owner?'Synthetic Teacher':'Other Teacher',email:'teacher@example.test',firstName:'Synthetic',
+        lastName:'Teacher',initials:'ST'};},
     async updateRecoveryPassword(){providerUpdates+=1;
       if(failProvider)throw Object.assign(new Error('synthetic provider rejection'),{kind:'password'});
       return {updated:true};},
@@ -115,8 +158,54 @@ try {
   const app=express();app.disable('x-powered-by');app.set('trust proxy',false);
   app.use('/__stage3/auth',boundary.beforeAuth);
   app.use('/__stage3/auth',createServerSessionRouter(boundary));
-  app.get('/__stage3/protected',createRequireServerSession(boundary),
+  const guard=createRequireServerSession(boundary);
+  app.get('/__stage3/protected',guard,
     (req,res)=>res.json({userId:req.serverSession.userId}));
+  app.use(express.json({limit:'8kb'}));
+  const requireAuth=(req,res,next)=>guard(req,res,()=>{
+    req.auth={userId:req.serverSession.userId,accessToken:req.serverSession.accessToken,
+      sessionName:req.get('X-Plannix-Expected-Session')};next();
+  });
+  const year={id:ids.year,label:'2026/2027',startDate:'2026-09-01',endDate:'2027-08-31',holidays:[]};
+  const layout={timetableId:ids.timetable,revision:1,name:'Synthetic timetable',cycle:'one-week',
+    periodsPerDay:1,periodLengthMinutes:60,schoolStartTime:'09:00',
+    registration:{enabled:false,startTime:'08:40',lengthMinutes:15},breaks:[],
+    lunch:{startTime:'12:30',lengthMinutes:45},showBreaksInTimetable:false,
+    showLunchInTimetable:false,weeks:[{id:ids.week,code:'A',name:'Week A'}],
+    periods:[{id:ids.period,type:'teaching',number:1,label:'Period 1',
+      startTime:'09:00',endTime:'10:00',enabled:true,visible:true,order:0}]};
+  app.get('/api/academic-years',requireAuth,(_req,res)=>res.json({academicYears:[year]}));
+  app.get('/api/academic-year',requireAuth,(_req,res)=>res.json({plan:year}));
+  app.get('/api/timetable/layout',requireAuth,(_req,res)=>res.json({layout}));
+  app.get('/api/classes',requireAuth,(req,res)=>res.json({revision:1,entries:[{
+    id:ids.class,name:req.auth.userId===owner?'A private class':'B class',frequency:5}]}));
+  app.get('/api/memberships',requireAuth,(_req,res)=>res.json({memberships:[]}));
+  app.get('/api/events',requireAuth,(_req,res)=>res.json({events:[]}));
+  registerTimetableSessionRoutes({app,requireAuth,createRequestClient(auth){return {rpc(name,args){
+    const record=plannerRecords.get(auth.userId);
+    const session=title=>({id:ids.lesson,day:0,periodId:ids.period,classId:ids.class,title,notes:''});
+    const finish=()=>{
+      if(name==='plannix_get_recurring_timetable_sessions')return {data:[{revision:record.revision,
+        weeks:[{weekId:ids.week,code:'A',collectionId:ids.collection,sessions:[session(record.title)]}]}],error:null};
+      if(name==='plannix_get_dated_timetable_sessions')return {data:[{revision:record.revision,
+        week_start_date:args.target_week_start_date,repeating_week_id:ids.week,
+        source:'override',override_exists:true,collection_id:ids.collection,
+        sessions:[session(record.title)]}],error:null};
+      if(name==='plannix_save_dated_timetable_sessions'){
+        record.revision+=1;record.title=args.target_sessions[0]?.title||'';
+        return {data:[{revision:record.revision,collection_id:ids.collection,
+          repeating_week_id:ids.week,sessions:[session(record.title)]}],error:null};
+      }
+      throw Error('Unexpected synthetic timetable operation.');
+    };
+    if(name==='plannix_save_dated_timetable_sessions'){
+      plannerWrites.push({owner:auth.userId,name,sessionName:auth.sessionName,
+        title:args.target_sessions[0]?.title});
+      if(holdPlannerSave)return new Promise(resolve=>heldPlannerSaves.push({release:()=>resolve(finish())}));
+    }
+    return Promise.resolve(finish());
+  }};}});
+  app.use((error,_req,res,_next)=>res.status(error?.statusCode||500).json({message:'Synthetic route failure.'}));
   app.use(express.static(path.join(work,'dist')));
   app.get(/.*/,(req,res)=>res.sendFile(path.join(work,'dist','index.html')));
   server=createServer(app);
@@ -126,12 +215,23 @@ try {
       '--no-first-run','--disable-gpu','--remote-debugging-port=0',
       `--user-data-dir=${path.join(work,'chrome')}`,'about:blank'],
     {stdio:['ignore','ignore','pipe']});
-  const wsUrl=await new Promise((resolve,reject)=>{
-    const timer=setTimeout(()=>reject(Error('Chrome startup timeout')),15000);
-    chrome.once('error',reject);
-    chrome.stderr.on('data',chunk=>{const found=String(chunk).match(/DevTools listening on (ws:\/\/[^\s]+)/);
-      if(found){clearTimeout(timer);resolve(found[1]);}});
-  });
+  let chromeStartError;
+  chrome.once('error',error=>{chromeStartError=error;});
+  chrome.stderr.resume();
+  let wsUrl;
+  await waitUntil(async()=>{
+    if(chromeStartError)throw chromeStartError;
+    if(chrome.exitCode!==null || chrome.signalCode!==null)throw Error('Chrome exited before DevTools was ready.');
+    try {
+      const [port,browserPath]=String(await readFile(path.join(work,'chrome','DevToolsActivePort'),'utf8'))
+        .trim().split('\n');
+      if(/^\d{1,5}$/.test(port) && /^\/devtools\/browser\/[a-zA-Z0-9-]+$/.test(browserPath)){
+        wsUrl=`ws://127.0.0.1:${port}${browserPath}`;
+        return true;
+      }
+    } catch { /* Chrome has not written its isolated profile's port file yet. */ }
+    return false;
+  },'Chrome DevTools startup',15000);
   socket=new WebSocket(wsUrl);
   await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});
   let serial=0;const pending=new Map();
@@ -156,9 +256,9 @@ try {
     assert.equal(result.success,true,`synthetic ${name} cookie installed`);
   };
   await setCookie(markerName,markerValue);
-  const loadRecovery=async()=>{
+  const loadRecovery=async(pathname='/reset-password')=>{
     await setCookie(cookie().split('=')[0],current.value);
-    await cdp('Page.navigate',{url:`${origin}/reset-password`},tab);
+    await cdp('Page.navigate',{url:`${origin}${pathname}`},tab);
   };
   const heldFor=form=>held.filter(item=>item.form===form);
   const release=form=>{for(const item of held.filter(item=>item.form===form))item.release();
@@ -211,6 +311,9 @@ try {
       throw Error('synthetic post-success notification failure');
     }`);
     const before=passwordPosts;
+    const beforeReconciliation=await evaluate("window.__authTestOperations.filter(e=>e.kind==='subscription-terminal').length");
+    const viewId=await evaluate("window.__authTestOperations.filter(e=>e.kind==='recovery-view-mount').at(-1)?.id");
+    assert.match(viewId,/^[0-9a-f-]{36}$/i);
     await submit();
     await waitUntil(()=>Promise.resolve(passwordPosts===before+1),
       'one password request reached guard');
@@ -218,6 +321,14 @@ try {
       'one password provider update');
     await waitUntil(()=>evaluate("location.pathname==='/'"),
       'confirmed password response completed form success handling');
+    await waitUntil(()=>evaluate(`window.__authTestOperations.some(e=>
+      e.kind==='recovery-submit-terminal'&&e.viewId===${JSON.stringify(viewId)}
+      &&e.outcome==='confirmed')`),'confirmed reset handler completed');
+    await waitUntil(()=>evaluate(`window.__authTestOperations.filter(e=>
+      e.kind==='subscription-terminal').length>${beforeReconciliation}`),
+    'post-success App reconciliation completed');
+    assert.equal(await evaluate("!document.body.textContent.includes('This reset link is missing or invalid')"),true,
+      'post-success reconciliation cannot show the invalid-link view');
     assert.equal(passwordPosts,before+1,'one password POST per form submission');
     assert.equal(await evaluate("document.querySelector('.reset-password-message--error')===null"),true);
   }
@@ -328,7 +439,57 @@ try {
     'old recovery completion does not redirect a newer context');
   assert.equal(await evaluate("document.querySelector('.reset-password-message--error')===null"),true);
   assert.equal(providerUpdates,3,'a confirmed late response represents one accepted password update');
+  // React Router accepts trailing slashes and case variants. Both must retain
+  // the confirmed view through the real App reconciliation path.
+  for(const [index,pathname] of ['/reset-password/','/RESET-PASSWORD/'].entries()){
+  ordinaryMode=false;
+  current={number:12+index,value:(index?'o':'n').repeat(43)};
+  await setCookie(ordinaryCookie().split('=')[0],ordinaryCookie().split('=')[1]);
+  await loadRecovery(pathname);
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-form button') && !document.querySelector('.reset-password-form button').disabled)"),
+    'account-change recovery form ready');
+  const changingViewId=await evaluate("window.__authTestOperations.filter(e=>e.kind==='recovery-view-mount').at(-1)?.id");
+  const beforeChangingPassword=passwordPosts;
+  const beforeChangingProvider=providerUpdates;
+  holdPasswordResponse=true;
+  holdApp=true;
+  await submit();
+  await waitUntil(()=>Promise.resolve(Boolean(heldPasswordResponse)),
+    'account-change 204 held after one provider update');
+  ordinaryMode=true;
+  await evaluate("new BroadcastChannel('plannix-server-session').postMessage({changed:true})");
+  await waitUntil(()=>Promise.resolve(heldFor(false).length>=1),
+    'account-change App status reached its hold point');
+  const changingStatusId=heldFor(false)[0].operationId;
+  const releaseChangingPassword=heldPasswordResponse;
+  heldPasswordResponse=null;holdPasswordResponse=false;releaseChangingPassword();
+  await waitUntil(()=>evaluate(`window.__authTestOperations.some(e=>
+    e.kind==='recovery-submit-terminal'&&e.viewId===${JSON.stringify(changingViewId)}
+    &&e.outcome==='confirmed-session-changed')`),'successful reset handler finished before App adoption');
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-card--success'))"),
+    'confirmed reset success rendered before App adoption');
+  release(false);
+  await waitUntil(()=>evaluate(`window.__authTestOperations.some(e=>
+    e.kind==='subscription-terminal'&&e.id===${JSON.stringify(changingStatusId)}
+    &&e.outcome==='authenticated')`),'changed-account App subscriber completed');
+  await waitUntil(()=>evaluate("document.querySelector('.nav-user-name')?.textContent==='Synthetic Teacher'"),
+    'changed account committed to the real App header');
+  assert.equal(passwordPosts,beforeChangingPassword+1,'account change cannot repeat password POST');
+  assert.equal(providerUpdates,beforeChangingProvider+1,'account change cannot repeat provider update');
+  const postAdoption=await evaluate(`({success:Boolean(document.querySelector('.reset-password-card--success')),
+    oldViewUnmounted:window.__authTestOperations.some(e=>
+      e.kind==='recovery-view-unmount'&&e.id===${JSON.stringify(changingViewId)}),
+    invalid:document.body.textContent.includes('This reset link is missing or invalid')})`);
+  assert.equal(postAdoption.success,true,
+    `confirmed recovery success survives App account adoption: ${JSON.stringify(postAdoption)}`);
+  assert.equal(postAdoption.oldViewUnmounted,false,
+    'App account adoption must not remount the completed reset view');
+  assert.equal(await evaluate(`location.pathname===${JSON.stringify(pathname)}`),true,
+    'a newer account does not redirect the completed recovery operation');
+  assert.equal(await evaluate("!document.body.textContent.includes('This reset link is missing or invalid')"),true);
+  }
   await cdp('Page.navigate',{url:`${origin}/reset-password`},tab);
+  ordinaryMode=false;
   await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-lead--warn') && document.querySelector('.reset-password-form button:disabled'))"),
     'invalid recovery view after logout');
   const ineligible=await evaluate("fetch('/__stage3/auth/status').then(async r=>({http:r.status,...await r.json()}))");
@@ -349,12 +510,85 @@ try {
     'provider uncertainty displayed without claiming definite failure');
   await evaluate("document.querySelector('.reset-password-form button').click()");
   assert.equal(passwordPosts,beforeUncertain+1,'uncertain mutation is never replayed');
-  console.log('Rendered recovery proof passed: response orders, status-only Retry, confirmed invalid status, unmount, expiry/replacement, no second POST, provider uncertainty, CSRF, ordinary isolation and late 204.');
+  // A can have protected provider state when entering the reset route. The
+  // route itself cannot authorize a recovery form from A's ordinary cookie.
+  failProvider=false;ordinaryMode=true;ordinaryOwner=owner;ordinaryVersion=30;
+  await setCookie(ordinaryCookie().split('=')[0],ordinaryCookie().split('=')[1]);
+  await cdp('Page.navigate',{url:`${origin}/reset-password/`},tab);
+  await waitUntil(()=>evaluate(`window.__recoveryPlanner?.state().userId===${JSON.stringify(owner)}
+    &&window.__recoveryPlanner.state().yearId===${JSON.stringify(ids.year)}
+    &&window.__recoveryPlanner.state().classes.includes('A private class')`),
+  'A planner data loaded in the real mounted providers on recovery route');
+  const aProvider=await evaluate('window.__recoveryPlanner.instance');
+  await evaluate("window.__recoveryPlanner.loadDate('2026-10-19')");
+  await waitUntil(()=>evaluate("window.__recoveryPlanner.state().datedTitle==='A private lesson'"),
+    'A dated lesson loaded in the real provider');
+  await evaluate("window.__recoveryPlanner.draft('A private draft')");
+  await waitUntil(()=>evaluate("window.__recoveryPlanner.state().classes.includes('A private draft')"),
+    'A class draft exists before account replacement');
+  const writesBeforeA=plannerWrites.length;
+  holdPlannerSave=true;
+  assert.equal(await evaluate("window.__recoveryPlanner.edit('A accepted edit')"),true);
+  await waitUntil(()=>Promise.resolve(heldPlannerSaves.length===1),'A guarded save held at RPC');
+  assert.equal(await evaluate("window.__recoveryPlanner.edit('A queued edit')"),true);
+  assert.equal(plannerWrites.length,writesBeforeA+1,
+    'queued A edit has not dispatched behind the accepted A request');
+  ordinaryOwner=otherOwner;ordinaryVersion=31;
+  await setCookie(ordinaryCookie().split('=')[0],ordinaryCookie().split('=')[1]);
+  await evaluate("new BroadcastChannel('plannix-server-session').postMessage({changed:true})");
+  await waitUntil(()=>evaluate(`document.querySelector('.nav-user-name')?.textContent==='Other Teacher'
+    &&window.__recoveryPlanner?.state().userId===${JSON.stringify(otherOwner)}
+    &&window.__recoveryPlanner.state().classes.includes('B class')`),
+  'real App adopted B and reset A provider drafts on recovery route');
+  assert.equal(await evaluate("window.__recoveryPlanner.instance"),aProvider,
+    'reset route remains mounted while B replaces A');
+  assert.equal(await evaluate("!window.__recoveryPlanner.state().classes.includes('A private draft')"),true);
+  assert.equal(plannerWrites.length,writesBeforeA+1,
+    'account replacement discarded the queued A edit without dispatch');
+  await waitUntil(()=>evaluate(`window.__timetableOperations.some(event=>
+    event.kind==='save-terminal'&&event.title==='A queued edit'
+    &&event.outcome==='discarded')`),'A queued edit discarded by provider reset');
+  assert.equal(plannerWrites.at(-1).sessionName,'__Host-plannix-s-30',
+    'the already accepted A save retained its original expected session');
+  await evaluate(`(() => {
+    window.__recoveryRouteLeaks=[];
+    window.__recoveryRouteObserver=new MutationObserver(() => {
+      if(location.pathname==='/timetable' && /A private (draft|class|lesson)|A queued edit|A accepted edit/
+        .test(document.body.innerText))window.__recoveryRouteLeaks.push('stale content');
+    });
+    window.__recoveryRouteObserver.observe(document.body,{subtree:true,childList:true,characterData:true});
+  })()`);
+  await evaluate("document.querySelector('a[href=\"/timetable\"]')?.click()");
+  await waitUntil(()=>evaluate(`location.pathname==='/timetable'
+    &&window.__recoveryPlanner?.instance!==${aProvider}
+    &&window.__recoveryPlanner.state().userId===${JSON.stringify(otherOwner)}
+    &&window.__recoveryPlanner.state().classes.includes('B class')`),
+  'leaving recovery rekeyed providers before B timetable became visible');
+  await evaluate("window.__recoveryPlanner.loadDate('2026-10-19')");
+  await waitUntil(()=>evaluate("window.__recoveryPlanner.state().datedTitle==='B lesson'"),
+    'B timetable is authoritative after route exit');
+  assert.deepEqual(await evaluate("window.__recoveryRouteObserver.disconnect();window.__recoveryRouteLeaks"),[],
+    'no A planner text became visible on the protected route before B rekey');
+  const bState=await evaluate("window.__recoveryPlanner.state()");
+  assert.equal(plannerWrites.filter(item=>item.owner===otherOwner).length,0,
+    'no queued A work dispatched under B');
+  holdPlannerSave=false;heldPlannerSaves.shift().release();
+  await waitUntil(()=>evaluate(`window.__timetableOperations.some(event=>
+    event.kind==='save-terminal'&&event.title==='A accepted edit'
+    &&event.outcome==='stale')`),'late accepted A save reached the real stale terminal handler');
+  assert.equal(await evaluate("window.__recoveryPlanner.state().datedTitle"),bState.datedTitle,
+    'late A completion cannot replace B timetable');
+  assert.equal(await evaluate("window.__recoveryPlanner.state().classes.includes('A private draft')"),false,
+    'late A completion cannot restore A drafts');
+  assert.equal(plannerWrites.filter(item=>item.owner===otherOwner).length,0,
+    'late A completion cannot trigger a B mutation');
+  console.log('Rendered recovery proof passed: route variants, A-to-B planner rekey and queued-work discard, status-only Retry, unmount, CSRF, ordinary isolation and late 204.');
 } catch(error){failure=error;} finally {
   const cleanupErrors=[];
   const cleanup=async task=>{try{await task();}catch(error){cleanupErrors.push(error);}};
   await cleanup(async()=>{for(const item of held)item.release();});
   await cleanup(async()=>heldPasswordResponse?.());
+  await cleanup(async()=>{for(const item of heldPlannerSaves)item.release();});
   await cleanup(async()=>socket?.close());
   let stopped=!chrome||chrome.exitCode!==null||chrome.signalCode!==null;
   await cleanup(async()=>{if(chrome&&!stopped){

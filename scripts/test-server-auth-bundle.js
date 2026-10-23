@@ -31,10 +31,11 @@ try {
   }
   assert.equal(text.includes('Browser Supabase access is unavailable'), true);
   for (const marker of ['__plannixTimetableOperationObserver',
-    '__plannixAuthTestObserver', '__timetablePendingUpdateIds',
+    '__plannixAuthTestObserver', '__timetablePendingUpdateIds', '__recoveryPlanner',
     'profile-gate-terminal', 'deletion-reconcile-terminal',
     'subscription-terminal', 'recovery-verification-terminal',
-    'recovery-verification-disposed',
+    'recovery-verification-disposed', 'recovery-view-mount',
+    'recovery-view-unmount', 'recovery-submit-terminal',
     'save-update-start', 'testCommitIds']) {
     assert.equal(text.includes(marker), false, `Test observer remains in server bundle: ${marker}`);
   }
@@ -56,10 +57,11 @@ try {
   const bearerText = (await Promise.all(bearerAssets.filter(name => name.endsWith('.js'))
     .map(name => readFile(path.join(bearerOutput, 'assets', name), 'utf8')))).join('\n');
   for (const marker of ['__plannixTimetableOperationObserver',
-    '__plannixAuthTestObserver', '__timetablePendingUpdateIds',
+    '__plannixAuthTestObserver', '__timetablePendingUpdateIds', '__recoveryPlanner',
     'profile-gate-terminal', 'deletion-reconcile-terminal',
     'subscription-terminal', 'recovery-verification-terminal',
-    'recovery-verification-disposed',
+    'recovery-verification-disposed', 'recovery-view-mount',
+    'recovery-view-unmount', 'recovery-submit-terminal',
     'save-update-start', 'testCommitIds']) {
     assert.equal(bearerText.includes(marker), false, `Test observer remains in bearer bundle: ${marker}`);
   }

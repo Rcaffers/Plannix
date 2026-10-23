@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { matchPath, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import './App.css';
 import Header from './components/Header';
 import Hero from './components/Hero';
@@ -361,8 +361,12 @@ export default function App() {
       || authController.isCurrentSessionVersion(name, id, generation)}
   />;
 
+  // The reset page must survive App reconciliation after a confirmed password
+  // update. Leaving it rekeys the planner to the current account as usual.
+  const plannerScopeKey = serverManagedAuth && matchPath({ path: '/reset-password', end: true }, location.pathname)
+    ? 'server-recovery' : `${user?.id || 'signed-out'}:${user?.organisationId || 'none'}`;
   return (
-    <AcademicYearProvider key={`${user?.id || 'signed-out'}:${user?.organisationId || 'none'}`} user={user}>
+    <AcademicYearProvider key={plannerScopeKey} user={user}>
       <TimetableLayoutProvider user={user}>
         <ClassProvider user={user}>
           <TimetableSessionProvider user={user}>

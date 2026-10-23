@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { dispatchOpenLoginModal } from '../utils/plannixEvents';
 import { INVALID_RECOVERY_MESSAGE, MAX_PASSWORD_LENGTH, supabaseRecovery, validateRecoveryPasswords } from '../utils/supabaseRecovery';
+import { authTestOperationId, observeAuthTestOperation } from '../utils/serverAuthTestObserver';
 import './ResetPassword.css';
 
 export default function ResetPassword() {
@@ -12,11 +13,14 @@ export default function ResetPassword() {
   const [status, setStatus] = useState('checking');
   const [error, setError] = useState('');
   const verificationRef = useRef(null);
+  const testViewId = useRef(null);
+  if (!testViewId.current) testViewId.current = authTestOperationId();
 
   const isSubmitting = status === 'submitting';
   const isReady = status === 'ready';
 
   useEffect(() => {
+    if (testViewId.current) observeAuthTestOperation({kind:'recovery-view-mount',id:testViewId.current});
     const cleanup = supabaseRecovery.subscribe({
       onReady: () => { setStatus('ready'); setError(''); },
       onInvalid: (message) => { setStatus('invalid'); setError(message);
@@ -25,11 +29,13 @@ export default function ResetPassword() {
         setPassword(''); setConfirm(''); },
     });
     verificationRef.current = cleanup;
-    return () => { verificationRef.current = null; cleanup?.(); };
+    return () => { verificationRef.current = null; cleanup?.();
+      if (testViewId.current) observeAuthTestOperation({kind:'recovery-view-unmount',id:testViewId.current}); };
   }, []);
 
   async function handleSubmit(event) {
     event.preventDefault();
+    const testSubmitId = authTestOperationId();
     setError('');
     const validation = validateRecoveryPasswords(password, confirm);
     if (!isReady || validation) {
@@ -52,9 +58,15 @@ export default function ResetPassword() {
     setPassword('');
     setConfirm('');
     setStatus('done');
-    if (outcome?.sessionChanged) return;
+    if (outcome?.sessionChanged) {
+      if (testSubmitId) observeAuthTestOperation({kind:'recovery-submit-terminal',
+        id:testSubmitId,viewId:testViewId.current,outcome:'confirmed-session-changed'});
+      return;
+    }
     navigate('/', { replace: true });
     dispatchOpenLoginModal();
+    if (testSubmitId) observeAuthTestOperation({kind:'recovery-submit-terminal',
+      id:testSubmitId,viewId:testViewId.current,outcome:'confirmed'});
   }
 
   return (
