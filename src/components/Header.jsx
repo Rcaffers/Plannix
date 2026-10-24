@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   getLoginValidationError,
   getSignupValidationError,
@@ -9,6 +9,7 @@ import {
   signupSuccessMessage,
 } from '../utils/authForms';
 import { supabaseRecovery } from '../utils/supabaseRecovery';
+import { serverManagedAuth } from '../utils/serverAuthTransport';
 import { headerNavLinks } from '../utils/headerNav';
 import { SETTINGS_SUBNAV_ITEMS } from './SettingsSubnav';
 import { PLANNIX_OPEN_LOGIN_EVENT, PLANNIX_OPEN_SIGNUP_EVENT } from '../utils/plannixEvents';
@@ -28,6 +29,7 @@ export default function Header({
   onSignup,
 }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isSignupOpen, setIsSignupOpen] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
@@ -181,6 +183,12 @@ export default function Header({
 
   const openLoginRef = useRef(openLogin);
   openLoginRef.current = openLogin;
+
+  useEffect(() => {
+    if (!serverManagedAuth || location.pathname !== '/' || location.state?.plannixOpenLogin !== true) return;
+    openLoginRef.current();
+    navigate('/', { replace: true, state: null });
+  }, [location.pathname, location.state, navigate]);
 
   useEffect(() => {
     const onGlobalOpenSignup = () => {

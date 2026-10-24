@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { dispatchOpenLoginModal } from '../utils/plannixEvents';
 import { INVALID_RECOVERY_MESSAGE, MAX_PASSWORD_LENGTH, supabaseRecovery, validateRecoveryPasswords } from '../utils/supabaseRecovery';
+import { serverManagedAuth } from '../utils/serverAuthTransport';
 import { authTestOperationId, observeAuthTestOperation } from '../utils/serverAuthTestObserver';
+import '../components/Header.css';
 import './ResetPassword.css';
 
 export default function ResetPassword() {
@@ -15,6 +17,8 @@ export default function ResetPassword() {
   const verificationRef = useRef(null);
   const submissionPendingRef = useRef(false);
   const submissionContextChangedRef = useRef(false);
+  const confirmedServerResetRef = useRef(false);
+  const successButtonRef = useRef(null);
   const testViewId = useRef(null);
   if (!testViewId.current) testViewId.current = authTestOperationId();
 
@@ -24,16 +28,19 @@ export default function ResetPassword() {
   useEffect(() => {
     if (testViewId.current) observeAuthTestOperation({kind:'recovery-view-mount',id:testViewId.current});
     const cleanup = supabaseRecovery.subscribe({
-      onReady: () => { if (submissionPendingRef.current) {
+      onReady: () => { if (confirmedServerResetRef.current) return;
+        if (submissionPendingRef.current) {
         submissionContextChangedRef.current = true; return;
       }
         setStatus('ready'); setError(''); },
-      onInvalid: (message) => { if (submissionPendingRef.current) {
+      onInvalid: (message) => { if (confirmedServerResetRef.current) return;
+        if (submissionPendingRef.current) {
         submissionContextChangedRef.current = true; return;
       }
         setStatus('invalid'); setError(message);
         setPassword(''); setConfirm(''); },
-      onUnavailable: () => { if (submissionPendingRef.current) {
+      onUnavailable: () => { if (confirmedServerResetRef.current) return;
+        if (submissionPendingRef.current) {
         submissionContextChangedRef.current = true; return;
       }
         setStatus('verification-unavailable'); setError('');
@@ -43,6 +50,36 @@ export default function ResetPassword() {
     return () => { verificationRef.current = null; cleanup?.();
       if (testViewId.current) observeAuthTestOperation({kind:'recovery-view-unmount',id:testViewId.current}); };
   }, []);
+
+  useEffect(() => {
+    if (!serverManagedAuth || status !== 'done') return undefined;
+    const button = successButtonRef.current;
+    const cookieDialogOpen = () => Boolean(document.querySelector('.cookie-consent-backdrop'));
+    const focusButton = () => { if (!cookieDialogOpen()) button?.focus(); };
+    const keepDialogFocus = (event) => {
+      if (!cookieDialogOpen() && event.target !== button) button?.focus();
+    };
+    const keepFocus = (event) => {
+      if (cookieDialogOpen()) return;
+      if (event.key === 'Tab' || event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        button?.focus();
+      }
+    };
+    const cookieObserver = new MutationObserver(() => {
+      if (!cookieDialogOpen()) { cookieObserver.disconnect(); focusButton(); }
+    });
+    if (cookieDialogOpen()) cookieObserver.observe(document.body, { childList: true, subtree: true });
+    document.addEventListener('focusin', keepDialogFocus, true);
+    document.addEventListener('keydown', keepFocus, true);
+    focusButton();
+    return () => {
+      cookieObserver.disconnect();
+      document.removeEventListener('focusin', keepDialogFocus, true);
+      document.removeEventListener('keydown', keepFocus, true);
+    };
+  }, [status]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -77,7 +114,14 @@ export default function ResetPassword() {
     submissionPendingRef.current = false;
     setPassword('');
     setConfirm('');
+    if (serverManagedAuth) confirmedServerResetRef.current = true;
     setStatus('done');
+    if (serverManagedAuth) {
+      if (testSubmitId) observeAuthTestOperation({kind:'recovery-submit-terminal',
+        id:testSubmitId,viewId:testViewId.current,
+        outcome:outcome?.sessionChanged ? 'confirmed-session-changed' : 'confirmed'});
+      return;
+    }
     if (outcome?.sessionChanged) {
       if (testSubmitId) observeAuthTestOperation({kind:'recovery-submit-terminal',
         id:testSubmitId,viewId:testViewId.current,outcome:'confirmed-session-changed'});
@@ -98,7 +142,26 @@ export default function ResetPassword() {
           Reset password
         </p>
 
-        {status === 'done' ? (
+        {status === 'done' && serverManagedAuth ? (
+          <div className="login-modal-backdrop">
+            <section className="login-modal reset-password-success-modal" role="dialog"
+              aria-modal="true" aria-labelledby="reset-password-success-title"
+              aria-describedby="reset-password-success-message">
+              <h2 id="reset-password-success-title">Password reset successful</h2>
+              <p id="reset-password-success-message" className="login-forgot-lead">
+                Your password has been updated. Sign in with your new password to continue.
+              </p>
+              <div className="login-form">
+                <button ref={successButtonRef} type="button" className="login-submit"
+                  onClick={() => {
+                    navigate('/', { replace: true, state: { plannixOpenLogin: true } });
+                  }}>
+                  Go to login
+                </button>
+              </div>
+            </section>
+          </div>
+        ) : status === 'done' ? (
           <div className="reset-password-card reset-password-card--success">
             <p className="visually-hidden" role="status">Password updated</p>
             <h1 className="reset-password-title">Password reset</h1>

@@ -319,8 +319,8 @@ try {
       'one password request reached guard');
     await waitUntil(()=>Promise.resolve(providerUpdates===(order==='form-first'?1:2)),
       'one password provider update');
-    await waitUntil(()=>evaluate("location.pathname==='/'"),
-      'confirmed password response completed form success handling');
+    await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-success-modal'))"),
+      'confirmed password response displayed success modal');
     await waitUntil(()=>evaluate(`window.__authTestOperations.some(e=>
       e.kind==='recovery-submit-terminal'&&e.viewId===${JSON.stringify(viewId)}
       &&e.outcome==='confirmed')`),'confirmed reset handler completed');
@@ -331,6 +331,11 @@ try {
       'post-success reconciliation cannot show the invalid-link view');
     assert.equal(passwordPosts,before+1,'one password POST per form submission');
     assert.equal(await evaluate("document.querySelector('.reset-password-message--error')===null"),true);
+    assert.equal(await evaluate("location.pathname==='/reset-password'"),true,
+      'confirmed server reset does not navigate automatically');
+    await evaluate("document.querySelector('.reset-password-success-modal button').click()");
+    await waitUntil(()=>evaluate("location.pathname==='/' && Boolean(document.querySelector('#login-modal-title'))"),
+      'success modal button opens the existing Home/login flow');
   }
   current={number:10,value:'j'.repeat(43)};
   failNextFormStatus=1;
@@ -433,7 +438,7 @@ try {
     'cross-tab change processed before response release');
   const releasePassword=heldPasswordResponse;
   heldPasswordResponse=null;holdPasswordResponse=false;releasePassword();
-  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-card--success'))"),
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-success-modal'))"),
     'confirmed 204 remains a success after session change');
   assert.equal(await evaluate("location.pathname==='/reset-password'"),true,
     'old recovery completion does not redirect a newer context');
@@ -466,7 +471,7 @@ try {
   await waitUntil(()=>evaluate(`window.__authTestOperations.some(e=>
     e.kind==='recovery-submit-terminal'&&e.viewId===${JSON.stringify(changingViewId)}
     &&e.outcome==='confirmed-session-changed')`),'successful reset handler finished before App adoption');
-  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-card--success'))"),
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-success-modal'))"),
     'confirmed reset success rendered before App adoption');
   release(false);
   await waitUntil(()=>evaluate(`window.__authTestOperations.some(e=>
@@ -476,7 +481,7 @@ try {
     'changed account committed to the real App header');
   assert.equal(passwordPosts,beforeChangingPassword+1,'account change cannot repeat password POST');
   assert.equal(providerUpdates,beforeChangingProvider+1,'account change cannot repeat provider update');
-  const postAdoption=await evaluate(`({success:Boolean(document.querySelector('.reset-password-card--success')),
+  const postAdoption=await evaluate(`({success:Boolean(document.querySelector('.reset-password-success-modal')),
     oldViewUnmounted:window.__authTestOperations.some(e=>
       e.kind==='recovery-view-unmount'&&e.id===${JSON.stringify(changingViewId)}),
     invalid:document.body.textContent.includes('This reset link is missing or invalid')})`);
@@ -631,15 +636,48 @@ try {
   await waitUntil(()=>evaluate(`window.__authTestOperations.filter(e=>
     e.kind==='subscription-terminal').slice(${beforeSuccess.subscriptions})
     .some(e=>e.outcome==='signed-out')`),'post-reset App subscriber signed-out decision');
-  await waitUntil(()=>evaluate("location.pathname==='/'"),'intentional Home/login navigation');
-  await waitUntil(()=>evaluate(`window.__authTestOperations.some(e=>
-    e.kind==='recovery-view-unmount'&&e.id===${JSON.stringify(successViewId)})`),
-    'confirmed reset view unmounted after Home navigation');
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-success-modal'))"),
+    'confirmed 204 success modal committed');
+  assert.equal(await evaluate("location.pathname==='/reset-password'"),true,
+    'confirmed reset remains on the reset route until Go to login');
+  assert.equal(await evaluate(`!window.__authTestOperations.some(e=>
+    e.kind==='recovery-view-unmount'&&e.id===${JSON.stringify(successViewId)})`),true,
+    'App reconciliation does not unmount the success modal');
+  await evaluate("document.querySelector('.cookie-consent-reject')?.click()");
+  await waitUntil(()=>evaluate("!document.querySelector('.cookie-consent-backdrop')"),
+    'existing cookie-consent dialog closed before success-modal focus check');
+  await waitUntil(()=>evaluate("document.activeElement===document.querySelector('.reset-password-success-modal button')"),
+    'success modal action receives focus');
+  assert.deepEqual(await evaluate(`(() => {
+    const dialog=document.querySelector('.reset-password-success-modal');
+    const button=dialog?.querySelector('button');
+    return {role:dialog?.getAttribute('role'),modal:dialog?.getAttribute('aria-modal'),
+      title:dialog?.querySelector('h2')?.textContent,
+      message:dialog?.querySelector('#reset-password-success-message')?.textContent.trim(),
+      button:button?.textContent.trim(),focused:document.activeElement===button,
+      passwordFields:document.querySelectorAll('.reset-password-form input').length};
+  })()`),{role:'dialog',modal:'true',title:'Password reset successful',
+    message:'Your password has been updated. Sign in with your new password to continue.',
+    button:'Go to login',focused:true,passwordFields:0});
+  await evaluate(`(() => {
+    const button=document.querySelector('.reset-password-success-modal button');
+    button.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));
+    button.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+  })()`);
+  assert.equal(await evaluate("location.pathname==='/reset-password' && document.activeElement===document.querySelector('.reset-password-success-modal button')"),true,
+    'Tab and Escape do not dismiss or escape the success modal');
   const completeMessages=await evaluate("window.__recoveryMessageObserver.disconnect();window.__recoveryMessageTrace");
   assert.equal(completeMessages.some(entry=>entry.invalid||entry.uncertain||entry.error),false,
     'confirmed 204 cannot show a transient invalid or uncertain message');
-  assert.equal(passwordPosts,beforeSuccess.posts+1,'one password POST through Home navigation');
-  assert.equal(providerUpdates,beforeSuccess.updates+1,'one provider update through Home navigation');
+  assert.equal(passwordPosts,beforeSuccess.posts+1,'one password POST before modal action');
+  assert.equal(providerUpdates,beforeSuccess.updates+1,'one provider update before modal action');
+  await evaluate("document.querySelector('.reset-password-success-modal button').click()");
+  await waitUntil(()=>evaluate("location.pathname==='/' && Boolean(document.querySelector('#login-modal-title'))"),
+    'Go to login performs the existing Home/login navigation');
+  await waitUntil(()=>evaluate(`window.__authTestOperations.some(e=>
+    e.kind==='recovery-view-unmount'&&e.id===${JSON.stringify(successViewId)})`),
+    'success view unmounted after explicit navigation');
+  assert.equal(passwordPosts,beforeSuccess.posts+1,'modal action does not resubmit password');
   current={number:25,value:'u'.repeat(43)};
   await loadRecovery();
   await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-form button') && !document.querySelector('.reset-password-form button').disabled)"),
@@ -676,7 +714,7 @@ try {
     e.kind==='recovery-submit-terminal'&&e.viewId===${JSON.stringify(concurrentViewId)}
     &&e.outcome==='confirmed-session-changed')`),
     'confirmed 204 handled after concurrent invalidation');
-  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-card--success'))"),
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-success-modal'))"),
     'confirmed success remains visible without redirecting changed context');
   const concurrentWarnings=await evaluate("window.__heldRecoveryObserver.disconnect();window.__heldRecoveryWarnings");
   assert.equal(concurrentWarnings.some(entry=>entry.invalid||entry.uncertain),false,
