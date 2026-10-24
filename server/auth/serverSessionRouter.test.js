@@ -271,6 +271,41 @@ test('recovery diagnostics distinguish preflight, provider, revocation and respo
   }
 });
 
+test('recovery provider substages share the request ID and reject unlisted diagnostic data',async()=>{
+  const identity=fakeIdentity(),lines=[];
+  identity.updateRecoveryPassword=async({onDiagnostic})=>{
+    onDiagnostic('user_validation','started');
+    onDiagnostic('user_validation','succeeded');
+    onDiagnostic('session_setup_or_refresh','started');
+    onDiagnostic('session_setup_or_refresh','succeeded');
+    onDiagnostic('password_update','started');
+    onDiagnostic('password_update','failed','private-provider-code');
+    onDiagnostic('private-substage','failed','same_password');
+    throw Error('private-provider-response');
+  };
+  const ctx=await fixture({identity,recoveryDiagnosticsEnabled:true,
+    recoveryDiagnosticWrite:line=>lines.push(line)});
+  try {
+    const ready=await readyRecovery(ctx);
+    const result=await ctx.request('/recovery/password',{method:'POST',
+      cookie:ready.cookie,csrf:ready.csrf,body:{password:'private-synthetic-password'}});
+    assert.equal(result.status,503);
+    const records=lines.map(JSON.parse);
+    assert(records.every(record=>record.correlationId===result.recoveryDiagnosticId));
+    assert.deepEqual(records.filter(record=>record.substage).map(record=>({
+      substage:record.substage,outcome:record.outcome,category:record.category})),[
+      {substage:'user_validation',outcome:'started',category:undefined},
+      {substage:'user_validation',outcome:'succeeded',category:undefined},
+      {substage:'session_setup_or_refresh',outcome:'started',category:undefined},
+      {substage:'session_setup_or_refresh',outcome:'succeeded',category:undefined},
+      {substage:'password_update',outcome:'started',category:undefined},
+      {substage:'password_update',outcome:'failed',category:'generic'},
+    ]);
+    assert.doesNotMatch(lines.join(''),/private|synthetic|provider-response/);
+    assert.equal(ctx.repository.current()?.cookie,ready.cookie.split('; ')[1]);
+  } finally { await ctx.close(); }
+});
+
 test('recovery diagnostics default off and failing writers cannot alter reset',async()=>{
   for (const settings of [
     {recoveryDiagnosticWrite:()=>{throw Error('private-log-error');}},

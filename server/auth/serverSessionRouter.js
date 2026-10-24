@@ -99,11 +99,21 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     const stages = new Set(['preflight','provider','revoke','response']);
     const outcomes = new Set(['started','succeeded','failed','revoked','not_revoked',
       'attempted','finished','closed_before_finish']);
-    return (stage, outcome) => {
+    const providerSubstages = new Set(['user_validation','session_setup_or_refresh',
+      'password_update']);
+    const providerCategories = new Set(['same_password','weak_password','generic']);
+    return (stage, outcome, detail) => {
       if (!stages.has(stage) || !outcomes.has(outcome)) return;
       try {
-        const record = JSON.stringify({ correlationId, stage, outcome });
-        Promise.resolve(recoveryDiagnosticWrite(record)).catch(() => {});
+        const record = { correlationId, stage, outcome };
+        if (detail) {
+          if (stage !== 'provider' || !providerSubstages.has(detail.substage)
+            || !['started','succeeded','failed'].includes(outcome)) return;
+          record.substage = detail.substage;
+          if (outcome === 'failed') record.category = providerCategories.has(detail.category)
+            ? detail.category : 'generic';
+        }
+        Promise.resolve(recoveryDiagnosticWrite(JSON.stringify(record))).catch(() => {});
       } catch { /* Diagnostics must not change password-reset results. */ }
     };
   }
@@ -506,7 +516,9 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     diagnostic('provider','started');
     try {
       await deadline(identity.updateRecoveryPassword({ accessToken:tokens.accessToken,
-        refreshToken:tokens.refreshToken,password:req.body.password,expectedUserId:tokens.ownerId }));
+        refreshToken:tokens.refreshToken,password:req.body.password,expectedUserId:tokens.ownerId,
+        ...(recoveryDiagnosticsEnabled ? {onDiagnostic:(substage,outcome,category) =>
+          diagnostic('provider',outcome,{substage,category})} : {}) }));
       diagnostic('provider','succeeded');
     } catch(error) { diagnostic('provider','failed'); throw error; }
     diagnostic('revoke','started');

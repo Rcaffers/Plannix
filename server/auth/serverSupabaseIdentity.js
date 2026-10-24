@@ -10,6 +10,30 @@ const credentialsError = () => Object.assign(new Error('Credentials were not acc
   { kind: 'credentials' });
 const passwordError = () => Object.assign(new Error('Password was not accepted.'),
   { kind: 'password' });
+const recoveryErrorCategory = error =>
+  error?.code === 'same_password' || error?.code === 'weak_password'
+    ? error.code : 'generic';
+
+function observeRecoveryStep(observer, substage, outcome, error) {
+  if (typeof observer !== 'function') return;
+  try {
+    Promise.resolve(observer(substage, outcome,
+      outcome === 'failed' ? recoveryErrorCategory(error) : undefined)).catch(() => {});
+  } catch { /* Diagnostics cannot change an identity operation. */ }
+}
+
+async function recoveryStep(observer, substage, operation, accepts) {
+  observeRecoveryStep(observer, substage, 'started');
+  let result;
+  try { result = await operation(); }
+  catch (error) { observeRecoveryStep(observer, substage, 'failed', error); throw error; }
+  if (!accepts(result)) {
+    observeRecoveryStep(observer, substage, 'failed', result?.error);
+    throw timeoutError();
+  }
+  observeRecoveryStep(observer, substage, 'succeeded');
+  return result;
+}
 
 export function createServerSupabaseIdentity({ url, publishableKey, secretKey,
   createClientImpl = createClient, fetchImpl = globalThis.fetch, timeoutMs = 7000 } = {}) {
@@ -189,14 +213,19 @@ export function createServerSupabaseIdentity({ url, publishableKey, secretKey,
         || !result.data?.user?.email_confirmed_at) throw timeoutError();
       return { userId: expectedUserId, email: result.data.user.email };
     },
-    async updateRecoveryPassword({ accessToken, refreshToken, password, expectedUserId }) {
+    async updateRecoveryPassword({ accessToken, refreshToken, password, expectedUserId,
+      onDiagnostic }) {
       const scoped = client();
-      const verified = await scoped.auth.getUser(accessToken);
-      if (verified.error || verified.data?.user?.id !== expectedUserId) throw timeoutError();
-      const loaded = await scoped.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
-      if (loaded.error || loaded.data?.user?.id && loaded.data.user.id !== expectedUserId) throw timeoutError();
-      const result = await scoped.auth.updateUser({ password });
-      if (result.error || result.data?.user?.id !== expectedUserId) throw timeoutError();
+      await recoveryStep(onDiagnostic, 'user_validation',
+        () => scoped.auth.getUser(accessToken),
+        result => Boolean(result) && !result.error && result.data?.user?.id === expectedUserId);
+      await recoveryStep(onDiagnostic, 'session_setup_or_refresh',
+        () => scoped.auth.setSession({ access_token: accessToken, refresh_token: refreshToken }),
+        result => Boolean(result) && !result.error && (!result.data?.user?.id
+          || result.data.user.id === expectedUserId));
+      await recoveryStep(onDiagnostic, 'password_update',
+        () => scoped.auth.updateUser({ password }),
+        result => Boolean(result) && !result.error && result.data?.user?.id === expectedUserId);
       return { updated: true };
     },
     async deleteAccount({ userId, email, password }) {
