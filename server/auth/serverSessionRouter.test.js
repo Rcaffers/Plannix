@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { createServerSessionTestApp } from './serverSessionTestApp.js';
+import { observeRecoveryResponse } from './serverSessionRouter.js';
 
 const ownerA = 'dd000000-0000-4000-8000-000000000011';
 const ownerB = 'dd000000-0000-4000-8000-000000000012';
@@ -148,7 +150,8 @@ function fakeIdentity() {
 }
 
 async function fixture({identity=fakeIdentity(),repository=fakeRepository(),providerDeadlineMs=1000,
-  callbackDiagnosticsEnabled=false,callbackDiagnosticWrite}={}) {
+  callbackDiagnosticsEnabled=false,callbackDiagnosticWrite,
+  recoveryDiagnosticsEnabled=false,recoveryDiagnosticWrite,recoveryDiagnosticIdFactory}={}) {
   const portServer=createServer().listen(0,'localhost');
   await new Promise(resolve=>portServer.once('listening',resolve));
   const port=portServer.address().port;
@@ -156,7 +159,8 @@ async function fixture({identity=fakeIdentity(),repository=fakeRepository(),prov
   const origin=`http://localhost:${port}`;
   const app=createServerSessionTestApp({identity,repository,origin,
     csrfKey:Buffer.alloc(32,1),providerDeadlineMs,
-    callbackDiagnosticsEnabled,callbackDiagnosticWrite});
+    callbackDiagnosticsEnabled,callbackDiagnosticWrite,
+    recoveryDiagnosticsEnabled,recoveryDiagnosticWrite,recoveryDiagnosticIdFactory});
   const server=app.listen(port,'localhost');
   await new Promise(resolve=>server.once('listening',resolve));
   async function request(path,{method='GET',body,cookie,csrf,originHeader=origin,headers={},absolute=false}={}) {
@@ -172,10 +176,152 @@ async function fixture({identity=fakeIdentity(),repository=fakeRepository(),prov
       cookies:response.headers.getSetCookie(),location:response.headers.get('location'),
       cache:response.headers.get('cache-control'),
       recoveryOutcome:response.headers.get('x-plannix-recovery-outcome'),
-      diagnosticId:response.headers.get('x-plannix-callback-diagnostic-id')};
+      diagnosticId:response.headers.get('x-plannix-callback-diagnostic-id'),
+      recoveryDiagnosticId:response.headers.get('x-plannix-recovery-diagnostic-id')};
   }
   return {request,repository,identity,origin,close:()=>new Promise(resolve=>server.close(resolve))};
 }
+
+async function readyRecovery(ctx) {
+  const boot=await ctx.request('/bootstrap');
+  const started=await ctx.request('/recover',{method:'POST',cookie:marker,
+    csrf:boot.body.csrfToken,body:{email:'synthetic@example.test'}});
+  assert.equal(started.status,200);
+  const destination=new URL(ctx.identity.calls.find(item=>item[0]==='recover')[1]);
+  const confirmed=await ctx.request(`/callback?state=${destination.searchParams.get('state')}`
+    + `&kind=recovery&sb_flow_id=${flowId}&code=synthetic-code`,
+  {cookie:marker,originHeader:null});
+  assert.equal(confirmed.status,303);
+  const cookie=`${marker}; ${confirmed.cookies[0].split(';')[0]}`;
+  const status=await ctx.request('/status',{cookie});
+  assert.equal(status.body.recovery,true);
+  return {cookie,csrf:status.body.csrfToken};
+}
+
+test('recovery response observer distinguishes finish, early close and later close',()=>{
+  for (const [events, expected] of [
+    [['finish'],'finished'],
+    [['close'],'closed_before_finish'],
+    [['finish','close'],'finished'],
+    [['close','finish'],'closed_before_finish'],
+  ]) {
+    const res=new EventEmitter(),records=[];
+    const stop=observeRecoveryResponse(res,(stage,outcome)=>records.push([stage,outcome]));
+    assert.equal(res.listenerCount('finish'),1);
+    assert.equal(res.listenerCount('close'),1);
+    for (const event of events) res.emit(event);
+    assert.deepEqual(records,[['response',expected]]);
+    assert.equal(res.listenerCount('finish'),0);
+    assert.equal(res.listenerCount('close'),0);
+    stop();
+    assert.deepEqual(records,[['response',expected]]);
+  }
+});
+
+test('recovery response observer suppresses handler and registration failures',()=>{
+  const res=new EventEmitter();
+  observeRecoveryResponse(res,()=>{ throw Error('private-observer-error'); });
+  assert.doesNotThrow(()=>{res.emit('finish');res.emit('close');});
+  const broken=new EventEmitter();
+  broken.once=()=>{throw Error('private-registration-error');};
+  assert.doesNotThrow(()=>observeRecoveryResponse(broken,()=>{}));
+  assert.equal(broken.listenerCount('finish'),0);
+  assert.equal(broken.listenerCount('close'),0);
+});
+
+test('recovery diagnostics distinguish preflight, provider, revocation and response without private data',async()=>{
+  const cases=[
+    {stage:'preflight',override:(identity,repository)=>{
+      repository.readTokens=async()=>{throw Error('private-token-error');}; },status:503},
+    {stage:'provider',override:identity=>{
+      identity.updateRecoveryPassword=async()=>{throw Error('private-provider-error');}; },status:503},
+    {stage:'revoke',override:(identity,repository)=>{
+      repository.logout=async()=>{throw Error('private-database-error');}; },status:503},
+    {stage:'response',override:(identity,repository)=>{
+      repository.logout=async()=>({state:'absent'}); },status:204,notRevoked:true},
+    {stage:'response',override:()=>{},status:204},
+  ];
+  for (const item of cases) {
+    const identity=fakeIdentity(),repository=fakeRepository(),lines=[];
+    const ctx=await fixture({identity,repository,recoveryDiagnosticsEnabled:true,
+      recoveryDiagnosticWrite:line=>lines.push(line)});
+    try {
+      const ready=await readyRecovery(ctx);
+      item.override(identity,repository);
+      let providerInvocations=0;
+      const update=identity.updateRecoveryPassword;
+      identity.updateRecoveryPassword=async args=>{ providerInvocations+=1; return update(args); };
+      const result=await ctx.request('/recovery/password',{method:'POST',
+        cookie:ready.cookie,csrf:ready.csrf,body:{password:'private-synthetic-password'}});
+      assert.equal(result.status,item.status);
+      assert.match(result.recoveryDiagnosticId,/^[0-9a-f-]{36}$/);
+      const records=lines.map(JSON.parse);
+      assert(records.length>0);
+      assert(records.every(record=>record.correlationId===result.recoveryDiagnosticId));
+      assert(records.every(record=>Object.keys(record).sort().join(',')==='correlationId,outcome,stage'));
+      assert.equal(records.at(-1).stage,item.stage);
+      assert.equal(records.at(-1).outcome,item.stage==='response'?'finished':'failed');
+      if (item.stage==='response') assert.deepEqual(records.filter(record=>record.stage==='response')
+        .map(record=>record.outcome),['attempted','finished']);
+      if (item.notRevoked) assert(records.some(record=>record.stage==='revoke'
+        && record.outcome==='not_revoked'));
+      assert.doesNotMatch(lines.join(''),/private|synthetic|password|token|database|provider-error/);
+      assert.equal(providerInvocations,item.stage==='preflight'?0:1);
+    } finally { await ctx.close(); }
+  }
+});
+
+test('recovery diagnostics default off and failing writers cannot alter reset',async()=>{
+  for (const settings of [
+    {recoveryDiagnosticWrite:()=>{throw Error('private-log-error');}},
+    {recoveryDiagnosticsEnabled:true,recoveryDiagnosticWrite:()=>{throw Error('private-log-error');}},
+    {recoveryDiagnosticsEnabled:true,
+      recoveryDiagnosticWrite:()=>Promise.reject(Error('private-log-error'))},
+  ]) {
+    const ctx=await fixture(settings);
+    try {
+      const ready=await readyRecovery(ctx);
+      const result=await ctx.request('/recovery/password',{method:'POST',
+        cookie:ready.cookie,csrf:ready.csrf,body:{password:'private-synthetic-password'}});
+      assert.equal(result.status,204);
+      assert.equal(ctx.identity.calls.filter(call=>call[0]==='update-password').length,1);
+      assert.equal(result.recoveryDiagnosticId===null,!settings.recoveryDiagnosticsEnabled);
+      await new Promise(resolve=>setImmediate(resolve));
+    } finally { await ctx.close(); }
+  }
+  const identity=fakeIdentity();
+  identity.updateRecoveryPassword=async()=>{ throw Error('private-provider-error'); };
+  const failed=await fixture({identity,recoveryDiagnosticsEnabled:true,
+    recoveryDiagnosticWrite:()=>{ throw Error('private-log-error'); }});
+  try {
+    const ready=await readyRecovery(failed);
+    const result=await failed.request('/recovery/password',{method:'POST',
+      cookie:ready.cookie,csrf:ready.csrf,body:{password:'private-synthetic-password'}});
+    assert.equal(result.status,503);
+    assert.deepEqual(result.body,{message:'Authentication service is temporarily unavailable.'});
+    assert.equal(failed.repository.current()?.cookie,ready.cookie.split('; ')[1]);
+  } finally { await failed.close(); }
+});
+
+test('recovery diagnostic ID generation failure leaves the password operation unchanged',async()=>{
+  const lines=[];
+  for (const recoveryDiagnosticIdFactory of [
+    () => {throw Error('private-id-error');},
+    () => 'private-invalid-id',
+  ]) {
+    const ctx=await fixture({recoveryDiagnosticsEnabled:true,recoveryDiagnosticIdFactory,
+      recoveryDiagnosticWrite:line=>lines.push(line)});
+    try {
+      const ready=await readyRecovery(ctx);
+      const result=await ctx.request('/recovery/password',{method:'POST',
+        cookie:ready.cookie,csrf:ready.csrf,body:{password:'private-synthetic-password'}});
+      assert.equal(result.status,204);
+      assert.equal(result.recoveryDiagnosticId,null);
+      assert.equal(ctx.identity.calls.filter(call=>call[0]==='update-password').length,1);
+    } finally { await ctx.close(); }
+  }
+  assert.deepEqual(lines,[]);
+});
 
 test('callback diagnostics default off and classify query shape without values',async()=>{
   const disabled=[];

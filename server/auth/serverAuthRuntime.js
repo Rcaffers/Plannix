@@ -53,6 +53,7 @@ export function createServerAuthRuntime({ config = env, environment = process.en
     csrfKey: csrfKey(config.serverAuthCsrfKey),
     limiter: { check: (...args) => measureAuth('auth.limiter', () => limiter.check(...args)) },
     callbackDiagnosticsEnabled: config.serverAuthCallbackDiagnosticsEnabled === true,
+    recoveryDiagnosticsEnabled: config.serverAuthRecoveryDiagnosticsEnabled === true,
     requireLogoutVersion: true };
   const sessionGuard = createRequireServerSession(options);
   return Object.freeze({

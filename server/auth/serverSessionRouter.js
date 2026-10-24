@@ -24,10 +24,42 @@ function callbackQueryReason(pairs) {
   return 'invalid_format';
 }
 
+// The response lifecycle is observed only when recovery diagnostics are enabled.
+// `finish` means Node handed the response off, not that a client received it.
+export function observeRecoveryResponse(res, diagnostic) {
+  let terminal = false;
+  const detach = () => {
+    try {
+      res.off('finish', onFinish);
+      res.off('close', onClose);
+    } catch { /* Observation must not affect the response. */ }
+  };
+  const settle = outcome => {
+    if (terminal) return;
+    terminal = true;
+    detach();
+    try { diagnostic('response', outcome); }
+    catch { /* Observation must not affect the response. */ }
+  };
+  const onFinish = () => settle('finished');
+  const onClose = () => settle('closed_before_finish');
+  try {
+    res.once('finish', onFinish);
+    res.once('close', onClose);
+  } catch {
+    terminal = true;
+    detach();
+  }
+  return () => { terminal = true; detach(); };
+}
+
 export function createServerSessionRouter({ repository, identity, origin, csrfKey,
   limiter, providerDeadlineMs = 8000, requireLogoutVersion = false,
   callbackDiagnosticsEnabled = false,
-  callbackDiagnosticWrite = line => process.stdout.write(`${line}\n`) } = {}) {
+  callbackDiagnosticWrite = line => process.stdout.write(`${line}\n`),
+  recoveryDiagnosticsEnabled = false,
+  recoveryDiagnosticWrite = line => process.stdout.write(`${line}\n`),
+  recoveryDiagnosticIdFactory = randomUUID } = {}) {
   let target;
   try { target = new URL(origin); } catch { throw new Error('Exact application origin required.'); }
   if (!['https:', 'http:'].includes(target.protocol) || target.username || target.password
@@ -53,6 +85,26 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
         const record = { correlationId, outcome, reason };
         Promise.resolve(callbackDiagnosticWrite(JSON.stringify(record))).catch(() => {});
       } catch { /* Diagnostics must not change callback results. */ }
+    };
+  }
+
+  function recoveryDiagnostic(res) {
+    if (!recoveryDiagnosticsEnabled) return () => {};
+    let correlationId;
+    try {
+      correlationId = recoveryDiagnosticIdFactory();
+      if (typeof correlationId !== 'string' || !UUID.test(correlationId)) return () => {};
+      res.set('X-Plannix-Recovery-Diagnostic-ID', correlationId);
+    } catch { return () => {}; }
+    const stages = new Set(['preflight','provider','revoke','response']);
+    const outcomes = new Set(['started','succeeded','failed','revoked','not_revoked',
+      'attempted','finished','closed_before_finish']);
+    return (stage, outcome) => {
+      if (!stages.has(stage) || !outcomes.has(outcome)) return;
+      try {
+        const record = JSON.stringify({ correlationId, stage, outcome });
+        Promise.resolve(recoveryDiagnosticWrite(record)).catch(() => {});
+      } catch { /* Diagnostics must not change password-reset results. */ }
     };
   }
 
@@ -428,8 +480,13 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
   }));
 
   router.post('/recovery/password',wrap(async(req,res) => {
+    const diagnostic = recoveryDiagnostic(res);
+    diagnostic('preflight','started');
     if (!only(req.body,['password']) || typeof req.body.password!=='string'
-      || req.body.password.length<8 || req.body.password.length>128) throw fail(400,'Authentication request is invalid.');
+      || req.body.password.length<8 || req.body.password.length>128) {
+      diagnostic('preflight','failed');
+      throw fail(400,'Authentication request is invalid.');
+    }
     let tokens;
     let chosen;
     try {
@@ -439,16 +496,31 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
       verifyCsrf(req,chosen.header);
       tokens = await repository.readTokens(chosen.header,'recovery');
       if (tokens.state!=='current') throw fail(401,'Recovery session is required.');
+      diagnostic('preflight','succeeded');
     } catch(error) {
+      diagnostic('preflight','failed');
       if ([401,403,409].includes(error?.status))
         res.set('X-Plannix-Recovery-Outcome','invalid-session');
       throw error;
     }
-    await deadline(identity.updateRecoveryPassword({ accessToken:tokens.accessToken,
-      refreshToken:tokens.refreshToken,password:req.body.password,expectedUserId:tokens.ownerId }));
-    const loggedOut = await repository.logout(chosen.header);
+    diagnostic('provider','started');
+    try {
+      await deadline(identity.updateRecoveryPassword({ accessToken:tokens.accessToken,
+        refreshToken:tokens.refreshToken,password:req.body.password,expectedUserId:tokens.ownerId }));
+      diagnostic('provider','succeeded');
+    } catch(error) { diagnostic('provider','failed'); throw error; }
+    diagnostic('revoke','started');
+    let loggedOut;
+    try {
+      loggedOut = await repository.logout(chosen.header);
+      diagnostic('revoke',loggedOut.state==='revoked'?'revoked':'not_revoked');
+    } catch(error) { diagnostic('revoke','failed'); throw error; }
     cleanup(res,[loggedOut.cleanup].filter(Boolean));
-    return res.status(204).end();
+    const stopObserving = recoveryDiagnosticsEnabled
+      ? observeRecoveryResponse(res, diagnostic) : () => {};
+    diagnostic('response','attempted');
+    try { return res.status(204).end(); }
+    catch(error) { stopObserving(); throw error; }
   }));
 
   router.post('/refresh',wrap(async(req,res) => {
