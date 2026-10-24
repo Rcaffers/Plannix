@@ -398,7 +398,7 @@ try {
   const beforeStale=passwordPosts;
   await submit();
   await waitUntil(()=>Promise.resolve(passwordPosts===beforeStale+1),'stale request reached guard');
-  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-lead--warn') && document.querySelector('.reset-password-form button:disabled') && document.querySelector('.reset-password-actions button.reset-password-primary'))"),
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-lead--warn')?.textContent.includes('missing or invalid') && document.querySelector('.reset-password-message--error')?.textContent.includes('invalid or has expired') && document.querySelector('.reset-password-form button:disabled') && document.querySelector('.reset-password-actions button.reset-password-primary'))"),
     'stale rejection invalidated the ready form');
   assert.equal(providerUpdates,beforeCsrf,'stale recovery form cannot update another session');
   await evaluate("document.querySelector('.reset-password-form button').click()");
@@ -413,7 +413,7 @@ try {
   await evaluate("window.dispatchEvent(new Event('focus'))");
   await waitUntil(()=>evaluate(`window.__authTestOperations.filter(e=>e.kind==='subscription-terminal').length>${beforeExpiryCheck}`),
     'expired recovery status handled by App');
-  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-lead--warn') && document.querySelector('.reset-password-form button:disabled'))"),
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-lead--warn')?.textContent.includes('missing or invalid') && document.querySelector('.reset-password-form button:disabled'))"),
     'definitive expired status invalidated form');
   await evaluate("document.querySelector('.reset-password-form button').click()");
   assert.equal(passwordPosts,beforeExpiry,'expired form cannot send a password POST');
@@ -582,6 +582,133 @@ try {
     'late A completion cannot restore A drafts');
   assert.equal(plannerWrites.filter(item=>item.owner===otherOwner).length,0,
     'late A completion cannot trigger a B mutation');
+  // A confirmed reset formerly rendered the invalid-link warning for the entire
+  // submitting state. Observe every rendered message while its real response is held.
+  ordinaryMode=false;current={number:23,value:'s'.repeat(43)};
+  holdApp=false;holdForm=false;held=[];
+  await loadRecovery();
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-form button') && !document.querySelector('.reset-password-form button').disabled)"),
+    'confirmed-path recovery form ready');
+  await evaluate(`(() => {
+    window.__recoveryMessageTrace=[];
+    const record=()=>{
+      const entry={path:location.pathname,
+        saving:Boolean(document.querySelector('.reset-password-lead[role="status"]')?.textContent
+          .includes('Saving your new password…')),
+        invalid:document.body.textContent.includes('This reset link is missing or invalid'),
+        uncertain:document.body.textContent.includes('could not confirm whether your password changed'),
+        error:Boolean(document.querySelector('.reset-password-message--error'))};
+      if(JSON.stringify(entry)!==JSON.stringify(window.__recoveryMessageTrace.at(-1)))
+        window.__recoveryMessageTrace.push(entry);
+    };
+    window.__recoveryMessageObserver=new MutationObserver(record);
+    window.__recoveryMessageObserver.observe(document.body,
+      {subtree:true,childList:true,characterData:true});
+    record();
+  })()`);
+  const successViewId=await evaluate("window.__authTestOperations.filter(e=>e.kind==='recovery-view-mount').at(-1)?.id");
+  assert.match(successViewId,/^[0-9a-f-]{36}$/i);
+  const beforeSuccess={posts:passwordPosts,updates:providerUpdates,
+    subscriptions:await evaluate("window.__authTestOperations.filter(e=>e.kind==='subscription-terminal').length")};
+  holdPasswordResponse=true;
+  await submit();
+  await waitUntil(()=>Promise.resolve(Boolean(heldPasswordResponse)),
+    'confirmed-path response held after provider update and revocation');
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-lead[role=\"status\"]')?.textContent.includes('Saving your new password…') && document.querySelector('.reset-password-form button:disabled'))"),
+    'neutral saving message rendered while response is pending');
+  await evaluate("document.querySelector('.reset-password-form button').click()");
+  assert.equal(passwordPosts,beforeSuccess.posts+1,'disabled Save cannot repeat a pending password POST');
+  assert.equal(providerUpdates,beforeSuccess.updates+1,'one provider update before response release');
+  const heldMessages=await evaluate("window.__recoveryMessageTrace");
+  assert.equal(heldMessages.some(entry=>entry.saving),true);
+  assert.equal(heldMessages.some(entry=>entry.invalid||entry.uncertain||entry.error),false,
+    'pending confirmed reset never presents a definitive or uncertain warning');
+  const releaseConfirmed=heldPasswordResponse;
+  heldPasswordResponse=null;holdPasswordResponse=false;releaseConfirmed();
+  await waitUntil(()=>evaluate(`window.__authTestOperations.some(e=>
+    e.kind==='recovery-submit-terminal'&&e.viewId===${JSON.stringify(successViewId)}
+    &&e.outcome==='confirmed')`),'confirmed reset handler terminal decision');
+  await waitUntil(()=>evaluate(`window.__authTestOperations.filter(e=>
+    e.kind==='subscription-terminal').slice(${beforeSuccess.subscriptions})
+    .some(e=>e.outcome==='signed-out')`),'post-reset App subscriber signed-out decision');
+  await waitUntil(()=>evaluate("location.pathname==='/'"),'intentional Home/login navigation');
+  await waitUntil(()=>evaluate(`window.__authTestOperations.some(e=>
+    e.kind==='recovery-view-unmount'&&e.id===${JSON.stringify(successViewId)})`),
+    'confirmed reset view unmounted after Home navigation');
+  const completeMessages=await evaluate("window.__recoveryMessageObserver.disconnect();window.__recoveryMessageTrace");
+  assert.equal(completeMessages.some(entry=>entry.invalid||entry.uncertain||entry.error),false,
+    'confirmed 204 cannot show a transient invalid or uncertain message');
+  assert.equal(passwordPosts,beforeSuccess.posts+1,'one password POST through Home navigation');
+  assert.equal(providerUpdates,beforeSuccess.updates+1,'one provider update through Home navigation');
+  current={number:25,value:'u'.repeat(43)};
+  await loadRecovery();
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-form button') && !document.querySelector('.reset-password-form button').disabled)"),
+    'concurrent-status recovery form ready');
+  await evaluate(`(() => {
+    window.__heldRecoveryWarnings=[];
+    const record=()=>window.__heldRecoveryWarnings.push({
+      invalid:document.body.textContent.includes('This reset link is missing or invalid'),
+      uncertain:document.body.textContent.includes('could not confirm whether your password changed'),
+      saving:document.body.textContent.includes('Saving your new password…')});
+    window.__heldRecoveryObserver=new MutationObserver(record);
+    window.__heldRecoveryObserver.observe(document.body,{subtree:true,childList:true,characterData:true});
+    record();
+  })()`);
+  const concurrentViewId=await evaluate("window.__authTestOperations.filter(e=>e.kind==='recovery-view-mount').at(-1)?.id");
+  const beforeConcurrent=passwordPosts;
+  holdPasswordResponse=true;
+  await submit();
+  await waitUntil(()=>Promise.resolve(Boolean(heldPasswordResponse)),
+    'concurrent-status 204 held after provider update and revocation');
+  const beforeConcurrentStatus=await evaluate("window.__authTestOperations.filter(e=>e.kind==='subscription-terminal').length");
+  await evaluate("window.dispatchEvent(new Event('focus'))");
+  await waitUntil(()=>evaluate(`window.__authTestOperations.filter(e=>
+    e.kind==='subscription-terminal').slice(${beforeConcurrentStatus})
+    .some(e=>e.outcome==='signed-out')`),
+    'concurrent signed-out status applied before 204 release');
+  assert.equal(await evaluate("Boolean(document.querySelector('.reset-password-lead[role=\"status\"]')?.textContent.includes('Saving your new password…') && document.querySelector('.reset-password-form button:disabled'))"),true,
+    'status invalidates recovery authority without replacing pending saving text');
+  await evaluate("document.querySelector('.reset-password-form button').click()");
+  assert.equal(passwordPosts,beforeConcurrent+1,'invalidated pending form cannot submit again');
+  const releaseConcurrent=heldPasswordResponse;
+  heldPasswordResponse=null;holdPasswordResponse=false;releaseConcurrent();
+  await waitUntil(()=>evaluate(`window.__authTestOperations.some(e=>
+    e.kind==='recovery-submit-terminal'&&e.viewId===${JSON.stringify(concurrentViewId)}
+    &&e.outcome==='confirmed-session-changed')`),
+    'confirmed 204 handled after concurrent invalidation');
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-card--success'))"),
+    'confirmed success remains visible without redirecting changed context');
+  const concurrentWarnings=await evaluate("window.__heldRecoveryObserver.disconnect();window.__heldRecoveryWarnings");
+  assert.equal(concurrentWarnings.some(entry=>entry.invalid||entry.uncertain),false,
+    'concurrent status cannot flash invalid or uncertain text before confirmed success');
+  assert.equal(concurrentWarnings.some(entry=>entry.saving),true);
+  assert.equal(passwordPosts,beforeConcurrent+1);
+  current={number:24,value:'t'.repeat(43)};
+  failProvider=true;
+  await loadRecovery();
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-form button') && !document.querySelector('.reset-password-form button').disabled)"),
+    'provider-failure recovery form ready');
+  const beforeFailedPost=passwordPosts;
+  holdPasswordResponse=true;
+  await submit();
+  await waitUntil(()=>Promise.resolve(Boolean(heldPasswordResponse)),
+    'provider-failure response held');
+  current={number:0,value:''};
+  const beforeFailedStatus=await evaluate("window.__authTestOperations.filter(e=>e.kind==='subscription-terminal').length");
+  await evaluate("window.dispatchEvent(new Event('focus'))");
+  await waitUntil(()=>evaluate(`window.__authTestOperations.filter(e=>
+    e.kind==='subscription-terminal').slice(${beforeFailedStatus})
+    .some(e=>e.outcome==='signed-out')`),
+  'concurrent signed-out status applied before failed response');
+  assert.equal(await evaluate("Boolean(document.querySelector('.reset-password-lead[role=\"status\"]')?.textContent.includes('Saving your new password…') && document.querySelector('.reset-password-form button:disabled'))"),true,
+    'pending provider failure remains neutral until its response settles');
+  const releaseFailed=heldPasswordResponse;
+  heldPasswordResponse=null;holdPasswordResponse=false;releaseFailed();
+  await waitUntil(()=>evaluate("Boolean(document.querySelector('.reset-password-lead--warn')?.textContent.includes('could not confirm whether your password changed') && document.querySelector('.reset-password-form button:disabled'))"),
+    'failed provider response settles as uncertain after status invalidation');
+  await evaluate("document.querySelector('.reset-password-form button').click()");
+  assert.equal(passwordPosts,beforeFailedPost+1,'uncertain mutation is not replayed');
+  failProvider=false;
   console.log('Rendered recovery proof passed: route variants, A-to-B planner rekey and queued-work discard, status-only Retry, unmount, CSRF, ordinary isolation and late 204.');
 } catch(error){failure=error;} finally {
   const cleanupErrors=[];

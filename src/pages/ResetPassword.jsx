@@ -13,6 +13,8 @@ export default function ResetPassword() {
   const [status, setStatus] = useState('checking');
   const [error, setError] = useState('');
   const verificationRef = useRef(null);
+  const submissionPendingRef = useRef(false);
+  const submissionContextChangedRef = useRef(false);
   const testViewId = useRef(null);
   if (!testViewId.current) testViewId.current = authTestOperationId();
 
@@ -22,10 +24,19 @@ export default function ResetPassword() {
   useEffect(() => {
     if (testViewId.current) observeAuthTestOperation({kind:'recovery-view-mount',id:testViewId.current});
     const cleanup = supabaseRecovery.subscribe({
-      onReady: () => { setStatus('ready'); setError(''); },
-      onInvalid: (message) => { setStatus('invalid'); setError(message);
+      onReady: () => { if (submissionPendingRef.current) {
+        submissionContextChangedRef.current = true; return;
+      }
+        setStatus('ready'); setError(''); },
+      onInvalid: (message) => { if (submissionPendingRef.current) {
+        submissionContextChangedRef.current = true; return;
+      }
+        setStatus('invalid'); setError(message);
         setPassword(''); setConfirm(''); },
-      onUnavailable: () => { setStatus('verification-unavailable'); setError('');
+      onUnavailable: () => { if (submissionPendingRef.current) {
+        submissionContextChangedRef.current = true; return;
+      }
+        setStatus('verification-unavailable'); setError('');
         setPassword(''); setConfirm(''); },
     });
     verificationRef.current = cleanup;
@@ -35,6 +46,7 @@ export default function ResetPassword() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (submissionPendingRef.current || isSubmitting) return;
     const testSubmitId = authTestOperationId();
     setError('');
     const validation = validateRecoveryPasswords(password, confirm);
@@ -43,18 +55,26 @@ export default function ResetPassword() {
       return;
     }
 
+    submissionContextChangedRef.current = false;
+    submissionPendingRef.current = true;
     setStatus('submitting');
     let outcome;
     try {
       outcome = await supabaseRecovery.update(password, confirm);
     } catch (err) {
+      submissionPendingRef.current = false;
       if (err.code === 'recovery_invalid' || err.code === 'recovery_unconfirmed') {
         setStatus(err.code === 'recovery_invalid' ? 'invalid' : 'uncertain');
         setPassword(''); setConfirm('');
+      } else if (submissionContextChangedRef.current) {
+        setStatus('uncertain'); setPassword(''); setConfirm('');
       } else setStatus('ready');
-      setError(err.message || 'Your password could not be updated. Please request a new reset link and try again.');
+      setError(submissionContextChangedRef.current && err.code !== 'recovery_invalid'
+        ? 'We could not confirm whether your password changed. Try signing in with the new password before requesting another reset link.'
+        : err.message || 'Your password could not be updated. Please request a new reset link and try again.');
       return;
     }
+    submissionPendingRef.current = false;
     setPassword('');
     setConfirm('');
     setStatus('done');
@@ -71,7 +91,6 @@ export default function ResetPassword() {
 
   return (
     <main className="reset-password-page">
-      <p className="visually-hidden" role="status">{isSubmitting ? 'Saving password…' : ''}</p>
       <div className="container reset-password-inner">
         <p className="reset-password-breadcrumb">
           <Link to="/">Home</Link>
@@ -116,6 +135,8 @@ export default function ResetPassword() {
               <p className="reset-password-lead reset-password-lead--warn" role="alert">
                 We could not confirm whether your password changed. Try signing in with the new password before requesting another reset link.
               </p>
+            ) : isSubmitting ? (
+              <p className="reset-password-lead" role="status">Saving your new password…</p>
             ) : !isReady ? (
               <p className="reset-password-lead reset-password-lead--warn" role="alert">
                 This reset link is missing or invalid. Request a new link from the log in screen.
