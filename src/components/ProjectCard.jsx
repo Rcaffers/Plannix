@@ -29,6 +29,10 @@ import { localCalendarDayDifference } from '../utils/timetableEvents';
 import { classPlacementUnavailableReason } from '../utils/timetableClassPlacement';
 import { useClassPlacement } from '../hooks/useClassPlacement';
 import { useWeekendEventsPreference } from '../hooks/useWeekendEventsPreference.js';
+import { serverManagedAuth, captureServerOperationContext,
+  assertServerOperationContext } from '../utils/serverAuthTransport.js';
+import { prepareTimetableSnapshots } from '../utils/timetableOperationContext.js';
+import { observeTimetableOperation } from '../utils/timetableTestObserver.js';
 import './ProjectCard.css';
 
 /** Single-day navigation is reserved for phone widths, regardless of pointer type. */
@@ -336,8 +340,9 @@ export default function ProjectCard({
   [activeCollection?.sessions, periodIndexById, classNameById]);
 
   useEffect(() => {
-    if (weekMode === 'date' && sessionState.scope) void sessionState.loadDate(formatDateKeyPart(weekStartDate));
-  }, [weekMode, weekStartDate, sessionState.scope]);
+    if (weekMode === 'date' && sessionState.scope && sessionState.recurringReady)
+      void sessionState.loadDate(formatDateKeyPart(weekStartDate));
+  }, [weekMode, weekStartDate, sessionState.scope, sessionState.recurringReady]);
 
   function persistDisplaySessions(next) {
     if (!target) return false;
@@ -680,13 +685,21 @@ export default function ProjectCard({
   };
 
   async function shiftLessonDetailsAcrossDatedWeeks(direction) {
+    let operationContext;
+    try { operationContext = serverManagedAuth ? captureServerOperationContext(sessionState.userId) : null; }
+    catch { return { ok:false, reason:'STALE_SCOPE' }; }
     const dates = Array.from({ length: 8 }, (_, offset) => {
       const date = new Date(weekStartDate); date.setDate(date.getDate() + offset * 7);
       return formatDateKeyPart(date);
     });
     let snapshots;
-    try { snapshots = await sessionState.loadDateSnapshots(dates); }
-    catch { setLessonPushForwardError('Could not load the upcoming weeks.'); return null; }
+    try { snapshots = await prepareTimetableSnapshots(operationContext,
+      () => sessionState.loadDateSnapshots(dates, operationContext)); }
+    catch { if (operationContext) {
+        try { assertServerOperationContext(operationContext); } catch { return { ok:false, reason:'STALE_SCOPE' }; }
+      }
+      setLessonPushForwardError('Could not load the upcoming weeks.');
+      return { ok:false, reason:'LOAD_FAILED' }; }
     const byWeekKey = {};
     snapshots.forEach((snapshot, index) => {
       byWeekKey[dates[index]] = snapshot.sessions.map((session, sessionIndex) =>
@@ -704,7 +717,15 @@ export default function ProjectCard({
       .map(([weekStartDate, items]) => ({ type: 'date_override', weekStartDate,
         sessions: items.map((entry) => displayToSession(entry, periodIdByIndex)) }));
     if (!mutations.length) return result;
-    const savedResult = await sessionState.saveBatch(mutations);
+    let savedResult;
+    try { savedResult = await sessionState.saveBatch(mutations, operationContext); }
+    catch { if (operationContext) {
+        try { assertServerOperationContext(operationContext); } catch { return { ok:false, reason:'STALE_SCOPE' }; }
+      }
+      return { ok:false, reason:'SAVE_FAILED' }; }
+    if (operationContext) {
+      try { assertServerOperationContext(operationContext); } catch { return { ok:false, reason:'STALE_SCOPE' }; }
+    }
     return savedResult ? result : { ok: false, reason: 'SAVE_FAILED' };
   }
 
@@ -752,7 +773,12 @@ export default function ProjectCard({
       return;
     }
 
+    const observedId = import.meta.env.MODE === 'stage4-timetable-browser-test'
+      ? globalThis.crypto?.randomUUID?.() : null;
+    observeTimetableOperation({ kind:'snapshot-start', id:observedId });
+    try {
     const result = await shiftLessonDetailsAcrossDatedWeeks('forward');
+    if (result.reason === 'STALE_SCOPE' || result.reason === 'LOAD_FAILED') return;
     if (!result.ok) {
       const copy =
         result.reason === 'PIVOT_NOTHING_TO_SHIFT'
@@ -777,6 +803,7 @@ export default function ProjectCard({
     setLessonPushForwardSuccess(
       `Lesson details pushed to ${result.movedCount === 1 ? '1 next slot' : `${result.movedCount} next slots`}.`,
     );
+    } finally { observeTimetableOperation({ kind:'snapshot-terminal', id:observedId }); }
   }
 
   async function handlePullLessonsBackwardForClass() {
@@ -823,6 +850,7 @@ export default function ProjectCard({
     }
 
     const result = await shiftLessonDetailsAcrossDatedWeeks('backward');
+    if (result.reason === 'STALE_SCOPE' || result.reason === 'LOAD_FAILED') return;
     if (!result.ok) {
       const copy =
         result.reason === 'NO_LATER_DETAIL_TO_PULL'

@@ -36,6 +36,17 @@ export const env = Object.freeze({
   supabaseUrl: String(process.env.SUPABASE_URL || '').trim(),
   supabasePublishableKey: String(process.env.SUPABASE_PUBLISHABLE_KEY || '').trim(),
   supabaseSecretKey: String(process.env.SUPABASE_SECRET_KEY || '').trim(),
+  authMode: String(process.env.PLANNIX_AUTH_MODE || 'bearer').trim(),
+  serverAuthOrigin: String(process.env.PLANNIX_SERVER_AUTH_ORIGIN || '').trim(),
+  serverAuthCsrfKey: String(process.env.PLANNIX_SERVER_AUTH_CSRF_KEY || '').trim(),
+  serverAuthRateKey: String(process.env.PLANNIX_AUTH_RATE_KEY || '').trim(),
+  serverAuthRateEpoch: String(process.env.PLANNIX_AUTH_RATE_EPOCH || '').trim(),
+  serverAuthNetworkIdentityMode: String(process.env.PLANNIX_AUTH_NETWORK_IDENTITY_MODE || '').trim(),
+  serverAuthPerformanceEnabled: process.env.PLANNIX_AUTH_PERFORMANCE_ENABLED === 'true',
+  serverAuthCallbackDiagnosticsEnabled: process.env.PLANNIX_AUTH_CALLBACK_DIAGNOSTICS_ENABLED === 'true',
+  serverAuthRecoveryDiagnosticsEnabled: process.env.PLANNIX_AUTH_RECOVERY_DIAGNOSTICS_ENABLED === 'true',
+  ingressDiagnosticEnabled: String(process.env.PLANNIX_INGRESS_DIAGNOSTIC_ENABLED || 'false').trim(),
+  ingressDiagnosticToken: String(process.env.PLANNIX_INGRESS_DIAGNOSTIC_TOKEN || '').trim(),
   vapidPublicKey: String(process.env.VAPID_PUBLIC_KEY || '').trim(),
   vapidPrivateKey: String(process.env.VAPID_PRIVATE_KEY || '').trim(),
   vapidSubject: String(process.env.VAPID_SUBJECT || '').trim(),
@@ -71,6 +82,19 @@ export function requireSupabaseAdminConfig(config = env) {
 }
 
 export function validateProductionEnv(config = env) {
+  const authMode = config.authMode ?? 'bearer';
+  if (!['bearer', 'server'].includes(authMode)) throw new Error('PLANNIX_AUTH_MODE is invalid.');
+  if (config.nodeEnv === 'production' && authMode === 'server') {
+    const key = config.serverAuthRateKey;
+    const decoded = typeof key === 'string' ? Buffer.from(key,'base64url') : Buffer.alloc(0);
+    if (!key || !/^[A-Za-z0-9_-]{43,}$/.test(key) || decoded.length < 32
+      || decoded.toString('base64url') !== key
+      || !['digitalocean-managed','direct'].includes(config.serverAuthNetworkIdentityMode)
+      || !/^[1-9][0-9]*$/.test(config.serverAuthRateEpoch || '')
+      || !Number.isSafeInteger(Number(config.serverAuthRateEpoch))) {
+      throw new Error('Server-managed authentication requires shared rate-limit and network-identity configuration.');
+    }
+  }
   if (config.nodeEnv === 'production') {
     requireSupabasePublicConfig(config);
     requireSupabaseAdminConfig(config);

@@ -22,6 +22,7 @@ export default function Profile({
   clearAuthenticatedUser,
   getAccountDeletionSession,
   signOutAfterAccountDeletion,
+  isAccountDeletionSessionCurrent,
 }) {
   const schools = schoolMemberships(memberships);
   const [isEditingName, setIsEditingName] = useState(false);
@@ -253,6 +254,7 @@ export default function Profile({
           clearAuthenticatedUser={clearAuthenticatedUser}
           getAccountDeletionSession={getAccountDeletionSession}
           signOutAfterAccountDeletion={signOutAfterAccountDeletion}
+          isAccountDeletionSessionCurrent={isAccountDeletionSessionCurrent}
         />
       </div>
     </main>

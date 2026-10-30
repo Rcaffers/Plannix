@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Route, Routes, useNavigate } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { matchPath, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import './App.css';
 import Header from './components/Header';
 import Hero from './components/Hero';
@@ -14,6 +14,7 @@ import Contact from './pages/Contact';
 import ResetPassword from './pages/ResetPassword';
 import Settings from './pages/Settings';
 import Profile from './pages/Profile';
+import ProfileSessionGate from './components/ProfileSessionGate';
 import OrganisationControls from './pages/OrganisationControls';
 import AcademicYear from './pages/AcademicYear';
 import Events from './pages/Events';
@@ -28,13 +29,16 @@ import TermsModal from './modals/TermsModal';
 import PrivacyModal from './modals/PrivacyModal';
 import ScrollToTop from './components/ScrollToTop';
 import { createSupabaseAuthController, privateRouteState } from './utils/supabaseAuthController';
+import { createServerAuthController } from './utils/serverAuthController';
+import { serverManagedAuth, captureServerOperationContext,
+  assertServerOperationContext } from './utils/serverAuthTransport';
 import { TimetableLayoutProvider } from './context/TimetableLayoutContext';
 import { AcademicYearProvider } from './context/AcademicYearContext';
 import { ClassProvider } from './context/ClassContext';
 import { TimetableSessionProvider } from './context/TimetableSessionContext';
 import { loadOrganisationMemberships } from './utils/organisationMemberships';
 
-const authController = createSupabaseAuthController();
+const authController = serverManagedAuth ? createServerAuthController() : createSupabaseAuthController();
 const PUSH_CLEANUP_DEADLINE_MS = 8000;
 
 function beforeDeadline(work, deadline) {
@@ -49,8 +53,11 @@ function beforeDeadline(work, deadline) {
 
 export default function App() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [user, setUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [sessionVerificationError, setSessionVerificationError] = useState(false);
+  const [verifiedProfileKey, setVerifiedProfileKey] = useState(null);
   const [memberships, setMemberships] = useState([]);
   const [membershipsLoading, setMembershipsLoading] = useState(false);
   const [membershipsError, setMembershipsError] = useState('');
@@ -59,17 +66,42 @@ export default function App() {
   const [logoutCanSkipCleanup, setLogoutCanSkipCleanup] = useState(false);
   const logoutBusyRef = useRef(false);
   const logoutFailedAccountRef = useRef(null);
+  const logoutFailedContextRef = useRef(null);
   const userIdRef = useRef(null);
+  const profileVisit = useRef({ path: null, index: 0 });
+  useLayoutEffect(() => {
+    if (serverManagedAuth && !isAuthLoading && user?.id) {
+      authController.activateDisplayedSession(user.id);
+    }
+  }, [isAuthLoading,user]);
+  if (profileVisit.current.path !== location.pathname) {
+    profileVisit.current = { path: location.pathname, index: profileVisit.current.index + 1 };
+  }
   useEffect(() => {
     let isMounted = true;
 
     const cleanup = authController.subscribe({
-      onUser: (nextUser) => { if (isMounted) { if (userIdRef.current !== nextUser?.id) { logoutFailedAccountRef.current = null; setLogoutError(''); setLogoutCanSkipCleanup(false); } userIdRef.current = nextUser?.id || null; setUser(nextUser); setIsAuthLoading(false); } },
-      onSignedOut: () => { if (isMounted) { logoutFailedAccountRef.current = null; setLogoutCanSkipCleanup(false); userIdRef.current = null; setUser(null); setIsAuthLoading(false); } },
-      onError: () => { if (isMounted) { userIdRef.current = null; setUser(null); setIsAuthLoading(false); } },
+      onPending: () => { if (isMounted) { userIdRef.current = null; setUser(null);
+        setVerifiedProfileKey(null); setIsAuthLoading(true); } },
+      onUser: (nextUser) => { if (isMounted) { if (userIdRef.current !== nextUser?.id) { logoutFailedAccountRef.current = null; logoutFailedContextRef.current = null; setLogoutError(''); setLogoutCanSkipCleanup(false); } userIdRef.current = nextUser?.id || null; setUser(nextUser); setSessionVerificationError(false); setIsAuthLoading(false); } },
+      onSignedOut: () => { if (isMounted) { logoutFailedAccountRef.current = null; logoutFailedContextRef.current = null; setLogoutCanSkipCleanup(false); userIdRef.current = null; setUser(null); setSessionVerificationError(false); setIsAuthLoading(false); } },
+      onError: () => { if (isMounted) { userIdRef.current = null; setUser(null); setSessionVerificationError(true); setIsAuthLoading(false); } },
     });
-    authController.restoreSession().then((nextUser) => {
-      if (isMounted) { userIdRef.current = nextUser?.id || null; setUser(nextUser); }
+    authController.restoreSession().then((result) => {
+      if (!isMounted) return;
+      if (serverManagedAuth) {
+        if (result.state === 'stale') return;
+        if (result.state === 'verification-failure') {
+          if (!userIdRef.current) { setUser(null); setSessionVerificationError(true); }
+          return;
+        }
+        const nextUser = result.state === 'authenticated' ? result.user : null;
+        userIdRef.current = nextUser?.id || null;
+        setUser(nextUser);
+        return;
+      }
+      userIdRef.current = result?.id || null;
+      setUser(result);
     }).finally(() => {
       if (isMounted) setIsAuthLoading(false);
     });
@@ -86,7 +118,7 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    if (!user?.id) {
+    if (isAuthLoading || !user?.id) {
       setMemberships([]);
       setMembershipsLoading(false);
       setMembershipsError('');
@@ -110,10 +142,12 @@ export default function App() {
     );
 
     return () => { active = false; };
-  }, [user?.id]);
+  }, [isAuthLoading, user?.id]);
 
   const handleLogin = async ({ email, password }) => {
     const loggedInUser = await authController.login({ email, password });
+    if (serverManagedAuth && !authController.isCurrentUser(loggedInUser))
+      throw new DOMException('Account changed.', 'AbortError');
     setLogoutError('');
     setLogoutCanSkipCleanup(false);
     logoutFailedAccountRef.current = null;
@@ -137,45 +171,74 @@ export default function App() {
     if (logoutBusyRef.current || confirmDraftDiscard() !== true) return;
     const accountId = user?.id;
     if (!accountId) return;
+    let operationContext;
+    try { operationContext = serverManagedAuth
+      ? captureServerOperationContext(accountId) : null; }
+    catch { setLogoutError('Your account changed. Reload your session before signing out.'); return; }
+    const stillCurrent = () => {
+      if (userIdRef.current !== accountId) return false;
+      try { if (operationContext) assertServerOperationContext(operationContext); return true; }
+      catch { return false; }
+    };
     logoutBusyRef.current = true;
     const deadline = Date.now() + PUSH_CLEANUP_DEADLINE_MS;
     setLogoutBusy(true);
     setLogoutError('');
     setLogoutCanSkipCleanup(false);
     logoutFailedAccountRef.current = null;
+    logoutFailedContextRef.current = null;
     let gate;
     try {
       gate = beginPushSignOut();
       await beforeDeadline(() => gate.waitForRegistrations(Math.max(1, deadline - Date.now())), deadline);
       await beforeDeadline(() => disableCurrentDevice({ expectedUserId: accountId,
-        isCurrent: () => userIdRef.current === accountId }), deadline);
+        operationContext, isCurrent: stillCurrent }), deadline);
     } catch {
-      if (userIdRef.current === accountId) {
+      if (stillCurrent()) {
         setLogoutError('Notification cleanup could not be confirmed.');
         setLogoutCanSkipCleanup(true);
         logoutFailedAccountRef.current = accountId;
+        logoutFailedContextRef.current = operationContext;
       } else {
         setLogoutError('Your account changed during notification cleanup. Sign out again from the current account.');
         setLogoutCanSkipCleanup(false);
         logoutFailedAccountRef.current = null;
+        logoutFailedContextRef.current = null;
       }
       gate?.release();
       logoutBusyRef.current = false;
       setLogoutBusy(false);
       return;
     }
-    if (userIdRef.current !== accountId) {
+    if (!stillCurrent()) {
       setLogoutError('Your account changed during notification cleanup. Sign out again from the current account.');
       setLogoutCanSkipCleanup(false);
       logoutFailedAccountRef.current = null;
+      logoutFailedContextRef.current = null;
       gate?.release();
       logoutBusyRef.current = false;
       setLogoutBusy(false);
       return;
     }
-    try { await authController.logout(); }
-    catch { /* Committed baseline clears local access even when remote logout fails. */ }
-    finally { gate?.release(); logoutFailedAccountRef.current = null; setLogoutCanSkipCleanup(false); userIdRef.current = null; setUser(null); logoutBusyRef.current = false; setLogoutBusy(false); }
+    let cleared = true;
+    try { cleared = await authController.logout({ expectedUserId: accountId,
+      operationContext }); }
+    catch {
+      if (serverManagedAuth) {
+        setLogoutError('Sign out could not be confirmed. Please retry.');
+        gate?.release(); logoutBusyRef.current = false; setLogoutBusy(false);
+        return;
+      }
+      /* Committed browser-SDK baseline clears local access on failure. */
+    }
+    gate?.release();
+    if (serverManagedAuth && cleared === false) {
+      logoutBusyRef.current = false; setLogoutBusy(false);
+      return;
+    }
+    logoutFailedAccountRef.current = null; logoutFailedContextRef.current = null;
+    setLogoutCanSkipCleanup(false);
+    userIdRef.current = null; setUser(null); logoutBusyRef.current = false; setLogoutBusy(false);
   };
 
   const handleLogoutAnyway = async () => {
@@ -183,11 +246,30 @@ export default function App() {
     if (confirmDraftDiscard() !== true) return;
     if (window.confirm('Notification cleanup could not be confirmed. Notifications may remain enabled on this device. Sign out anyway?') !== true) return;
     if (logoutFailedAccountRef.current !== userIdRef.current) return;
+    const operationContext=logoutFailedContextRef.current;
+    try { if (operationContext) assertServerOperationContext(operationContext); }
+    catch { setLogoutError('Your account changed. Reload your session before signing out.');
+      setLogoutCanSkipCleanup(false); return; }
     logoutBusyRef.current = true;
     setLogoutBusy(true);
-    try { await authController.logout(); }
-    catch { /* Preserve committed local sign-out behaviour. */ }
-    finally { logoutFailedAccountRef.current = null; setLogoutCanSkipCleanup(false); userIdRef.current = null; setUser(null); logoutBusyRef.current = false; setLogoutBusy(false); }
+    let cleared = true;
+    try { cleared = await authController.logout({ expectedUserId: logoutFailedAccountRef.current,
+      operationContext }); }
+    catch {
+      if (serverManagedAuth) {
+        setLogoutError('Sign out could not be confirmed. Please retry.');
+        logoutBusyRef.current = false; setLogoutBusy(false);
+        return;
+      }
+      /* Preserve committed browser-SDK sign-out behaviour. */
+    }
+    if (serverManagedAuth && cleared === false) {
+      logoutBusyRef.current = false; setLogoutBusy(false);
+      return;
+    }
+    logoutFailedAccountRef.current = null; logoutFailedContextRef.current = null;
+    setLogoutCanSkipCleanup(false);
+    userIdRef.current = null; setUser(null); logoutBusyRef.current = false; setLogoutBusy(false);
   };
 
   const clearAuthenticatedUser = () => {
@@ -197,17 +279,30 @@ export default function App() {
 
   const handleProfileNameUpdate = async (details) => {
     const updatedUser = await authController.updateProfileName(details);
-    setUser(updatedUser);
+    if (userIdRef.current === updatedUser.id) setUser(updatedUser);
     return updatedUser;
   };
 
   const handleEmailUpdate = async (email) => {
     const result = await authController.updateEmail(email);
-    setUser(result.user);
+    if (serverManagedAuth && result.user && !authController.isCurrentUser(result.user))
+      throw new DOMException('Account changed.', 'AbortError');
+    if (userIdRef.current === result.user?.id
+      && (!serverManagedAuth || authController.isCurrentUser(result.user))) setUser(result.user);
     return result;
   };
 
   const privateRoute = (element) => {
+    if (serverManagedAuth && sessionVerificationError) {
+      return <main role="alert">
+        <p>Your current session could not be confirmed. Retry the session check.</p>
+        <button type="button" onClick={() => {
+          setSessionVerificationError(false);
+          setIsAuthLoading(true);
+          window.dispatchEvent(new Event('plannix-server-session-change'));
+        }}>Retry session check</button>
+      </main>;
+    }
     const state = privateRouteState({ isAuthLoading, user });
     if (state === 'loading') {
       return <main aria-busy="true"><p role="status" className="visually-hidden">Checking your session…</p></main>;
@@ -226,12 +321,52 @@ export default function App() {
 
   const handleSignup = async (details) => {
     const result = await authController.signup(details);
-    if (result.authenticated) setUser(result.user);
+    if (serverManagedAuth && result.authenticated && !authController.isCurrentUser(result.user))
+      throw new DOMException('Account changed.', 'AbortError');
+    if (result.authenticated && (!serverManagedAuth || authController.isCurrentUser(result.user)))
+      setUser(result.user);
     return result;
   };
 
+  const profileKey = serverManagedAuth && location.pathname === '/profile' && user
+    ? `${profileVisit.current.index}:${user.id}:${authController.currentSessionName() || 'unverified'}` : null;
+  const profilePending = !!profileKey && verifiedProfileKey !== profileKey;
+  const handleProfileVerification = (result) => {
+    if (result.state === 'authenticated') {
+      if (!authController.isCurrentUser(result.user)) return false;
+      userIdRef.current = result.user.id;
+      setUser(result.user);
+      setVerifiedProfileKey(`${profileVisit.current.index}:${result.user.id}:${authController.currentSessionName()}`);
+      return true;
+    } else if (result.state === 'signed-out' && authController.isSignedOut()) {
+      userIdRef.current = null;
+      setUser(null);
+      setVerifiedProfileKey(null);
+      return true;
+    }
+    return false;
+  };
+  const profilePage = <Profile
+    user={user}
+    memberships={memberships}
+    membershipsLoading={membershipsLoading}
+    membershipsError={membershipsError}
+    updateProfileName={handleProfileNameUpdate}
+    updateEmail={handleEmailUpdate}
+    updatePassword={(details) => authController.updatePassword(details)}
+    clearAuthenticatedUser={clearAuthenticatedUser}
+    getAccountDeletionSession={(options) => authController.getCurrentSession(options)}
+    signOutAfterAccountDeletion={(name) => authController.clearAfterAccountDeletion(name)}
+    isAccountDeletionSessionCurrent={(name, id, generation) => !serverManagedAuth
+      || authController.isCurrentSessionVersion(name, id, generation)}
+  />;
+
+  // The reset page must survive App reconciliation after a confirmed password
+  // update. Leaving it rekeys the planner to the current account as usual.
+  const plannerScopeKey = serverManagedAuth && matchPath({ path: '/reset-password', end: true }, location.pathname)
+    ? 'server-recovery' : `${user?.id || 'signed-out'}:${user?.organisationId || 'none'}`;
   return (
-    <AcademicYearProvider key={`${user?.id || 'signed-out'}:${user?.organisationId || 'none'}`} user={user}>
+    <AcademicYearProvider key={plannerScopeKey} user={user}>
       <TimetableLayoutProvider user={user}>
         <ClassProvider user={user}>
           <TimetableSessionProvider user={user}>
@@ -239,9 +374,9 @@ export default function App() {
           <ScrollToTop />
           <AnalyticsTracker user={user} isAuthLoading={isAuthLoading} />
           <Header
-            user={user}
+            user={profilePending ? null : user}
             memberships={memberships}
-            isAuthLoading={isAuthLoading}
+            isAuthLoading={isAuthLoading || profilePending}
             onLogin={handleLogin}
             onLogout={handleLogout}
             onLogoutAnyway={handleLogoutAnyway}
@@ -278,20 +413,11 @@ export default function App() {
             />
             <Route
               path="/profile"
-              element={privateRoute(
-                <Profile
-                  user={user}
-                  memberships={memberships}
-                  membershipsLoading={membershipsLoading}
-                  membershipsError={membershipsError}
-                  updateProfileName={handleProfileNameUpdate}
-                  updateEmail={handleEmailUpdate}
-                  updatePassword={(details) => authController.updatePassword(details)}
-                  clearAuthenticatedUser={clearAuthenticatedUser}
-                  getAccountDeletionSession={() => authController.getCurrentSession()}
-                  signOutAfterAccountDeletion={() => authController.clearAfterAccountDeletion()}
-                />,
-              )}
+              element={privateRoute(serverManagedAuth ? <ProfileSessionGate
+                key={profileKey} verify={(options) => authController.verifyProfileEntry(options)}
+                onVerified={handleProfileVerification}>
+                {profilePage}
+              </ProfileSessionGate> : profilePage)}
             />
             <Route
               path="/organisation-controls"
@@ -314,7 +440,7 @@ export default function App() {
               element={privateRoute(<Timetable userId={user?.id} />)}
             />
           </Routes>
-          <Footer user={user} />
+          <Footer user={profilePending ? null : user} />
           <TermsModal />
           <PrivacyModal />
           <CookieConsent />

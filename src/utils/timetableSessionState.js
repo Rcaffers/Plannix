@@ -14,7 +14,7 @@ export function sameSessions(left, right) {
   return JSON.stringify(clean(left)) === JSON.stringify(clean(right));
 }
 
-export function createSerializedSaveQueue({ save, onOptimistic, onAuthoritative, onError }) {
+export function createSerializedSaveQueue({ save, onOptimistic, onAuthoritative, onError, onTerminal }) {
   let queued = null;
   let running = false;
   let stopped = false;
@@ -23,26 +23,36 @@ export function createSerializedSaveQueue({ save, onOptimistic, onAuthoritative,
   async function drain(currentGeneration) {
     if (running || stopped) return;
     running = true;
-    while (queued && !stopped && currentGeneration === generation) {
-      const next = queued;
-      queued = null;
-      try {
-        const result = await save(next);
-        if (currentGeneration !== generation) break;
-        onAuthoritative(result, queued);
-      } catch (error) {
-        if (currentGeneration === generation) onError(error, next);
-        stopped = true;
+    const settled = [];
+    try {
+      while (queued && !stopped && currentGeneration === generation) {
+        const next = queued;
+        queued = null;
+        try {
+          const result = await save(next);
+          if (currentGeneration !== generation) { settled.push([next, 'stale']); break; }
+          const decision = onAuthoritative(result, queued, next);
+          settled.push([next, 'success', decision]);
+        } catch (error) {
+          const decision = currentGeneration === generation ? onError(error, next) : false;
+          if (currentGeneration === generation) stopped = true;
+          settled.push([next, currentGeneration === generation ? 'error' : 'stale', decision]);
+        }
       }
+    } finally {
+      if (currentGeneration === generation) running = false;
+      // Test observation follows all state and queue scheduling decisions.
+      for (const [entry, outcome, decision] of settled) onTerminal?.(entry, outcome, decision);
     }
-    running = false;
   }
 
   return {
     enqueue(value) {
       if (stopped) return false;
+      const replaced = queued;
       queued = value;
       onOptimistic(value);
+      if (replaced !== null) onTerminal?.(replaced, 'coalesced', false);
       void drain(generation);
       return true;
     },
@@ -50,7 +60,9 @@ export function createSerializedSaveQueue({ save, onOptimistic, onAuthoritative,
       stopped = false;
       return this.enqueue(value);
     },
-    reset() { generation += 1; queued = null; running = false; stopped = false; },
+    reset() { const discarded = queued;
+      generation += 1; queued = null; running = false; stopped = false;
+      if (discarded !== null) onTerminal?.(discarded, 'discarded', false); },
     get pending() { return running || queued !== null; },
     get conflicted() { return stopped; },
   };

@@ -33,7 +33,7 @@ function Harness() {
   const [sessions, setSessions] = useState([initial]);
   const [weekB, setWeekB] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState('A');
-  state = { ...feedback, retry() { retryCalls++; }, reload() { reloadCalls++; }, scope, revision: 1, periods, dated: { sessions, overrideExists: feedback.overrideExists }, loadDate(date) { loadedDates.push(date); }, recurring: [{ code: 'A', weekId: 'A', sessions }, { code: 'B', weekId: 'B', sessions: weekB }],
+  state = { ...feedback, retry() { retryCalls++; }, reload() { reloadCalls++; }, scope, revision: 1, periods, recurringReady: true, dated: { sessions, overrideExists: feedback.overrideExists }, loadDate(date) { loadedDates.push(date); }, recurring: [{ code: 'A', weekId: 'A', sessions }, { code: 'B', weekId: 'B', sessions: weekB }],
     edit(target, next) { if (observeSave) setFeedback({ isSaving: true }); calls.push({ target, sessions: next }); if (target.weekId === 'B') setWeekB(next); else setSessions(next); return true; } };
   if (testPageSpacing) return <>
     <header id="site-header-fixture" style={{ height: 64 }}>Site navigation</header>

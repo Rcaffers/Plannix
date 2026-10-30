@@ -1,4 +1,6 @@
 import { getSupabaseClient } from '../lib/supabase.js';
+import { serverManagedAuth, serverAuthFetch, captureServerOperationContext,
+  assertServerOperationContext } from './serverAuthTransport.js';
 import { API_BASE_URL, ApiError, JSON_POST_HEADERS, parseJsonSafe } from './api.js';
 import { CANONICAL_UUID } from './timetableLayoutPersistence.js';
 
@@ -104,18 +106,27 @@ async function defaultSession() {
 }
 
 export function createTimetableSessionApi({ fetchImpl = fetch, getSession = defaultSession } = {}) {
-  async function request(path, options, fallback, mapper) {
+  async function request(path, options, fallback, mapper, operationContext) {
+    const context = serverManagedAuth
+      ? operationContext || (['GET', 'HEAD'].includes(options.method) ? captureServerOperationContext() : null)
+      : null;
+    if (context) assertServerOperationContext(context);
     try {
-      const session = await getSession();
-      if (!session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
-      const response = await fetchImpl(`${API_BASE_URL}${path}`, { ...options, credentials: 'omit',
-        headers: { ...options?.headers, Authorization: `Bearer ${session.access_token}` } });
+      const session = serverManagedAuth ? null : await getSession();
+      if (!serverManagedAuth && !session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
+      const init = { ...options, credentials: 'omit', headers: { ...options?.headers,
+        ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.access_token}` }) } };
+      const response = serverManagedAuth
+        ? await serverAuthFetch(`${API_BASE_URL}${path}`, init, { fetchImpl, operationContext:context })
+        : await fetchImpl(`${API_BASE_URL}${path}`, init);
       const payload = await parseJsonSafe(response);
       const rawRequestId = response.headers?.get?.('x-request-id');
       const requestId = REQUEST_ID.test(String(rawRequestId || '')) ? rawRequestId : null;
       if (!response.ok) throw new ApiError(payload?.message || fallback, { status: response.status, requestId });
+      if (context) assertServerOperationContext(context);
       return { ...mapper(payload), requestId };
     } catch (error) {
+      if (error?.name === 'AbortError') throw error;
       if (error instanceof ApiError) throw error;
       throw new ApiError(fallback);
     }
@@ -127,15 +138,15 @@ export function createTimetableSessionApi({ fetchImpl = fetch, getSession = defa
   const query = (value, extras = {}) => new URLSearchParams({ ...scope(value), ...extras });
   const body = (value, extras = {}) => ({ ...scope(value), ...extras });
   return {
-    loadRecurring(value, { signal } = {}) { return request(`/api/timetable/sessions/recurring?${query(value)}`, { method: 'GET', signal }, 'Could not load timetable sessions.', mapRecurring); },
-    saveRecurring(value) { return request('/api/timetable/sessions/recurring', { method: 'PUT', headers: JSON_POST_HEADERS,
-      body: JSON.stringify(body(value, { weekId: uuid(value.weekId, 'Week'), expectedRevision: revision(value.expectedRevision), sessions: requestSessions(value.sessions) })) }, 'Could not save timetable sessions.', (payload) => mapSaved(payload)); },
-    loadDate(value, { signal } = {}) { return request(`/api/timetable/sessions/date?${query(value, { weekStartDate: monday(value.weekStartDate) })}`, { method: 'GET', signal }, 'Could not load timetable sessions.', mapDated); },
-    saveDate(value) { return request('/api/timetable/sessions/date', { method: 'PUT', headers: JSON_POST_HEADERS,
-      body: JSON.stringify(body(value, { weekStartDate: monday(value.weekStartDate), expectedRevision: revision(value.expectedRevision), sessions: requestSessions(value.sessions) })) }, 'Could not save timetable sessions.', (payload) => mapSaved(payload, true)); },
-    removeDate(value) { const q = query(value, { weekStartDate: monday(value.weekStartDate), expectedRevision: String(revision(value.expectedRevision)) });
-      return request(`/api/timetable/sessions/date?${q}`, { method: 'DELETE' }, 'Could not restore the repeating timetable.', mapDated); },
-    saveBatch(value) { if (!Array.isArray(value.mutations) || value.mutations.length < 1 || value.mutations.length > 20) throw new ApiError('Session mutations are invalid.');
+    loadRecurring(value, { signal, operationContext } = {}) { return request(`/api/timetable/sessions/recurring?${query(value)}`, { method: 'GET', signal }, 'Could not load timetable sessions.', mapRecurring, operationContext); },
+    saveRecurring(value, { operationContext } = {}) { return request('/api/timetable/sessions/recurring', { method: 'PUT', headers: JSON_POST_HEADERS,
+      body: JSON.stringify(body(value, { weekId: uuid(value.weekId, 'Week'), expectedRevision: revision(value.expectedRevision), sessions: requestSessions(value.sessions) })) }, 'Could not save timetable sessions.', (payload) => mapSaved(payload), operationContext); },
+    loadDate(value, { signal, operationContext } = {}) { return request(`/api/timetable/sessions/date?${query(value, { weekStartDate: monday(value.weekStartDate) })}`, { method: 'GET', signal }, 'Could not load timetable sessions.', mapDated, operationContext); },
+    saveDate(value, { operationContext } = {}) { return request('/api/timetable/sessions/date', { method: 'PUT', headers: JSON_POST_HEADERS,
+      body: JSON.stringify(body(value, { weekStartDate: monday(value.weekStartDate), expectedRevision: revision(value.expectedRevision), sessions: requestSessions(value.sessions) })) }, 'Could not save timetable sessions.', (payload) => mapSaved(payload, true), operationContext); },
+    removeDate(value, { operationContext } = {}) { const q = query(value, { weekStartDate: monday(value.weekStartDate), expectedRevision: String(revision(value.expectedRevision)) });
+      return request(`/api/timetable/sessions/date?${q}`, { method: 'DELETE' }, 'Could not restore the repeating timetable.', mapDated, operationContext); },
+    saveBatch(value, { operationContext } = {}) { if (!Array.isArray(value.mutations) || value.mutations.length < 1 || value.mutations.length > 20) throw new ApiError('Session mutations are invalid.');
       const targets = new Set(); const mutations = value.mutations.map((mutation) => { if (!['recurring', 'date_override'].includes(mutation.type)) throw new ApiError('Session mutation type is invalid.'); const target = mutation.type === 'recurring' ? `recurring:${mutation.weekId}` : `date:${mutation.weekStartDate}`; if (targets.has(target)) throw new ApiError('Session mutation targets must be unique.'); targets.add(target); return ({ type: mutation.type,
       ...(mutation.type === 'recurring' ? { weekId: uuid(mutation.weekId, 'Week') } : { weekStartDate: monday(mutation.weekStartDate) }),
       sessions: requestSessions(mutation.sessions) }); });
@@ -147,14 +158,14 @@ export function createTimetableSessionApi({ fetchImpl = fetch, getSession = defa
           weekId: uuid(collection.weekId, 'Week'), ...(collection.type === 'date_override' ? { weekStartDate: monday(collection.weekStartDate) } : {}),
           sessions: collection.sessions.map((entry) => publicSession(entry)),
         })) };
-      }); },
+      }, operationContext); },
   };
 }
 
 const timetableSessionApi = createTimetableSessionApi();
 export const fetchRecurringTimetableSessions = (scope, options) => timetableSessionApi.loadRecurring(scope, options);
-export const saveRecurringTimetableSessions = (input) => timetableSessionApi.saveRecurring(input);
+export const saveRecurringTimetableSessions = (input, options) => timetableSessionApi.saveRecurring(input, options);
 export const fetchDatedTimetableSessions = (input, options) => timetableSessionApi.loadDate(input, options);
-export const saveDatedTimetableSessions = (input) => timetableSessionApi.saveDate(input);
-export const removeDatedTimetableOverride = (input) => timetableSessionApi.removeDate(input);
-export const saveTimetableSessionBatch = (input) => timetableSessionApi.saveBatch(input);
+export const saveDatedTimetableSessions = (input, options) => timetableSessionApi.saveDate(input, options);
+export const removeDatedTimetableOverride = (input, options) => timetableSessionApi.removeDate(input, options);
+export const saveTimetableSessionBatch = (input, options) => timetableSessionApi.saveBatch(input, options);

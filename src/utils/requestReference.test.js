@@ -74,13 +74,88 @@ test('generation guards precede success and failure reference updates', async ()
     const source = await fs.readFile(new URL(`../context/${context}Context.jsx`, import.meta.url), 'utf8');
     const expected = context === 'TimetableSession' ? 'expected' : 'expectedGeneration';
     for (const name of names.filter((name) => !['removeOverride', 'saveBatch'].includes(name))) {
+      const loadGeneration = context === 'TimetableSession'
+        ? name === 'loadRecurring' ? 'recurringLoadGeneration' : 'datedLoadGeneration'
+        : 'generation';
       const start = source.indexOf(`const ${name} = useCallback(async`);
       const body = source.slice(start, source.indexOf('\n  },', start));
       const success = body.split(/\btry\s*\{/)[1].split(/\}\s*catch/)[0];
       const failure = body.split(/\}\s*catch/)[1];
-      assert.match(success, new RegExp(`if \\(${expected} !== generation\\.current\\) return [^;]+;[\\s\\S]*setRequestReference\\(''\\)`));
-      assert.match(failure, new RegExp(`if \\(${expected} === generation\\.current\\) \\{[\\s\\S]*setRequestReference\\(safeRequestReference`));
+      assert.match(success, new RegExp(`if \\(${expected} !== ${loadGeneration}\\.current\\) return [^;]+;[\\s\\S]*setRequestReference\\(''\\)`));
+      assert.match(failure, new RegExp(`if \\(${expected} === ${loadGeneration}\\.current\\) \\{[\\s\\S]*setRequestReference\\(safeRequestReference`));
     }
+  }
+});
+
+test('stale recurring and dated results cannot replace a newer load or its support reference', async () => {
+  const source = await fs.readFile(new URL('../context/TimetableSessionContext.jsx', import.meta.url), 'utf8');
+  const deferred = () => {
+    let resolve;
+    let reject;
+    const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
+  };
+  for (const [name, fetchName, resultKey, latestResult] of [
+    ['loadRecurring', 'fetchRecurringTimetableSessions', 'recurring',
+      { weeks: [{ weekId: 'new-week' }], revision: 12 }],
+    ['loadDate', 'fetchDatedTimetableSessions', 'dated',
+      { collectionId: 'new-date', revision: 22 }],
+  ]) {
+    const start = source.indexOf(`const ${name} = useCallback(`);
+    assert.ok(start >= 0, name);
+    const callbackStart = start + `const ${name} = useCallback(`.length;
+    const callbackEnd = source.indexOf('\n  },', callbackStart);
+    assert.ok(callbackEnd > callbackStart, name);
+    const callback = source.slice(callbackStart, callbackEnd + 4)
+      .replaceAll('import.meta.env.MODE', JSON.stringify('test'));
+    const pending = [];
+    const state = { recurring: null, dated: null, ready: false, revision: null,
+      loading: false, error: '', reference: '', saved: false, conflict: false, unsaved: false };
+    const setters = Object.fromEntries(Object.keys(state).map(key => [key,
+      value => { state[key] = value; }]));
+    const recurringLoadGeneration = { current: 0 };
+    const datedLoadGeneration = { current: 0 };
+    const dependencies = {
+      scope: { organisationId: 'organisation', academicYearId: 'year', timetableId: 'timetable' },
+      user: { id: 'user' }, resetSaveQueue: () => {}, recurringLoadGeneration,
+      datedLoadGeneration, observeTimetableOperation: () => {}, safeRequestReference,
+      [fetchName]: () => { const request = deferred(); pending.push(request); return request.promise; },
+      setRecurring: setters.recurring, setRecurringReady: setters.ready,
+      setDated: setters.dated, setRevision: setters.revision,
+      setIsLoading: setters.loading, setError: setters.error,
+      setRequestReference: setters.reference, setSaved: setters.saved,
+      setConflict: setters.conflict, setUnsaved: setters.unsaved,
+    };
+    const load = new Function(...Object.keys(dependencies), `return (${callback});`)(
+      ...Object.values(dependencies));
+    const invoke = () => name === 'loadDate' ? load('2026-10-26') : load();
+
+    const oldSuccess = invoke();
+    const newSuccess = invoke();
+    assert.equal(pending.length, 2, `${name} starts both requests`);
+    pending[1].resolve(latestResult);
+    assert.equal(await newSuccess, true);
+    assert.equal(state[resultKey], name === 'loadRecurring' ? latestResult.weeks : latestResult);
+    pending[0].resolve(name === 'loadRecurring'
+      ? { weeks: [{ weekId: 'old-week' }], revision: 1 }
+      : { collectionId: 'old-date', revision: 1 });
+    assert.equal(await oldSuccess, false);
+    assert.equal(state[resultKey], name === 'loadRecurring' ? latestResult.weeks : latestResult);
+    assert.equal(state.revision, latestResult.revision);
+    assert.deepEqual({ error: state.error, reference: state.reference, loading: state.loading },
+      { error: '', reference: '', loading: false });
+
+    const oldFailure = invoke();
+    const newFailure = invoke();
+    const currentError = Object.assign(new Error('Newer failure'), { requestId });
+    pending[3].reject(currentError);
+    assert.equal(await newFailure, false);
+    pending[2].reject(Object.assign(new Error('Stale failure'), {
+      requestId: '50000000-0000-4000-8000-000000000001',
+    }));
+    assert.equal(await oldFailure, false);
+    assert.deepEqual({ error: state.error, reference: state.reference, loading: state.loading },
+      { error: 'Newer failure', reference: requestId, loading: false });
   }
 });
 

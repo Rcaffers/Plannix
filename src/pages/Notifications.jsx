@@ -4,6 +4,8 @@ import SettingsSubnav from '../components/SettingsSubnav';
 import MorningSummaryPanel from '../components/MorningSummaryPanel.jsx';
 import { currentPushSubscription, disableCurrentDevice, pushRequest, pushSupport, reconcilePushAccount, vapidBytes, waitForPushAccountReconciliation } from '../utils/pushNotifications';
 import { pushCoordinationSupported, PUSH_LOCK_UNAVAILABLE, withPushDeviceLock } from '../utils/pushDeviceLock';
+import { serverManagedAuth, captureServerOperationContext,
+  assertServerOperationContext } from '../utils/serverAuthTransport';
 import './Settings.css';
 
 export default function Notifications({ userId, organisationId }) {
@@ -32,17 +34,21 @@ export default function Notifications({ userId, organisationId }) {
     if (!supported || !coordinated || !userId) { setLoading(false); return () => { generation.current++; busyRef.current = null; }; }
     (async () => {
       try {
-        const config = await pushRequest('config', undefined, { expectedUserId: userId });
+        const context = serverManagedAuth ? captureServerOperationContext(userId) : null;
+        const config = await pushRequest('config', undefined,
+          { expectedUserId: userId, operationContext:context });
         if (ticket !== generation.current) return;
         publicKey.current = config?.publicKey || null;
         setConfigLoaded(true);
         setConfigured(config?.configured === true && Boolean(publicKey.current));
         await withPushDeviceLock(async () => {
+          if (context) assertServerOperationContext(context);
           if (ticket !== generation.current) return;
           const subscription = await currentPushSubscription();
           if (!subscription) { if (ticket === generation.current) setRegistered(false); return; }
           if (config?.configured !== true) return;
-          const status = await pushRequest('status', { endpoint: subscription.endpoint }, { expectedUserId: userId });
+          const status = await pushRequest('status', { endpoint: subscription.endpoint },
+            { expectedUserId: userId, operationContext:context });
           if (typeof status?.registered !== 'boolean') throw new Error('Invalid device status.');
           if (ticket === generation.current) setRegistered(status.registered === true ? true : null);
         });
@@ -58,14 +64,17 @@ export default function Notifications({ userId, organisationId }) {
     const ticket = generation.current;
     busyRef.current = ticket;
     setBusy(true); setError(''); setNotice('');
-    try { await operation(ticket); }
+    try {
+      const context = serverManagedAuth ? captureServerOperationContext(userId) : null;
+      await operation(ticket,context);
+    }
     catch (caught) { if (ticket === generation.current) setError(caught?.message || 'Notification action failed.'); }
     finally {
       if (busyRef.current === ticket) { busyRef.current = null; setPermission(globalThis.Notification?.permission || 'unavailable'); setBusy(false); }
     }
   }
 
-  const enable = () => run(async (ticket) => {
+  const enable = () => run(async (ticket, context) => {
     await waitForPushAccountReconciliation();
     if (ticket !== generation.current) return;
     if (!configured || !publicKey.current) throw new Error('Notifications are not configured.');
@@ -75,6 +84,7 @@ export default function Notifications({ userId, organisationId }) {
     if (result !== 'granted') throw new Error(result === 'denied'
       ? 'Notifications are blocked in your browser settings.' : 'Notification permission was not granted.');
     await withPushDeviceLock(async () => {
+      if (context) assertServerOperationContext(context);
       if (ticket !== generation.current) return;
       const registration = await navigator.serviceWorker.register('/push-sw.js', { scope: '/' });
       if (ticket !== generation.current) return;
@@ -84,28 +94,33 @@ export default function Notifications({ userId, organisationId }) {
       });
       if (ticket !== generation.current) return;
       const details = subscription.toJSON();
-      await pushRequest('register', { subscription: { endpoint: details.endpoint, keys: details.keys } }, { expectedUserId: userId });
+      await pushRequest('register', { subscription: { endpoint: details.endpoint, keys: details.keys } },
+        { expectedUserId: userId, operationContext:context });
     });
     if (ticket !== generation.current) { void reconcilePushAccount().catch(() => {}); return; }
     setRegistered(true);
     setNotice('Notifications are enabled on this device.');
   });
-  const disable = () => run(async (ticket) => {
+  const disable = () => run(async (ticket, context) => {
+    if (context) assertServerOperationContext(context);
     const result = await disableCurrentDevice({ expectedUserId: userId,
-      isCurrent: () => generation.current === ticket });
+      isCurrent: () => generation.current === ticket,
+      operationContext:context });
     if (ticket !== generation.current) return;
     setRegistered(false);
     setNotice(result?.state === 'absent'
       ? 'This account has no registered notification subscription on this device.'
       : 'Notifications are disabled on this device.');
   });
-  const test = () => run(async (ticket) => {
+  const test = () => run(async (ticket, context) => {
     await withPushDeviceLock(async () => {
+      if (context) assertServerOperationContext(context);
       if (ticket !== generation.current) return;
       const subscription = await currentPushSubscription();
       if (ticket !== generation.current) return;
       if (!subscription) { setRegistered(false); throw new Error('This device is no longer subscribed. Enable notifications again.'); }
-      try { await pushRequest('test', { endpoint: subscription.endpoint }, { expectedUserId: userId }); }
+      try { await pushRequest('test', { endpoint: subscription.endpoint },
+        { expectedUserId: userId, operationContext:context }); }
       catch (caught) {
         if (ticket === generation.current && caught?.status === 410) setRegistered(null);
         throw caught;

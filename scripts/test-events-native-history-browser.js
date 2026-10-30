@@ -12,7 +12,8 @@ try {
   await build({ configFile: false, logLevel: 'error', define: { 'process.env.NODE_ENV': '"production"' },
     esbuild: { jsx: 'automatic' }, plugins: [{ name: 'history-test-mocks', enforce: 'pre', resolveId(source, importer) {
       if (importer?.endsWith('/App.jsx') && (source.startsWith('./') || source.startsWith('./utils/'))) {
-        if (source === './pages/Events' || source.endsWith('.css')) return null;
+        if (source === './pages/Events' || source.endsWith('.css')
+          || source === './utils/serverAuthController' || source === './utils/serverAuthTransport') return null;
         return path.resolve('src/pages/Events.history-browser-test.jsx');
       }
       if (importer?.endsWith('/Events.jsx') && ['../context/AcademicYearContext', '../utils/eventApi.js'].includes(source)) {

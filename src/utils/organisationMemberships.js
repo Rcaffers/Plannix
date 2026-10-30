@@ -1,4 +1,7 @@
 import { getSupabaseClient } from '../lib/supabase.js';
+import { serverManagedAuth, serverAuthFetch, serverSessionStatus,
+  assertServerResponseCurrent, captureServerOperationContext,
+  assertServerOperationContext } from './serverAuthTransport.js';
 
 export const ORGANISATION_ADMIN_ROLE = 'Organisation Admin';
 
@@ -50,8 +53,22 @@ export function buildOrganisationMemberships({ memberships, organisations, assig
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-export async function loadOrganisationMemberships({ userId, client = getSupabaseClient() }) {
+export async function loadOrganisationMemberships({ userId, client } = {}) {
   if (!String(userId || '').trim()) return [];
+
+  if (serverManagedAuth) {
+    const context = captureServerOperationContext(userId);
+    const status = await serverSessionStatus(fetch,{operationContext:context});
+    assertServerOperationContext(context);
+    if (!status.authenticated || status.userId !== userId) throw new OrganisationMembershipError();
+    const response = await serverAuthFetch('/api/memberships',{},
+      {operationContext:context});
+    const payload = await response.json().catch(() => null);
+    assertServerResponseCurrent(response);
+    if (!response.ok || !Array.isArray(payload?.memberships)) throw new OrganisationMembershipError();
+    return payload.memberships;
+  }
+  client ||= getSupabaseClient();
 
   const memberships = rows(await client
     .from('plannix_organisation_users')

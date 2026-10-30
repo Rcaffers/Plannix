@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../lib/supabase.js';
+import { serverManagedAuth, serverAuthFetch, captureServerOperationContext } from './serverAuthTransport.js';
 import { API_BASE_URL, ApiError, parseJsonSafe } from './api.js';
 import { IMPORT_DESTINATIONS, IMPORT_IMAGE_BYTES, IMPORT_TEXT_BYTES, normalizeImportPreview } from '../../shared/importPreview.js';
 import { boundaryError } from './holidayReview.js';
@@ -37,22 +38,27 @@ async function session() {
 }
 export function createImportPreviewApi({ fetchImpl = fetch, getSession = session } = {}) {
   return async function extract({ destination, mode, text = '', file = null, academicYearStartDate, academicYearEndDate }, { signal } = {}) {
+    const operationContext = serverManagedAuth ? captureServerOperationContext() : null;
     try {
       if (!IMPORT_DESTINATIONS.includes(destination) || boundaryError(academicYearStartDate, academicYearEndDate))
         throw new ApiError('Select an academic year with valid dates.', { status: 400 });
       const sourceError = importSourceError({ mode, text, file });
       if (sourceError) throw new ApiError(sourceError, { status: 400 });
       signal?.throwIfAborted();
-      const active = await getSession();
+      const active = serverManagedAuth ? null : await getSession();
       signal?.throwIfAborted();
-      if (!active?.access_token) throw new ApiError(safeMessages[401], { status: 401 });
+      if (!serverManagedAuth && !active?.access_token) throw new ApiError(safeMessages[401], { status: 401 });
       const query = new URLSearchParams({ destination, boundaryStart: academicYearStartDate, boundaryEnd: academicYearEndDate });
       const path = mode === 'text' ? '/api/ai/import-preview/extract'
         : `/api/ai/import-preview/extract-${mode}?${query}`;
-      const response = await fetchImpl(`${API_BASE_URL}${path}`, { method: 'POST', credentials: 'omit', cache: 'no-store', signal,
-        headers: { Authorization: `Bearer ${active.access_token}`, 'Content-Type': mode === 'text' ? 'application/json'
+      const init = { method: 'POST', credentials: 'omit', cache: 'no-store', signal,
+        headers: { ...(serverManagedAuth ? {} : { Authorization: `Bearer ${active.access_token}` }),
+          'Content-Type': mode === 'text' ? 'application/json'
           : mode === 'csv' ? 'text/csv' : mode === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : file.type },
-        body: mode === 'text' ? JSON.stringify({ destination, text, academicYearStartDate, academicYearEndDate }) : file });
+        body: mode === 'text' ? JSON.stringify({ destination, text, academicYearStartDate, academicYearEndDate }) : file };
+      const response = serverManagedAuth
+        ? await serverAuthFetch(`${API_BASE_URL}${path}`, init, { fetchImpl, operationContext })
+        : await fetchImpl(`${API_BASE_URL}${path}`, init);
       const payload = await parseJsonSafe(response);
       signal?.throwIfAborted();
       const requestId = response.headers?.get?.('x-request-id');

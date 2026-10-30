@@ -1,4 +1,6 @@
 import { createServerSupabaseClient } from '../supabase/client.js';
+import { env } from '../config/env.js';
+import { getServerAuthRuntime } from '../auth/serverAuthRuntime.js';
 
 const MAX_ACCESS_TOKEN_LENGTH = 8192;
 const AUTH_REQUIRED = 'Authentication is required.';
@@ -86,4 +88,6 @@ export function createRequireSupabaseAuth({
   };
 }
 
-export const requireSupabaseAuth = createRequireSupabaseAuth();
+export const requireSupabaseAuth = env.authMode === 'server'
+  ? (req, res, next) => getServerAuthRuntime().requireAuth(req, res, next)
+  : createRequireSupabaseAuth();

@@ -8,9 +8,11 @@ import { env } from './config/env.js';
 import { corsDelegate } from './config/cors.js';
 import { createProductionCspConfig, reportingEndpoints } from './config/csp.js';
 import { analyticsHostBoundary } from './config/analyticsHost.js';
+import { registerIngressDiagnostic } from './config/ingressDiagnostic.js';
 import { errorHandler, logRouteError, sendError } from './middleware/errorHandler.js';
 import { notFound } from './middleware/notFound.js';
 import { requestId } from './middleware/requestId.js';
+import { createAuthPerformance } from './observability/authPerformance.js';
 import { registerAiHolidayExtractionRoutes } from './routes/ai-holiday-extraction-routes.js';
 import { registerAiImportPreviewRoutes } from './routes/ai-import-preview-routes.js';
 import { registerAiConnectionRoutes } from './routes/ai-connection-routes.js';
@@ -25,6 +27,9 @@ import { registerTimetableLayoutRoutes } from './routes/timetable-layout-routes.
 import { registerTimetableSessionRoutes } from './routes/timetable-session-routes.js';
 import { registerPushRoutes } from './routes/push-routes.js';
 import { registerMorningSummaryRoutes } from './routes/morning-summary-routes.js';
+import { getServerAuthRuntime } from './auth/serverAuthRuntime.js';
+import { registerServerAuthMembershipRoutes } from './routes/server-auth-membership-routes.js';
+import { requireMatchingBuild } from './config/buildAuthMode.js';
 
 export const app = express();
 if (env.nodeEnv === 'production' && env.analyticsFrameOrigin
@@ -39,6 +44,8 @@ app.use(analyticsHostBoundary({ analyticsFrameOrigin: productionCsp?.analyticsFr
   applicationOrigin: productionCsp?.applicationOrigin, measurementId: env.gaMeasurementId,
   frameCsp: productionCsp?.analyticsFrameContentSecurityPolicy }));
 app.use(requestId);
+app.use(createAuthPerformance({ enabled: env.authMode === 'server'
+  && env.serverAuthPerformanceEnabled }).middleware);
 app.use(helmet({
   contentSecurityPolicy: productionCsp?.contentSecurityPolicy || false,
   strictTransportSecurity: {
@@ -48,7 +55,14 @@ app.use(helmet({
   },
 }));
 if (productionCsp) app.use(reportingEndpoints(productionCsp));
+registerIngressDiagnostic({ app, enabled: env.ingressDiagnosticEnabled,
+  token: env.ingressDiagnosticToken, authMode: env.authMode });
 app.use(cors(corsDelegate));
+if (env.authMode === 'server') {
+  // One application-wide mode. The legacy bearer middleware is not mounted in
+  // this mode, and the auth router owns its bounded parser.
+  app.use('/__stage3/auth', getServerAuthRuntime().authRouter);
+}
 
 registerCspReportRoutes({
   app,
@@ -110,10 +124,12 @@ async function fetchUkBankHolidaysForYear(year) {
 }
 
 registerContactRoutes({ app, escapeHtml, logRouteError, normalizeEmailInput });
-registerAccountRoutes({ app });
+if (env.authMode !== 'server') registerAccountRoutes({ app });
 registerAcademicYearRoutes({ app });
 registerEventRoutes({ app });
 registerClassRoutes({ app });
+if (env.authMode === 'server') registerServerAuthMembershipRoutes({ app,
+  requireAuth: getServerAuthRuntime().requireAuth });
 registerTimetableLayoutRoutes({ app });
 registerTimetableSessionRoutes({ app });
 registerHolidayRoutes({
@@ -128,6 +144,7 @@ registerHolidayRoutes({
 app.use(notFound);
 
 if (fs.existsSync(env.distDirectory)) {
+  app.use(requireMatchingBuild(env.distDirectory, env.authMode));
   app.use(express.static(env.distDirectory, { index: ['index.html'] }));
   app.get(/.*/, (_req, res, next) => {
     res.sendFile(path.join(env.distDirectory, 'index.html'), (error) => {
