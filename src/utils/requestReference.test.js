@@ -81,8 +81,10 @@ test('generation guards precede success and failure reference updates', async ()
       const body = source.slice(start, source.indexOf('\n  },', start));
       const success = body.split(/\btry\s*\{/)[1].split(/\}\s*catch/)[0];
       const failure = body.split(/\}\s*catch/)[1];
-      assert.match(success, new RegExp(`if \\(${expected} !== ${loadGeneration}\\.current\\) return [^;]+;[\\s\\S]*setRequestReference\\(''\\)`));
-      assert.match(failure, new RegExp(`if \\(${expected} === ${loadGeneration}\\.current\\) \\{[\\s\\S]*setRequestReference\\(safeRequestReference`));
+      const contextGuard = context === 'TimetableSession' ? ' && contextIsCurrent\\(operationContext\\)' : '';
+      const staleContextGuard = context === 'TimetableSession' ? ' \\|\\| !contextIsCurrent\\(operationContext\\)' : '';
+      assert.match(success, new RegExp(`if \\(${expected} !== ${loadGeneration}\\.current${staleContextGuard}\\) return [^;]+;[\\s\\S]*setRequestReference\\(''\\)`));
+      assert.match(failure, new RegExp(`if \\(${expected} === ${loadGeneration}\\.current${contextGuard}\\) \\{[\\s\\S]*setRequestReference\\(safeRequestReference`));
     }
   }
 });
@@ -119,6 +121,7 @@ test('stale recurring and dated results cannot replace a newer load or its suppo
       scope: { organisationId: 'organisation', academicYearId: 'year', timetableId: 'timetable' },
       user: { id: 'user' }, resetSaveQueue: () => {}, recurringLoadGeneration,
       datedLoadGeneration, observeTimetableOperation: () => {}, safeRequestReference,
+      serverManagedAuth: false, loadOperationContext: () => null, contextIsCurrent: () => true,
       [fetchName]: () => { const request = deferred(); pending.push(request); return request.promise; },
       setRecurring: setters.recurring, setRecurringReady: setters.ready,
       setDated: setters.dated, setRevision: setters.revision,
@@ -156,6 +159,82 @@ test('stale recurring and dated results cannot replace a newer load or its suppo
     assert.equal(await oldFailure, false);
     assert.deepEqual({ error: state.error, reference: state.reference, loading: state.loading },
       { error: 'Newer failure', reference: requestId, loading: false });
+  }
+});
+
+test('recurring and dated loads ignore stale session outcomes without changing newer state', async () => {
+  const source = await fs.readFile(new URL('../context/TimetableSessionContext.jsx', import.meta.url), 'utf8');
+  const deferred = () => {
+    let resolve; let reject;
+    const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
+  };
+  for (const [name, fetchName, resultKey, payload] of [
+    ['loadRecurring', 'fetchRecurringTimetableSessions', 'recurring', { weeks:[{ weekId:'old' }], revision:9 }],
+    ['loadDate', 'fetchDatedTimetableSessions', 'dated', { collectionId:'old', revision:9 }],
+  ]) {
+    const start = source.indexOf(`const ${name} = useCallback(`);
+    const callbackStart = start + `const ${name} = useCallback(`.length;
+    const callback = source.slice(callbackStart, source.indexOf('\n  },', callbackStart) + 4)
+      .replaceAll('import.meta.env.MODE', JSON.stringify('test'));
+    for (const transition of ['same-account', 'other-account', 'logout']) {
+      for (const outcome of ['success', 'failure']) {
+        const pending = [];
+        const state = { recurring:[{ weekId:'new' }], dated:{ collectionId:'new' }, ready:true,
+          revision:42, loading:false, error:'', reference:'', saved:false,
+          conflict:false, unsaved:false };
+        const setters = Object.fromEntries(Object.keys(state).map(key => [key,
+          value => { state[key] = value; }]));
+        const oldContext = Object.freeze({ userId:'user', sessionName:'session-1', generation:1 });
+        let activeContext = oldContext;
+        const requests = [];
+        const dependencies = {
+          scope:{ organisationId:'org', academicYearId:'year', timetableId:'table' },
+          user:{ id:'user' }, resetSaveQueue:() => {},
+          recurringLoadGeneration:{ current:0 }, datedLoadGeneration:{ current:0 },
+          serverManagedAuth:true,
+          loadOperationContext:userId => activeContext?.userId === userId ? activeContext : undefined,
+          contextIsCurrent:context => context === activeContext,
+          observeTimetableOperation:() => {}, safeRequestReference,
+          [fetchName]:(_scope, options) => { const request = deferred();
+            requests.push(options.operationContext); pending.push(request); return request.promise; },
+          setRecurring:setters.recurring, setRecurringReady:setters.ready,
+          setDated:setters.dated, setRevision:setters.revision,
+          setIsLoading:setters.loading, setError:setters.error,
+          setRequestReference:setters.reference, setSaved:setters.saved,
+          setConflict:setters.conflict, setUnsaved:setters.unsaved,
+        };
+        const load = new Function(...Object.keys(dependencies), `return (${callback});`)(
+          ...Object.values(dependencies));
+        const invoke = () => name === 'loadDate' ? load('2026-10-26') : load();
+        const old = invoke();
+        assert.equal(requests[0], oldContext, `${name} captures its original context`);
+        activeContext = transition === 'logout' ? null : Object.freeze({
+          userId:transition === 'other-account' ? 'other' : 'user',
+          sessionName:'session-2', generation:2 });
+        if (transition === 'same-account') {
+          const fresh = invoke();
+          assert.equal(requests[1], activeContext, `${name} sends the replacement context`);
+          pending[1].resolve(name === 'loadRecurring'
+            ? { weeks:[{ weekId:'new' }], revision:42 }
+            : { collectionId:'new', revision:42 });
+          assert.equal(await fresh, true);
+        } else {
+          assert.equal(await invoke(), false, `${name} does not start a load under another account or logout`);
+          assert.equal(requests.length, 1);
+          Object.assign(state, { recurring:[{ weekId:'new' }], dated:{ collectionId:'new' },
+            ready:true, revision:42, loading:false, error:'', reference:'', saved:false,
+            conflict:false, unsaved:false });
+        }
+        const beforeOld = { ...state };
+        if (outcome === 'success') pending[0].resolve(payload);
+        else pending[0].reject(Object.assign(Error('Authentication is required.'), { requestId }));
+        assert.equal(await old, false);
+        assert.deepEqual(state, beforeOld,
+          `${name} stale ${outcome} after ${transition} changes no readiness, loading, revision, data, error or reference`);
+        assert.equal(state[resultKey], beforeOld[resultKey]);
+      }
+    }
   }
 });
 

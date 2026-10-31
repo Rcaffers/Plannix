@@ -27,7 +27,8 @@ export default function TimetableObserved(props) {
   const state = () => ({ dated: current.dated?.weekStartDate,
     sessions: current.dated?.sessions, revision: current.revision,
     isSaving: current.isSaving, saved: current.saved, error: current.error,
-    unsaved: current.unsaved });
+    requestReference:current.requestReference, recurringReady:current.recurringReady,
+    isLoading:current.isLoading, unsaved: current.unsaved });
   useLayoutEffect(() => {
     window.__firstLoginPlannerState = {
       yearId: academic.selectedAcademicYearId,
@@ -82,6 +83,7 @@ export default function TimetableObserved(props) {
           current.dated.sessions.map(session => ({ ...session, title })));
       },
       retry: () => current.retry(),
+      reload: () => current.reload(),
       state,
     };
     return () => { if (window.__timetableContextTest?.id === id)

@@ -26,9 +26,10 @@ let server,chrome,socket;
 let failure;
 const requests=[];const reads=[];const writes=[];const heldReads=[];const heldWrites=[];
 const heldRecurring=[];
+const heldDatedLoads=[];
 const heldLoginRestores=[];
 const routeErrors=[];
-let heldSnapshotDate=null,holdSave=false,failNextSave=false,holdInitialRecurring=false,failNextRecurring=false;
+let heldSnapshotDate=null,holdDatedLoad=false,holdSave=false,failNextSave=false,holdInitialRecurring=false,failNextRecurring=false;
 let holdPostLoginBootstrap=false,postLoginBootstrapCount=0,holdFirstMembership=false;
 const heldMemberships=[];
 const records=new Map([[A,{revision:1,title:'Initial A'}],[B,{revision:1,title:'Initial B'}]]);
@@ -229,6 +230,9 @@ try {
       if(!write&&holdInitialRecurring&&name==='plannix_get_recurring_timetable_sessions'
         && auth.userId===A){holdInitialRecurring=false;
         return new Promise(resolve=>heldRecurring.push({item,release:()=>resolve(finish())}));}
+      if(!write&&holdDatedLoad&&name==='plannix_get_dated_timetable_sessions'
+        && auth.userId===A&&args.target_week_start_date===initialWeek){holdDatedLoad=false;
+        return new Promise(resolve=>heldDatedLoads.push({item,release:()=>resolve(finish())}));}
       if(!write&&heldSnapshotDate&&name==='plannix_get_dated_timetable_sessions'
         && args.target_week_start_date === heldSnapshotDate) { heldSnapshotDate=null;
         return new Promise(resolve=>heldReads.push({item,release:()=>resolve(finish())})); }
@@ -485,6 +489,41 @@ try {
   assert.equal(writes.length,beforeReplacement,'old-version queue never dispatches');
   assert.equal(await evaluate("window.__timetableContextTest.state().saved"),false);
 
+  // A same-account replacement keeps the real provider mounted. A dated load
+  // captured under the old version must not alter its new-version state.
+  holdDatedLoad=true;
+  await evaluate("(() => { void window.__timetableContextTest.reload(); return true; })()");
+  await waitForServer(()=>heldDatedLoads.length===1,'old-version dated load reached its route hold');
+  const oldDatedOperation=await lastOperation('dated-start');
+  const oldDated=heldDatedLoads.shift();
+  const oldDatedVersion=oldDated.item.expectedSession;
+  const sameProvider=await evaluate('window.__timetableProviderMountId');
+  await evaluate("document.querySelector('a[href=\"/profile\"]')?.click()");
+  await waitFor("location.pathname==='/profile' && Boolean(document.querySelector('#personal-details-title'))",
+    'Profile before dated-load replacement');
+  const newDatedSession=await issueLogin('synthetic@example.test');
+  assert.notEqual(newDatedSession.sessionName,oldDatedVersion);
+  await evaluate("document.querySelector('a[href=\"/settings\"]')?.click()");
+  await waitFor("location.pathname==='/settings'",'Settings before dated-load verification');
+  await evaluate("document.querySelector('a[href=\"/profile\"]')?.click()");
+  await waitFor("location.pathname==='/profile' && Boolean(document.querySelector('#personal-details-title'))",
+    'Profile verifies new dated-load session');
+  assert.equal(await evaluate('window.__timetableProviderMountId'),sameProvider,
+    'same-account replacement does not remount the production provider');
+  await evaluate("document.querySelector('a[href=\"/timetable\"]')?.click()");
+  await waitFor("window.__timetableContextTest?.state().sessions?.[0]?.title==='A replacement first'",
+    'new-version dated load reaches the real displayed timetable');
+  const newDatedCommitted=await evaluate('window.__timetableCommittedState');
+  assert.equal(newDatedCommitted.sessionName,newDatedSession.sessionName);
+  oldDated.release();
+  await awaitTerminal(oldDatedOperation.id,'dated-terminal','old-version dated handler completed');
+  assert.equal(await evaluate(`window.__timetableOperations.find(event=>
+    event.kind==='dated-terminal'&&event.id===${JSON.stringify(oldDatedOperation.id)})?.outcome`),'stale');
+  assert.deepEqual(await evaluate('window.__timetableCommittedState'),newDatedCommitted,
+    'stale dated handler schedules no update to the mounted provider');
+  assert.equal(oldDated.item.owner,A);
+  assert.equal(oldDated.item.expectedSession,oldDated.item.selectedSessionName);
+
   // A late failed accepted request also cannot set B's error, cache or save state.
   holdSave=true;failNextSave=true;
   assert.equal(await evaluate("window.__timetableContextTest.edit('A late error')"),true);
@@ -611,6 +650,7 @@ try {
     heldLoginRestores.splice(0).forEach(item=>item.release());
     heldMemberships.splice(0).forEach(item=>item.release());
     heldRecurring.splice(0).forEach(item=>item.release());
+    heldDatedLoads.splice(0).forEach(item=>item.release());
     heldWrites.splice(0).forEach(item=>item.release());});
   await cleanup(async()=>socket?.close());
   let chromeExited=!chrome || chrome.exitCode!==null || chrome.signalCode!==null;

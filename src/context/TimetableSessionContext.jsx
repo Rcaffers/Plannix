@@ -10,12 +10,16 @@ import {
 import { assertUniqueSessionSlots, createSerializedSaveQueue } from '../utils/timetableSessionState';
 import { observeTimetableOperation } from '../utils/timetableTestObserver';
 import { serverManagedAuth, captureServerOperationContext,
-  assertServerOperationContext } from '../utils/serverAuthTransport.js';
+  assertServerOperationContext, serverSessionGeneration } from '../utils/serverAuthTransport.js';
 
 const TimetableSessionContext = createContext(null);
 function contextIsCurrent(context) {
   if (!context) return true;
   try { assertServerOperationContext(context); return true; } catch { return false; }
+}
+function loadOperationContext(userId) {
+  if (!serverManagedAuth) return null;
+  try { return captureServerOperationContext(userId); } catch { return undefined; }
 }
 
 export function TimetableSessionProvider({ children, user }) {
@@ -26,6 +30,7 @@ export function TimetableSessionProvider({ children, user }) {
   const scope = useMemo(() => organisationId && selectedAcademicYearId && timetableId
     ? { organisationId, academicYearId: selectedAcademicYearId, timetableId } : null,
   [organisationId, selectedAcademicYearId, timetableId]);
+  const sessionGeneration = serverManagedAuth ? serverSessionGeneration() : null;
   const [recurring, setRecurring] = useState([]);
   const [recurringReady, setRecurringReady] = useState(false);
   const [dated, setDated] = useState(null);
@@ -80,6 +85,8 @@ export function TimetableSessionProvider({ children, user }) {
 
   const loadRecurring = useCallback(async () => {
     if (!scope) return false;
+    const operationContext = loadOperationContext(user?.id);
+    if (serverManagedAuth && !operationContext) return false;
     resetSaveQueue();
     const expected = ++recurringLoadGeneration.current; setRecurringReady(false);
     const observedId = import.meta.env.MODE === 'stage4-timetable-browser-test'
@@ -88,18 +95,18 @@ export function TimetableSessionProvider({ children, user }) {
     let outcome = 'stale';
     setIsLoading(true); setError(''); setRequestReference(''); setSaved(false);
     try {
-      const result = await fetchRecurringTimetableSessions(scope);
-      if (expected !== recurringLoadGeneration.current) return false;
+      const result = await fetchRecurringTimetableSessions(scope, { operationContext });
+      if (expected !== recurringLoadGeneration.current || !contextIsCurrent(operationContext)) return false;
       setRecurring(result.weeks); setRecurringReady(true); setRevision(result.revision); setRequestReference('');
       setConflict(false); setUnsaved(false); outcome = 'success'; return true;
     } catch (loadError) {
-      if (expected === recurringLoadGeneration.current) { setError(loadError.message || 'Could not load timetable sessions.'); setRequestReference(safeRequestReference(loadError)); outcome = 'error'; }
+      if (expected === recurringLoadGeneration.current && contextIsCurrent(operationContext)) { setError(loadError.message || 'Could not load timetable sessions.'); setRequestReference(safeRequestReference(loadError)); outcome = 'error'; }
       return false;
-    } finally { if (expected === recurringLoadGeneration.current) setIsLoading(false);
+    } finally { if (expected === recurringLoadGeneration.current && contextIsCurrent(operationContext)) setIsLoading(false);
       observeTimetableOperation({ kind: 'recurring-terminal', id: observedId, outcome }); }
   }, [scope, resetSaveQueue, user?.id]);
 
-  useEffect(() => { clear(); if (scope && user?.id) void loadRecurring(); return clear; }, [scope, user?.id]);
+  useEffect(() => { clear(); if (scope && user?.id) void loadRecurring(); return clear; }, [scope, user?.id, sessionGeneration]);
   const hasPending = isSaving || unsaved;
   useEffect(() => registerAcademicYearChangeGuard(() => !hasPending
     || window.confirm('Timetable changes are not saved. Discard them and switch academic years?')),
@@ -112,17 +119,24 @@ export function TimetableSessionProvider({ children, user }) {
 
   const loadDate = useCallback(async (weekStartDate) => {
     if (!scope) return false;
+    const operationContext = loadOperationContext(user?.id);
+    if (serverManagedAuth && !operationContext) return false;
     resetSaveQueue();
     const expected = ++datedLoadGeneration.current; setIsLoading(true); setError(''); setRequestReference(''); setSaved(false);
+    const observedId = import.meta.env.MODE === 'stage4-timetable-browser-test'
+      ? globalThis.crypto?.randomUUID?.() : null;
+    observeTimetableOperation({ kind:'dated-start', id:observedId, userId:user?.id });
+    let outcome = 'stale';
     try {
-      const result = await fetchDatedTimetableSessions({ ...scope, weekStartDate });
-      if (expected !== datedLoadGeneration.current) return false;
+      const result = await fetchDatedTimetableSessions({ ...scope, weekStartDate }, { operationContext });
+      if (expected !== datedLoadGeneration.current || !contextIsCurrent(operationContext)) return false;
       setDated(result); setRevision(result.revision); setRequestReference('');
-      setConflict(false); setUnsaved(false); return true;
+      setConflict(false); setUnsaved(false); outcome = 'success'; return true;
     } catch (loadError) {
-      if (expected === datedLoadGeneration.current) { setError(loadError.message || 'Could not load timetable sessions.'); setRequestReference(safeRequestReference(loadError)); }
+      if (expected === datedLoadGeneration.current && contextIsCurrent(operationContext)) { setError(loadError.message || 'Could not load timetable sessions.'); setRequestReference(safeRequestReference(loadError)); outcome = 'error'; }
       return false;
-    } finally { if (expected === datedLoadGeneration.current) setIsLoading(false); }
+    } finally { if (expected === datedLoadGeneration.current && contextIsCurrent(operationContext)) setIsLoading(false);
+      observeTimetableOperation({ kind:'dated-terminal', id:observedId, outcome }); }
   }, [scope, resetSaveQueue]);
 
   const applyAuthoritative = useCallback((target, result, queued, observedId) => {
