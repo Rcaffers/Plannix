@@ -77,6 +77,26 @@ test('push registration rejects an account change during status preflight withou
   } finally {await f.close();}
 });
 
+test('server-mode uncertain removal never unsubscribes after a captured claim',async()=>{
+  const f=await fixture();const calls=[];
+  const subscription={endpoint:'https://fcm.googleapis.com/fcm/send/synthetic-device-token',
+    toJSON:()=>({keys:{p256dh:'p'.repeat(87),auth:'a'.repeat(22)}}),
+    unsubscribe:async()=>{calls.push('unsubscribe');return true;}};
+  const browser={isSecureContext:true,PushManager:class {},Notification:{permission:'granted'},
+    navigator:{locks:{request:async (_name,_options,callback)=>callback({name:'plannix-push-device'})},
+      serviceWorker:{getRegistration:async()=>({pushManager:{getSubscription:async()=>subscription}})}}};
+  try {
+    f.selectA();const context=f.transport.captureServerOperationContext(A);
+    await assert.rejects(f.push.disableCurrentDevice({browser,expectedUserId:A,operationContext:context,
+      request:async path=>{
+        calls.push(path);
+        if(path==='claim') return {state:'current',version:'ca000000-0000-4000-8000-000000000099'};
+        throw Error('Synthetic transport failure after server admission.');
+      }}));
+    assert.deepEqual(calls,['claim','remove'],'a claim is not permission to unsubscribe after uncertain removal');
+  } finally {await f.close();}
+});
+
 for (const replacement of ['different account','same account, new session']) {
   test(`dated snapshot preparation cannot save after ${replacement}`,async()=>{
     const f=await fixture();const snapshots=deferred();let saves=0;

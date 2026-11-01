@@ -5,6 +5,8 @@ import { endpointHash, validPushEndpoint, validPushSubscription, TEST_PUSH_PAYLO
 
 const USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const unavailable = () => new Error('Notifications are unavailable.');
+const changed = () => Object.assign(new Error('This device subscription changed. Reload notification settings before trying again.'),
+  { statusCode: 409, expose: true });
 
 export function pushConfiguration(config = env) {
   const publicKey = config.vapidPublicKey;
@@ -31,27 +33,72 @@ export function createPushService({ config = env, createClientImpl = createClien
     if (typeof value !== 'string' || !USER_ID.test(value)) throw unavailable();
     return value;
   }
+  function session(value) {
+    if (typeof value !== 'string' || !USER_ID.test(value)) throw unavailable();
+    return value;
+  }
+  const serverSession = (options) => config.authMode === 'server'
+    ? session(options?.sessionId) : null;
   return {
     configured: () => Boolean(pushConfiguration(config)),
     publicKey: () => pushConfiguration(config)?.publicKey || null,
-    async status(userId, endpoint) {
+    async status(userId, endpoint, options) {
       if (!validPushEndpoint(endpoint)) throw unavailable();
+      if (config.authMode === 'server') {
+        user(userId);
+        const result = await rpc('plannix_push_status_installation', {
+          target_session:serverSession(options), target_hash:endpointHash(endpoint),
+        });
+        if (result?.state !== 'current' || typeof result.registered !== 'boolean'
+          || typeof result.boundToCurrentSession !== 'boolean' || result.detailEligible !== false)
+          throw unavailable();
+        return result;
+      }
       const data = await rpc('plannix_push_device_status', { validated_user_id: user(userId), target_hash: endpointHash(endpoint) });
       if (typeof data !== 'boolean') throw unavailable();
-      return data;
+      return { registered:data };
     },
-    async register(userId, subscription) {
+    async observe(userId, subscription, options) {
+      if (config.authMode !== 'server' || !validPushSubscription(subscription)) throw unavailable();
+      user(userId);
+      const result = await rpc('plannix_push_observe_installation', {
+        target_session:serverSession(options), target_hash:endpointHash(subscription.endpoint),
+        target_p256dh:subscription.keys.p256dh, target_auth:subscription.keys.auth,
+      });
+      if (result?.state === 'absent' && (result.version === null
+        || (typeof result.version === 'string' && USER_ID.test(result.version))))
+        return { state:'absent', version:result.version };
+      if (result?.state === 'current' && USER_ID.test(result.version)) return { state:'current', version:result.version };
+      if (result?.state === 'changed') throw changed();
+      throw unavailable();
+    },
+    async register(userId, subscription, options) {
       if (!pushConfiguration(config) || !validPushSubscription(subscription)) throw unavailable();
+      if (config.authMode === 'server') {
+        user(userId);
+        const expectedVersion = options?.expectedVersion;
+        if (expectedVersion !== null && (typeof expectedVersion !== 'string' || !USER_ID.test(expectedVersion))) throw unavailable();
+        const result = await rpc('plannix_push_register_installation', {
+          target_session:serverSession(options), target_hash:endpointHash(subscription.endpoint),
+          target_endpoint:subscription.endpoint, target_p256dh:subscription.keys.p256dh,
+          target_auth:subscription.keys.auth, expected_version:expectedVersion,
+        });
+        if (result?.state === 'conflict') throw changed();
+        if (result?.state !== 'registered' || !USER_ID.test(result.version)) throw unavailable();
+        return;
+      }
       const result = await rpc('plannix_push_register_device', {
         validated_user_id: user(userId), target_hash: endpointHash(subscription.endpoint),
         target_endpoint: subscription.endpoint, target_p256dh: subscription.keys.p256dh, target_auth: subscription.keys.auth,
       });
       if (result !== true) throw unavailable();
     },
-    async claim(userId, subscription) {
+    async claim(userId, subscription, options) {
       if (!validPushSubscription(subscription)) throw unavailable();
-      const result = await rpc('plannix_push_claim_device', {
-        validated_user_id: user(userId), target_hash: endpointHash(subscription.endpoint),
+      const scoped = config.authMode === 'server';
+      const result = await rpc(scoped ? 'plannix_push_claim_installation' : 'plannix_push_claim_device', {
+        ...(scoped ? { target_session:serverSession(options) } : { validated_user_id:user(userId) }),
+        target_hash: endpointHash(subscription.endpoint),
         target_p256dh: subscription.keys.p256dh, target_auth: subscription.keys.auth,
       });
       if (result?.state === 'absent' || result?.state === 'superseded') return { state: result.state };
@@ -60,10 +107,12 @@ export function createPushService({ config = env, createClientImpl = createClien
       }
       throw unavailable();
     },
-    async remove(userId, endpoint, version) {
+    async remove(userId, endpoint, version, options) {
       if (!validPushEndpoint(endpoint) || typeof version !== 'string' || !USER_ID.test(version)) throw unavailable();
-      const result = await rpc('plannix_push_remove_device', {
-        validated_user_id: user(userId), target_hash: endpointHash(endpoint), claimed_version: version,
+      const scoped = config.authMode === 'server';
+      const result = await rpc(scoped ? 'plannix_push_remove_installation' : 'plannix_push_remove_device', {
+        ...(scoped ? { target_session:serverSession(options) } : { validated_user_id:user(userId) }),
+        target_hash: endpointHash(endpoint), claimed_version: version,
       });
       if (typeof result !== 'boolean') throw unavailable();
       return result;

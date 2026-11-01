@@ -94,7 +94,14 @@ export default function Notifications({ userId, organisationId }) {
       });
       if (ticket !== generation.current) return;
       const details = subscription.toJSON();
-      await pushRequest('register', { subscription: { endpoint: details.endpoint, keys: details.keys } },
+      const payload = { endpoint: details.endpoint, keys: details.keys };
+      const observed = serverManagedAuth
+        ? await pushRequest('observe', { subscription:payload }, { expectedUserId:userId, operationContext:context })
+        : null;
+      if (context) assertServerOperationContext(context);
+      if (ticket !== generation.current) return;
+      await pushRequest('register', serverManagedAuth
+        ? { subscription:payload, expectedVersion:observed.version } : { subscription:payload },
         { expectedUserId: userId, operationContext:context });
     });
     if (ticket !== generation.current) { void reconcilePushAccount().catch(() => {}); return; }

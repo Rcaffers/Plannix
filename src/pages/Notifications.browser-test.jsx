@@ -2,6 +2,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import Notifications from './Notifications.jsx';
+import { serverManagedAuth, invalidateServerSessionContext,
+  setServerSessionContext } from '../utils/serverAuthTransport.js';
 import '../styles/base.css';
 import '../styles/accessibility.css';
 
@@ -49,8 +51,10 @@ export const pushRequest = async (path, body) => {
   if (['status', 'register', 'test'].includes(path) && !lockDepth) throw Error('Device operation occurred outside Web Lock');
   if (path === 'config') return { configured: configEnabled, publicKey: configEnabled ? 'synthetic-public-key' : null };
   if (path === 'status') { if (failStatus) throw Error('Synthetic status failure'); return { registered: false }; }
+  if (path === 'observe') return { state:'absent', version:null };
   if (path === 'register') {
     if (body.subscription.expirationTime !== undefined) throw Error('Unexpected expirationTime');
+    if (serverManagedAuth && body.expectedVersion !== null) throw Error('First registration omitted the observed absent version');
     return { registered: true };
   }
   if (path === 'test') return { accepted: true };
@@ -58,9 +62,17 @@ export const pushRequest = async (path, body) => {
 };
 
 const root = createRoot(document.getElementById('root'));
+if (serverManagedAuth) setServerSessionContext('__Host-plannix-s-1','synthetic-csrf',
+  'ca000000-0000-4000-8000-000000000001');
 function NotificationFixture() {
   const [userId, setUserId] = React.useState('ca000000-0000-4000-8000-000000000001');
-  window.switchNotificationUser = setUserId;
+  window.switchNotificationUser = next => {
+    if (serverManagedAuth) {
+      invalidateServerSessionContext();
+      setServerSessionContext('__Host-plannix-s-2','synthetic-csrf',next);
+    }
+    setUserId(next);
+  };
   return <Notifications userId={userId} organisationId="cb000000-0000-4000-8000-000000000011" />;
 }
 const router = createMemoryRouter([{ path: '/settings/notifications', element: <NotificationFixture /> },
@@ -167,6 +179,9 @@ const chooseTime = value => {
   button('Enable notifications').click(); await tick(); await tick();
   check(calls.filter(item => item === 'permission').length === 1, 'explicit click requests permission once');
   check(calls.includes('register') && document.body.textContent.includes('Subscribed'), 'registration reaches server');
+  if (serverManagedAuth) check(calls.includes('observe')
+    && calls.indexOf('observe') < calls.indexOf('register'),
+  'server mode observes the installation version before registration');
   button('Send test notification').click(); await tick();
   check(calls.includes('test') && document.body.textContent.includes('not guaranteed'), 'server test path and truthful feedback');
   button('Disable on this device').click(); await tick();
