@@ -101,3 +101,55 @@ test('strict preference fields, safe errors and no summary send action', async (
     assert.match((await response.json()).message, /changed elsewhere/);
   } finally { await stale.close(); }
 });
+
+test('detail routes require a verified server session, exact selectors and separate consent fields', async () => {
+  const calls = [];
+  const app = express();
+  const verified = (req, _res, next) => {
+    req.auth = { userId };
+    req.serverSession = { sessionId: yearId };
+    next();
+  };
+  registerMorningSummaryRoutes({ app, requireAuth: verified,
+    service: { loadDetail: async id => {
+      calls.push(['load', id]);
+      return { enabled: false, deliveryTime: '07:00', revision: 0, academicYearId: null,
+        lessonDetailConsent: false, eventTitleConsent: false };
+    }, saveDetail: async (id, value) => {
+      calls.push(['save', id, value]); return { ...value, revision: 1 };
+    } },
+    detail: { resolve: async input => {
+      calls.push(['detail', input]); return { date: '2026-11-03', week: 'A', lessons: [], events: [] };
+    } },
+  });
+  app.use(errorHandler);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${server.address().port}/api/notifications/morning-summary`;
+  try {
+    const get = await fetch(`${base}/detail-preferences`);
+    assert.equal(get.status, 200);
+    assert.equal(get.headers.get('cache-control'), 'no-store, private');
+    assert.equal((await get.json()).eventTitleConsent, false);
+    const value = { enabled: true, deliveryTime: '07:00', revision: 0, academicYearId: yearId,
+      lessonDetailConsent: true, eventTitleConsent: false };
+    const save = await fetch(`${base}/detail-preferences`, { method: 'PUT',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+    assert.equal(save.status, 200);
+    assert.equal((await save.json()).eventTitleConsent, false);
+    const missing = await fetch(`${base}/detail`);
+    assert.equal(missing.status, 400);
+    const headers = { 'x-plannix-notification-reference': notificationRef,
+      'x-plannix-installation-hash': 'a'.repeat(64),
+      'x-plannix-installation-version': yearId };
+    const detail = await fetch(`${base}/detail`, { headers });
+    assert.equal(detail.status, 200);
+    assert.match(detail.headers.get('cache-control'), /no-store/);
+    assert.equal(detail.headers.get('vary'), 'Cookie');
+    assert.deepEqual(calls[2], ['detail', { sessionId: yearId, userId, endpointHash: 'a'.repeat(64),
+      installationVersion: yearId, notificationRef }]);
+    const invalid = await fetch(`${base}/detail?userId=${userId}`, { headers });
+    assert.equal(invalid.status, 400);
+    assert.equal(calls.length, 3);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});

@@ -33,7 +33,8 @@ export const eventApi = { list: async (academicYearId, options) => {
   return { events: [] };
 } };
 const preferencesByUser = new Map();
-const currentPreference = userId => preferencesByUser.get(userId) || { enabled: false, deliveryTime: '07:00', revision: 0, academicYearId: null };
+const currentPreference = userId => preferencesByUser.get(userId) || { enabled: false, deliveryTime: '07:00', revision: 0,
+  academicYearId: null, lessonDetailConsent: false, eventTitleConsent: false };
 window.setSummaryPreference = (userId, value) => preferencesByUser.set(userId, value);
 export const morningSummaryApi = {
   day: async (userId, summaryRef, { signal } = {}) => {
@@ -57,7 +58,9 @@ export const morningSummaryApi = {
     const current = currentPreference(userId);
     if (value.revision !== current.revision) throw Object.assign(Error('Synthetic conflict'), { status: 409 });
     const saved = { enabled: value.enabled, deliveryTime: value.deliveryTime,
-      academicYearId: value.academicYearId, revision: current.revision + 1 };
+      academicYearId: value.academicYearId, revision: current.revision + 1,
+      lessonDetailConsent: value.lessonDetailConsent === true,
+      eventTitleConsent: value.eventTitleConsent === true };
     preferencesByUser.set(userId, saved);
     return saved;
   },

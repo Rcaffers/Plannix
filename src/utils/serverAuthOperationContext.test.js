@@ -165,7 +165,8 @@ test('captured context cannot use another account CSRF after preflight, or a rep
 
 test('morning preference save rejects change before or during status and sends no write',async()=>{
   const f=await fixture();const status=deferred();const calls=[];
-  const value={enabled:true,deliveryTime:'07:30',revision:0,academicYearId:YEAR};
+  const value={enabled:true,deliveryTime:'07:30',revision:0,academicYearId:YEAR,
+    lessonDetailConsent:false,eventTitleConsent:false};
   try {
     f.selectA();const api=f.summary.createMorningSummaryApi({fetchImpl:(url,init)=>{
       calls.push({url,init});return status.promise;}});
@@ -185,7 +186,8 @@ test('same-account session replacement during a deferred preference preflight se
   try {
     f.selectA();const api=f.summary.createMorningSummaryApi({fetchImpl:(url,init)=>{
       calls.push({url,init});return status.promise;}});
-    const pending=api.save(A,{enabled:true,deliveryTime:'07:30',revision:0,academicYearId:YEAR});
+    const pending=api.save(A,{enabled:true,deliveryTime:'07:30',revision:0,academicYearId:YEAR,
+      lessonDetailConsent:false,eventTitleConsent:false});
     assert.equal(calls.length,1);
     f.replaceA();
     status.release(Response.json({authenticated:true,userId:A,sessionName:SESSION_A,csrfToken:CSRF_A}));

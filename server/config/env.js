@@ -50,6 +50,7 @@ export const env = Object.freeze({
   vapidPublicKey: String(process.env.VAPID_PUBLIC_KEY || '').trim(),
   vapidPrivateKey: String(process.env.VAPID_PRIVATE_KEY || '').trim(),
   vapidSubject: String(process.env.VAPID_SUBJECT || '').trim(),
+  morningSummaryPilotUserId: String(process.env.MORNING_SUMMARY_PILOT_USER_ID || '').trim(),
   gaMeasurementId: validMeasurementId(process.env.GA_MEASUREMENT_ID),
   analyticsFrameOrigin: String(process.env.ANALYTICS_FRAME_ORIGIN || '').trim(),
   distDirectory: path.join(serverDirectory, '..', '..', 'dist'),
