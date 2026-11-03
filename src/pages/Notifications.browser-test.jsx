@@ -101,9 +101,27 @@ const chooseTime = value => {
     && document.body.textContent.includes('Saved notification year: Not confirmed'),
   'current Settings year is offered but an old preference has no confirmed delivery year');
   check(document.querySelector('#morning-preview-date')?.value, 'London preview date selector is present');
+  const lessonConsent = [...document.querySelectorAll('.morning-opt-in')].find(label =>
+    label.textContent.includes('Allow lesson details'))?.querySelector('input');
+  const eventConsent = [...document.querySelectorAll('.morning-opt-in')].find(label =>
+    label.textContent.includes('Separately allow event titles'))?.querySelector('input');
+  if (serverManagedAuth) {
+    check(lessonConsent && eventConsent && !lessonConsent.checked && !eventConsent.checked,
+      'lesson and event-title consents are independently off by default');
+    check(document.body.textContent.includes('phone lock screen and connected watches')
+      && document.body.textContent.includes('cannot be recalled'),
+    'detail risk and irreversibility are explained before consent');
+    lessonConsent.click(); await tick();
+    check(document.querySelector('.morning-opt-in input')?.checked === false,
+      'lesson consent does not silently enable generic delivery');
+    eventConsent.click(); await tick();
+  } else check(!lessonConsent && !eventConsent, 'bearer UI keeps its established controls');
   const optIn = document.querySelector('.morning-opt-in input');
   optIn.click(); await tick();
   button('Save preferences').click(); await tick();
+  if (serverManagedAuth) check(window.summaryPreferenceSaves?.at(-1)?.lessonDetailConsent === true
+    && window.summaryPreferenceSaves?.at(-1)?.eventTitleConsent === true,
+  'both independent consents reach only the preferences API');
   check(window.summaryPreferenceSaves?.at(-1)?.enabled === true, 'opt-in preference reaches only the preference API');
   check(window.summaryPreferenceSaves.at(-1).academicYearId === 'cb000000-0000-4000-8000-000000000010',
     'saving explicitly confirms the notification academic year');

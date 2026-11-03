@@ -6,17 +6,25 @@ import { API_BASE_URL, ApiError, JSON_POST_HEADERS, parseJsonSafe } from './api.
 const TIME = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const PATH = '/api/notifications/morning-summary/preferences';
+const DETAIL_PATH = '/api/notifications/morning-summary/detail-preferences';
 
 function preferences(value) {
+  const expected = serverManagedAuth
+    ? 'academicYearId,deliveryTime,enabled,eventTitleConsent,lessonDetailConsent,revision'
+    : 'academicYearId,deliveryTime,enabled,revision';
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).sort().join(',') !== 'academicYearId,deliveryTime,enabled,revision'
+    || Object.keys(value).sort().join(',') !== expected
     || typeof value.enabled !== 'boolean' || typeof value.deliveryTime !== 'string'
+    || (serverManagedAuth && (typeof value.lessonDetailConsent !== 'boolean'
+      || typeof value.eventTitleConsent !== 'boolean'))
     || !TIME.test(value.deliveryTime) || !Number.isSafeInteger(value.revision)
     || value.revision < 0 || (value.academicYearId !== null
       && (typeof value.academicYearId !== 'string' || !UUID.test(value.academicYearId))))
     throw new ApiError('The server returned invalid morning summary preferences.');
   return { enabled: value.enabled, deliveryTime: value.deliveryTime, revision: value.revision,
-    academicYearId: value.academicYearId };
+    academicYearId: value.academicYearId,
+    ...(serverManagedAuth ? { lessonDetailConsent: value.lessonDetailConsent,
+      eventTitleConsent: value.eventTitleConsent } : {}) };
 }
 
 async function currentSession() {
@@ -33,7 +41,11 @@ export function createMorningSummaryApi({ fetchImpl = fetch, getSession = curren
     const context = serverManagedAuth ? captureServerOperationContext(expectedUserId) : null;
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     if (typeof expectedUserId !== 'string' || !UUID.test(expectedUserId)) throw new ApiError('Authentication is required.', { status: 401 });
-    const requestBody = method === 'PUT' ? JSON.stringify(preferences(value)) : null;
+    const submitted = method === 'PUT' && !serverManagedAuth ? {
+      enabled: value?.enabled, deliveryTime: value?.deliveryTime,
+      revision: value?.revision, academicYearId: value?.academicYearId,
+    } : value;
+    const requestBody = method === 'PUT' ? JSON.stringify(preferences(submitted)) : null;
     if (method === 'PUT' && (value.revision === Number.MAX_SAFE_INTEGER || !value.academicYearId))
       throw new ApiError('Morning summary preferences cannot be saved until reloaded.');
     const session = serverManagedAuth
@@ -49,7 +61,7 @@ export function createMorningSummaryApi({ fetchImpl = fetch, getSession = curren
         ...(method === 'PUT' ? { body: requestBody } : {}),
       };
       response = serverManagedAuth
-        ? await serverAuthFetch(`${API_BASE_URL}${PATH}`, init,
+        ? await serverAuthFetch(`${API_BASE_URL}${DETAIL_PATH}`, init,
           { fetchImpl, operationContext:context })
         : await fetchImpl(`${API_BASE_URL}${PATH}`, init);
     } catch (error) {

@@ -6,11 +6,13 @@ import { useTimetableLayout } from '../context/TimetableLayoutContext.jsx';
 import { fetchDatedTimetableSessions } from '../utils/timetableSessionApi.js';
 import { eventApi } from '../utils/eventApi.js';
 import { morningSummaryApi } from '../utils/morningSummaryApi.js';
+import { serverManagedAuth } from '../utils/serverAuthTransport.js';
 import { buildMorningSummary, londonToday, summaryDateInfo } from '../utils/morningSummary.js';
 import { safeRequestReference } from '../utils/requestReference.js';
 import './MorningSummaryPanel.css';
 
-const DEFAULT_PREFERENCES = { enabled: false, deliveryTime: '07:00', revision: 0, academicYearId: null };
+const DEFAULT_PREFERENCES = { enabled: false, deliveryTime: '07:00', revision: 0,
+  academicYearId: null, lessonDetailConsent: false, eventTitleConsent: false };
 
 export default function MorningSummaryPanel({ userId, organisationId, preferenceApi = morningSummaryApi,
   loadDated = fetchDatedTimetableSessions, listEvents = eventApi.list }) {
@@ -44,7 +46,9 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
     if (userId) preferenceApi.load(userId, { signal: controller.signal }).then(result => {
       if (ticket !== preferenceGeneration.current || controller.signal.aborted) return;
       const value = { enabled: result.enabled, deliveryTime: result.deliveryTime, revision: result.revision,
-        academicYearId: result.academicYearId ?? null };
+        academicYearId: result.academicYearId ?? null,
+        lessonDetailConsent: result.lessonDetailConsent === true,
+        eventTitleConsent: result.eventTitleConsent === true };
       setPreferences({ userId, status: 'ready', value, error: '', reference: '' });
       setDraft({ ...value, academicYearId: value.academicYearId || year.selectedAcademicYearId || null });
     }).catch(error => {
@@ -74,7 +78,9 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
       const result = await preferenceApi.save(userId, value);
       if (ticket !== preferenceGeneration.current) return;
       const saved = { enabled: result.enabled, deliveryTime: result.deliveryTime, revision: result.revision,
-        academicYearId: result.academicYearId };
+        academicYearId: result.academicYearId,
+        lessonDetailConsent: result.lessonDetailConsent === true,
+        eventTitleConsent: result.eventTitleConsent === true };
       setPreferences({ userId, status: 'ready', value: saved, error: '', reference: '' });
       if (version === draftVersion.current) setDraft(saved);
       setSavedNotice('Morning summary preferences saved. Summaries are not active yet.');
@@ -95,7 +101,9 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
     if (!conflict || reloadingRef.current || savingRef.current || currentPreferences.status !== 'ready') return;
     const changed = draft.enabled !== currentPreferences.value.enabled
       || draft.deliveryTime !== currentPreferences.value.deliveryTime
-      || draft.academicYearId !== currentPreferences.value.academicYearId;
+      || draft.academicYearId !== currentPreferences.value.academicYearId
+      || draft.lessonDetailConsent !== currentPreferences.value.lessonDetailConsent
+      || draft.eventTitleConsent !== currentPreferences.value.eventTitleConsent;
     if (changed && !window.confirm('Discard your unsaved morning summary preference changes and reload latest?')) return;
     reloadingRef.current = true; setReloading(true); setReloadError('');
     const ticket = preferenceGeneration.current;
@@ -109,7 +117,9 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
         return;
       }
       const value = { enabled: result.enabled, deliveryTime: result.deliveryTime, revision: result.revision,
-        academicYearId: result.academicYearId };
+        academicYearId: result.academicYearId,
+        lessonDetailConsent: result.lessonDetailConsent === true,
+        eventTitleConsent: result.eventTitleConsent === true };
       setPreferences({ userId, status: 'ready', value, error: '', reference: '' });
       setDraft(value); setConflict(false); setSaveError(''); setSaveReference('');
     } catch (error) {
@@ -229,10 +239,24 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
             {year.academicYears.map(item => <option key={item.id} value={item.id}>{item.label || item.name}</option>)}
           </select></div>
         <p className="settings-hint">Saved notification year: <strong>{year.academicYears.find(item => item.id === currentPreferences.value?.academicYearId)?.label || 'Not confirmed'}</strong></p>
+        {serverManagedAuth ? <div className="morning-detail-consent">
+          <p className="settings-hint">If you enable notification details, lesson and class names may appear on your phone lock screen and connected watches. These names are entered by users and may contain pupil or other sensitive information. Notifications already displayed or mirrored cannot be recalled.</p>
+          <label className="morning-opt-in"><input type="checkbox" checked={draft.lessonDetailConsent}
+            disabled={currentPreferences.status !== 'ready' || saving || reloading}
+            onChange={event => editDraft({ lessonDetailConsent: event.target.checked })} />
+            Allow lesson details in morning notifications</label>
+          <label className="morning-opt-in"><input type="checkbox" checked={draft.eventTitleConsent}
+            disabled={currentPreferences.status !== 'ready' || saving || reloading}
+            onChange={event => editDraft({ eventTitleConsent: event.target.checked })} />
+            Separately allow event titles in morning notifications</label>
+          <p className="settings-hint">Event titles may also contain pupil or other sensitive information. Detailed notifications are not active yet; these choices alone do not send or display details.</p>
+        </div> : null}
         <button type="button" className="settings-save" disabled={currentPreferences.status !== 'ready' || saving || reloading || conflict
           || !draft.academicYearId || (draft.enabled === currentPreferences.value.enabled
             && draft.deliveryTime === currentPreferences.value.deliveryTime
-            && draft.academicYearId === currentPreferences.value.academicYearId)}
+            && draft.academicYearId === currentPreferences.value.academicYearId
+            && draft.lessonDetailConsent === currentPreferences.value.lessonDetailConsent
+            && draft.eventTitleConsent === currentPreferences.value.eventTitleConsent)}
           onClick={savePreferences}>Save preferences</button>
       </div>
       {saveError ? <div className="settings-error" role="alert"><p>{saveError}</p>

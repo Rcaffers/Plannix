@@ -42,3 +42,23 @@ test('malformed IDs/results and database errors fail without exposing diagnostic
     error => error instanceof MorningSummaryPreferenceConflict && !JSON.stringify(error).includes('synthetic-private-row'));
   assert.throws(() => failed.save(userId, { enabled: true, deliveryTime: '07:00', revision: -1 }), /unavailable/);
 });
+
+test('separate detail consents use the revisioned service-role RPC without changing legacy preferences', async () => {
+  const calls = [];
+  const service = createMorningSummaryPreferenceService({ config, createClientImpl: () => ({ rpc: async (name, args) => {
+    calls.push([name, args]);
+    return { data: { enabled: true, deliveryTime: '07:00', revision: name.includes('save_') ? 2 : 1,
+      academicYearId: yearId, lessonDetailConsent: true, eventTitleConsent: false }, error: null };
+  } }) });
+  const loaded = await service.loadDetail(userId);
+  assert.equal(loaded.lessonDetailConsent, true);
+  assert.equal(loaded.eventTitleConsent, false);
+  assert.equal((await service.saveDetail(userId, loaded)).revision, 2);
+  assert.deepEqual(calls.map(call => call[0]), [
+    'plannix_get_morning_summary_detail_preferences',
+    'plannix_save_morning_summary_detail_preferences',
+  ]);
+  assert.equal(calls[1][1].target_lesson_detail_consent, true);
+  assert.equal(calls[1][1].target_event_title_consent, false);
+  assert.equal(calls[1][1].expected_revision, 1);
+});
