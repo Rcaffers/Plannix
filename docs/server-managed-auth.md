@@ -1,6 +1,6 @@
 # Server-managed authentication: Stages 1–4
 
-Stage 1 is an isolated design proof. Stage 2 adds a private database store, and Stage 3 adds the server identity boundary. Stage 4 wires that boundary behind an explicit application mode that defaults to the existing browser authentication. The generic morning-summary pilot and notification behavior remain unchanged. Supabase remains the identity provider.
+Stage 1 is an isolated design proof. Stage 2 adds a private database store, and Stage 3 adds the server identity boundary. Stage 4 wires that boundary behind an explicit application mode that defaults to the existing browser authentication. The generic morning-summary pilot and notification behavior remain unchanged. Supabase remains the identity provider. The separate [notification installation binding foundation](notification-installation-bindings.md) adds service-role-only versioned registration in server mode; it does not activate detailed delivery.
 
 ## Session and response ordering
 

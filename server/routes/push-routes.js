@@ -15,6 +15,7 @@ export function registerPushRoutes({ app, requireAuth = requireSupabaseAuth, ser
     if (!service.configured()) throw fail(503, 'Notifications are not configured.');
   }
   const error = (next) => next(fail(503, 'Notification service is temporarily unavailable.'));
+  const sessionOptions = req => ({ sessionId:req.serverSession?.sessionId });
 
   app.get('/api/notifications/config', requireAuth, (req, res, next) => {
     try {
@@ -26,22 +27,36 @@ export function registerPushRoutes({ app, requireAuth = requireSupabaseAuth, ser
     try {
       guard(req);
       if (!only(req.body, ['endpoint']) || !validPushEndpoint(req.body.endpoint)) throw fail(400, 'Notification request is invalid.');
-      res.json({ registered: await service.status(req.auth.userId, req.body.endpoint) });
+      res.json(await service.status(req.auth.userId, req.body.endpoint, sessionOptions(req)));
     } catch (caught) { next(caught?.expose ? caught : fail(503, 'Notification service is temporarily unavailable.')); }
   });
   app.post('/api/notifications/register', requireAuth, parse, async (req, res, next) => {
     try {
       guard(req);
-      if (!only(req.body, ['subscription']) || !validPushSubscription(req.body.subscription)) throw fail(400, 'Notification request is invalid.');
-      await service.register(req.auth.userId, req.body.subscription);
+      const scoped = Boolean(req.serverSession);
+      if (!only(req.body, scoped ? ['subscription','expectedVersion'] : ['subscription'])
+        || !validPushSubscription(req.body.subscription)
+        || (scoped && req.body.expectedVersion !== null
+          && (typeof req.body.expectedVersion !== 'string' || !UUID.test(req.body.expectedVersion))))
+        throw fail(400, 'Notification request is invalid.');
+      await service.register(req.auth.userId, req.body.subscription,
+        { ...sessionOptions(req), expectedVersion:req.body.expectedVersion });
       res.json({ registered: true });
     } catch (caught) { next(caught?.expose ? caught : fail(503, 'Could not enable notifications.')); }
+  });
+  app.post('/api/notifications/observe', requireAuth, parse, async (req, res, next) => {
+    try {
+      guard(req);
+      if (!req.serverSession || !only(req.body, ['subscription'])
+        || !validPushSubscription(req.body.subscription)) throw fail(400, 'Notification request is invalid.');
+      res.json(await service.observe(req.auth.userId, req.body.subscription, sessionOptions(req)));
+    } catch (caught) { next(caught?.expose ? caught : fail(503, 'Could not check this device subscription.')); }
   });
   app.post('/api/notifications/claim', requireAuth, parse, async (req, res, next) => {
     try {
       guard(req);
       if (!only(req.body, ['subscription']) || !validPushSubscription(req.body.subscription)) throw fail(400, 'Notification request is invalid.');
-      res.json(await service.claim(req.auth.userId, req.body.subscription));
+      res.json(await service.claim(req.auth.userId, req.body.subscription, sessionOptions(req)));
     } catch (caught) { next(caught?.expose ? caught : fail(503, 'Could not check this device subscription.')); }
   });
   app.post('/api/notifications/remove', requireAuth, parse, async (req, res, next) => {
@@ -49,7 +64,7 @@ export function registerPushRoutes({ app, requireAuth = requireSupabaseAuth, ser
       guard(req);
       if (!only(req.body, ['endpoint', 'version']) || !validPushEndpoint(req.body.endpoint)
         || typeof req.body.version !== 'string' || !UUID.test(req.body.version)) throw fail(400, 'Notification request is invalid.');
-      res.json({ removed: await service.remove(req.auth.userId, req.body.endpoint, req.body.version) });
+      res.json({ removed: await service.remove(req.auth.userId, req.body.endpoint, req.body.version, sessionOptions(req)) });
     } catch (caught) { next(caught?.expose ? caught : fail(503, 'Could not disable notifications.')); }
   });
   app.post('/api/notifications/test', requireAuth, parse, async (req, res, next) => {

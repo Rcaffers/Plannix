@@ -175,6 +175,9 @@ export async function disableCurrentDevice({ browser = globalThis, request = pus
       removed = response?.removed === true;
     } catch (error) {
       if (error instanceof SubscriptionChangedError) throw error;
+      // A claim is only a snapshot. In server mode a timed-out removal may
+      // still be running; do not unsubscribe a device another account took.
+      if (serverManagedAuth) throw error;
       // A confirmed claim permits browser unsubscription as a fallback.
     }
     if (!isCurrent()) throw new Error('Notification account changed.');

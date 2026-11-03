@@ -36,7 +36,7 @@ test('server uses one scoped RPC per operation and an injected push sender', asy
   const sends = [];
   const service = createPushService({ config, createClientImpl: () => fake,
     pushImpl: { sendNotification: async (...args) => { sends.push(args); return { statusCode: 201 }; } } });
-  assert.equal(await service.status(user, endpoint), true);
+  assert.deepEqual(await service.status(user, endpoint), { registered:true });
   await service.register(user, subscription);
   assert.deepEqual(await service.sendTest(user, endpoint), { accepted: true });
   assert.deepEqual(await service.claim(user, subscription), { state: 'current', version });
@@ -103,4 +103,66 @@ test('missing VAPID configuration disables push before database or network activ
   assert.equal(service.publicKey(), null);
   await assert.rejects(service.register(user, subscription));
   await assert.rejects(service.sendTest(user, endpoint));
+});
+
+test('server-mode registration carries the verified session and exact observed version without retry', async () => {
+  const sessionId = 'ca000000-0000-4000-8000-000000000077';
+  const calls = [];
+  let currentVersion = null;
+  const fake = { rpc: async (name, args) => {
+    calls.push([name, args]);
+    if (name === 'plannix_push_observe_installation') return { data:currentVersion
+      ? { state:'current',version:currentVersion } : { state:'absent',version:null }, error:null };
+    if (name === 'plannix_push_register_installation') {
+      if (args.expected_version !== currentVersion) return { data:{state:'conflict'},error:null };
+      currentVersion = version;
+      return { data:{state:'registered',version},error:null };
+    }
+    if (name === 'plannix_push_claim_installation') return { data:{state:'current',version},error:null };
+    if (name === 'plannix_push_status_installation') return { data:{state:'current',registered:true,
+      boundToCurrentSession:false,detailEligible:false},error:null };
+    if (name === 'plannix_push_remove_installation') return { data:true,error:null };
+    throw Error('Unexpected RPC');
+  } };
+  const service = createPushService({ config:{...config,authMode:'server'}, createClientImpl:() => fake });
+  const absent = await service.observe(user,subscription,{sessionId});
+  assert.deepEqual(absent,{state:'absent',version:null});
+  await service.register(user,subscription,{sessionId,expectedVersion:absent.version});
+  const current = await service.observe(user,subscription,{sessionId});
+  assert.equal(current.version,version);
+  await assert.rejects(service.register(user,subscription,{sessionId,expectedVersion:null}),error => error.statusCode === 409);
+  assert.deepEqual(await service.claim(user,subscription,{sessionId}),{state:'current',version});
+  assert.deepEqual(await service.status(user,endpoint,{sessionId}),{state:'current',registered:true,
+    boundToCurrentSession:false,detailEligible:false});
+  assert.equal(await service.remove(user,endpoint,version,{sessionId}),true);
+  assert.deepEqual(calls.map(([name]) => name),[
+    'plannix_push_observe_installation','plannix_push_register_installation',
+    'plannix_push_observe_installation','plannix_push_register_installation',
+    'plannix_push_claim_installation','plannix_push_status_installation','plannix_push_remove_installation',
+  ]);
+  assert.ok(calls.every(([,args]) => args.target_session === sessionId));
+  assert.equal(calls.filter(([name]) => name === 'plannix_push_register_installation')[1][1].expected_version,null);
+  await assert.rejects(service.observe(user,subscription,{}));
+});
+
+test('removed endpoint requires its newly observed tombstone version and status separates generic ownership', async () => {
+  const sessionId='ca000000-0000-4000-8000-000000000077';
+  const tombstone='ca000000-0000-4000-8000-000000000078';
+  const calls=[];
+  const fake={rpc:async(name,args)=>{
+    calls.push([name,args]);
+    if(name==='plannix_push_observe_installation') return {data:{state:'absent',version:tombstone},error:null};
+    if(name==='plannix_push_register_installation') return {data:{state:'registered',version},error:null};
+    if(name==='plannix_push_status_installation') return {data:{state:'current',registered:true,
+      boundToCurrentSession:false,detailEligible:false},error:null};
+    throw Error('Unexpected RPC');
+  }};
+  const service=createPushService({config:{...config,authMode:'server'},createClientImpl:()=>fake});
+  const observed=await service.observe(user,subscription,{sessionId});
+  assert.deepEqual(observed,{state:'absent',version:tombstone});
+  await service.register(user,subscription,{sessionId,expectedVersion:observed.version});
+  assert.equal(calls[1][1].expected_version,tombstone);
+  assert.deepEqual(await service.status(user,endpoint,{sessionId}),{state:'current',registered:true,
+    boundToCurrentSession:false,detailEligible:false});
+  assert.ok(calls.every(([,args])=>args.target_session===sessionId));
 });
