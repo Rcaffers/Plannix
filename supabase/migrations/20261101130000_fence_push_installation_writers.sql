@@ -1,4 +1,6 @@
-begin;
+-- The Supabase CLI owns this migration's transaction and history entry.
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
 
 -- Wait for writers that have reached the subscription table before installing
 -- the trigger. Subsequent writes, including calls using an old cached RPC body,
@@ -299,5 +301,3 @@ begin
   return removed_count=1;
 end;
 $$;
-
-commit;

@@ -75,6 +75,107 @@ from an account ID supplied by the browser.
 
 ## Compatibility and activation
 
+### Migration runner and production sequence
+
+Use the exact Supabase CLI **2.114.0** pinned in `package.json` and
+`package-lock.json` (`npm ci`; verify with
+`./node_modules/.bin/supabase --version`). Do not substitute a floating `npx`
+version. CLI **2.122.0** was used only to prepare the separate, isolated
+restore baseline; it is not the tested notification-migration runner. CLI
+2.115.0's pipelined runner rejects this feature's required
+`LOCK TABLE` outside a transaction block. The three migration files therefore
+contain no embedded `BEGIN`/`COMMIT`: the tested 2.114.0 runner applies each
+file and inserts its history row in one transaction. Each file sets a
+transaction-local five-second DDL lock timeout and 120-second statement
+timeout. The three files are **not** one atomic group. The second file takes
+an `ACCESS EXCLUSIVE` subscription-table lock; a timeout is a failed migration,
+not permission to bypass the fence.
+
+Before an authorized production application, compare migration history **and
+actual schema**. Run the complete preflight block from this worktree. The
+byte-exact check fails on missing or mismatched saved link metadata; it does
+not relink or reveal connection details. Both listing and dry run use only
+that verified linked target. The dry run must show exactly the three
+notification versions as pending:
+
+```sh
+npm ci
+(
+  set -eu
+  if ! printf '%s' 'vioymfickxroxqjpdayl' | cmp -s - supabase/.temp/project-ref; then
+    printf '%s\n' 'Linked project metadata is missing or unexpected; stop.' >&2
+    exit 1
+  fi
+  if [ "$(./node_modules/.bin/supabase --version)" != '2.114.0' ]; then
+    printf '%s\n' 'Unexpected Supabase CLI version; stop.' >&2
+    exit 1
+  fi
+  ./node_modules/.bin/supabase migration list --linked
+  ./node_modules/.bin/supabase db push --linked --skip-vault --dry-run
+)
+```
+
+Only after backup, schema review and change approval, run the **whole**
+application block. It repeats the target and CLI checks before any write:
+
+```sh
+(
+  set -eu
+  if ! printf '%s' 'vioymfickxroxqjpdayl' | cmp -s - supabase/.temp/project-ref; then
+    printf '%s\n' 'Linked project metadata is missing or unexpected; stop.' >&2
+    exit 1
+  fi
+  if [ "$(./node_modules/.bin/supabase --version)" != '2.114.0' ]; then
+    printf '%s\n' 'Unexpected Supabase CLI version; stop.' >&2
+    exit 1
+  fi
+  ./node_modules/.bin/supabase db push --linked --skip-vault
+  ./node_modules/.bin/supabase migration list --linked
+)
+```
+
+Run the following read-only checks against that same project after the push;
+require three ordered versions, four installation columns, the active history
+fence and FK-cleanup function, no detail-enabled row, and no browser access to
+endpoint history. Compare the installed function definition with the reviewed
+third migration, since a version row alone does not prove the final body.
+
+```sql
+select version from supabase_migrations.schema_migrations
+where version in ('20261101120000','20261101130000','20261101140000')
+order by version;
+select column_name from information_schema.columns
+where table_schema='private' and table_name='plannix_push_subscriptions'
+  and column_name in ('installation_id','installation_version',
+                      'bound_session_id','detail_disabled')
+order by column_name;
+select to_regclass('private.plannix_push_endpoint_history') is not null as history_exists,
+       (select relrowsecurity from pg_class
+        where oid='private.plannix_push_endpoint_history'::regclass) as history_rls,
+       has_table_privilege('anon','private.plannix_push_endpoint_history','SELECT,INSERT,UPDATE,DELETE') as anon_access,
+       has_table_privilege('authenticated','private.plannix_push_endpoint_history','SELECT,INSERT,UPDATE,DELETE') as authenticated_access;
+select tgname, tgenabled from pg_trigger
+where tgrelid='private.plannix_push_subscriptions'::regclass
+  and tgname='plannix_push_track_endpoint' and not tgisinternal;
+select pg_get_functiondef('private.plannix_push_track_endpoint()'::regprocedure);
+select count(*) as detail_enabled_rows from private.plannix_push_subscriptions
+where not detail_disabled;
+```
+
+Keep matching application code undeployed until history and schema show all
+three migrations in order. If a command fails or times out, leave the code
+undeployed and inspect both history and objects before retrying; never run
+automatic history repair. A failed second migration must not be treated as an
+installed fence. If the third fails, retain the second migration's fence and
+do not admit new bound registrations: the FK cleanup correction is still
+missing. Verify no bound subscription was created in that interval before
+retrying. Existing generic delivery continues. A project that already has
+any of these versions requires a separate schema/history comparison and, if
+needed, an additive correction; do not replay this revised SQL against a
+recorded version. The confirmed production project had only the 33 base
+versions and no notification objects at preflight; this says nothing about
+other projects.
+
 Apply `20261101120000_add_push_installation_bindings.sql` followed by
 `20261101130000_fence_push_installation_writers.sql` and
 `20261101140000_allow_push_session_fk_cleanup.sql` before deploying the

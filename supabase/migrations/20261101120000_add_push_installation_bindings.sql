@@ -1,4 +1,6 @@
-begin;
+-- The Supabase CLI owns this migration's transaction and history entry.
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
 
 -- Generic subscriptions remain deliverable. Detail authorization is disabled by
 -- default and must additionally prove the bound session is still current.
@@ -189,4 +191,3 @@ grant execute on function public.plannix_push_remove_installation(uuid,text,uuid
 
 -- No enable-detail function exists in this stage. Effective authorization
 -- requires this flag, current bound session, and future per-reference checks.
-commit;

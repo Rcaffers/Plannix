@@ -1,4 +1,6 @@
-begin;
+-- The Supabase CLI owns this migration's transaction and history entry.
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
 
 -- Additive correction: the bound-session FK uses ON DELETE SET NULL. Its
 -- exact child update must not make auth-session retention or binding cleanup
@@ -88,5 +90,3 @@ begin
 end;
 $$;
 revoke all on function private.plannix_push_track_endpoint() from public, anon, authenticated, service_role;
-
-commit;
