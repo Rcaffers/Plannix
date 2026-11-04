@@ -105,7 +105,7 @@ test('server-mode routes carry only the guard-selected session and require an ex
     status:async (...args) => { calls.push(['status',...args]);return {state:'current',registered:true,
       boundToCurrentSession:false,detailEligible:false}; },
     observe:async (...args) => { calls.push(['observe',...args]); return {state:'absent',version:null}; },
-    register:async (...args) => { calls.push(['register',...args]); },
+    register:async (...args) => { calls.push(['register',...args]); return {version}; },
   } });
   app.use(errorHandler);
   const server=app.listen(0,'127.0.0.1');
@@ -115,6 +115,10 @@ test('server-mode routes carry only the guard-selected session and require an ex
     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),
   });
   try {
+    assert.deepEqual(await (await fetch(`${url}/api/notifications/config`)).json(),
+      {configured:true,publicKey:'public-only',detailDisplayAvailable:false});
+    assert.equal((await request('detail-policy/set',{endpoint,installationVersion:version,
+      policyVersion:version,enabled:true})).status,404);
     assert.equal((await request('register',{subscription})).status,400);
     assert.equal(calls.length,0);
     assert.deepEqual(await (await request('observe',{subscription})).json(),{state:'absent',version:null});
@@ -185,5 +189,47 @@ test('external provider revocation fails before push registration or removal', a
     });
     assert.equal((await request({subscription,expectedVersion:null})).status,503);
     assert.equal(pushCalls,0);
+  } finally {await new Promise(resolve=>server.close(resolve));}
+});
+
+test('detail policy routes require production ordinary-session CSRF and exact captured version', async () => {
+  const cookie=`__Host-plannix-b-1=${'a'.repeat(43)}; __Host-plannix-s-2=${'b'.repeat(43)}`;
+  const app=express();let writes=0;
+  const server=app.listen(0,'127.0.0.1');
+  await new Promise(resolve=>server.once('listening',resolve));
+  const origin=`http://127.0.0.1:${server.address().port}`;
+  const csrfKey=Buffer.alloc(32,7);
+  const verified=createRequireServerSession({origin,csrfKey,
+    repository:{resolveForApplication:async header=>({state:'current',header,
+      sessionName:'__Host-plannix-s-2',sessionId:version,ownerId:userId,
+      tokenVersion:1,accessToken:'synthetic-access'})},
+    identity:{validateAccess:async()=>{}},
+  });
+  registerPushRoutes({app,config:{morningSummaryDetailDisplayEnabled:true,
+    morningSummaryPilotUserId:userId},requireAuth:(req,res,next)=>verified(req,res,error=>{
+    if(error) return next(error);
+    req.auth={userId:req.serverSession.userId};next();
+  }),service:{configured:()=>true,publicKey:()=> 'synthetic-public',
+    detailPolicy:async()=>({enabled:false,policyVersion:version}),
+    setDetailPolicy:async(...args)=>{writes++;assert.equal(args[0],userId);
+      assert.equal(args[5].sessionId,version);return {enabled:true,policyVersion:version};},
+  }});
+  app.use(errorHandler);
+  const endpointBody={endpoint,installationVersion:version,policyVersion:version,enabled:true};
+  const request=(extra={})=>fetch(`${origin}/api/notifications/detail-policy/set`,{
+    method:'POST',headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/json',
+      'X-Plannix-Expected-Session':'__Host-plannix-s-2',...extra},
+    body:JSON.stringify(endpointBody),
+  });
+  try {
+    assert.equal((await request()).status,403);
+    assert.equal(writes,0);
+    assert.equal((await request({'X-Plannix-CSRF':createSessionRequestSecurity({origin,csrfKey}).csrfFor(cookie),
+      'X-Plannix-Expected-Session':'__Host-plannix-s-3'})).status,409);
+    assert.equal(writes,0);
+    const response=await request({'X-Plannix-CSRF':createSessionRequestSecurity({origin,csrfKey}).csrfFor(cookie)});
+    assert.equal(response.status,200);
+    assert.match(response.headers.get('cache-control'),/no-store/);
+    assert.equal(writes,1);
   } finally {await new Promise(resolve=>server.close(resolve));}
 });

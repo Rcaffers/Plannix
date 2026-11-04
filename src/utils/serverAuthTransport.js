@@ -1,5 +1,6 @@
 // Cookie-mode transport. This module never reads or stores a Supabase token.
 import { observeAuthTestOperation } from './serverAuthTestObserver.js';
+import { invalidateDetailSelector, withDetailTransition } from './pushDetailSelector.js';
 const mode = String(import.meta.env?.VITE_PLANNIX_AUTH_MODE || 'bearer').trim();
 if (!['bearer', 'server'].includes(mode)) throw new Error('Authentication mode is invalid.');
 export const serverManagedAuth = mode === 'server';
@@ -24,6 +25,7 @@ if (serverManagedAuth && typeof BroadcastChannel !== 'undefined') {
   try {
     channel = new BroadcastChannel('plannix-server-session');
     channel.onmessage = () => { csrfToken = null; clearRecoveryContext(); accountGeneration += 1;
+      void invalidateDetailSelector().catch(() => {});
       globalThis.dispatchEvent?.(new Event('plannix-server-session-change')); };
   } catch { /* Server verification still owns authentication. */ }
 }
@@ -34,6 +36,7 @@ export function invalidateServerSessionContext() {
   clearRecoveryContext();
   accountGeneration += 1;
   pendingMismatch = true;
+  void invalidateDetailSelector().catch(() => {});
   return accountGeneration;
 }
 export function setServerSessionContext(sessionName, token, userId = null) {
@@ -41,6 +44,8 @@ export function setServerSessionContext(sessionName, token, userId = null) {
     throw new Error('Session context is invalid.');
   if (userId !== null && (typeof userId !== 'string' || !userId))
     throw new Error('Session context is invalid.');
+  if (displayedSessionName && displayedSessionName !== sessionName)
+    void invalidateDetailSelector().catch(() => {});
   displayedSessionName = sessionName;
   displayedUserId = userId;
   csrfToken = token || null;
@@ -86,6 +91,7 @@ export function notifyServerSessionChange({ reconcileThisTab = true } = {}) {
   csrfToken = null;
   clearRecoveryContext();
   accountGeneration += 1;
+  void invalidateDetailSelector().catch(() => {});
   try { channel?.postMessage({ changed: true }); }
   catch { /* The next server verification still owns session authority. */ }
   if (reconcileThisTab) {
@@ -205,7 +211,20 @@ export async function bootstrapServerSession(fetchImpl = fetch, { signal } = {})
   return result;
 }
 
-export async function serverAuthFetch(input, options = {}, { fetchImpl = fetch,
+export async function serverAuthFetch(input, options = {}, settings = {}) {
+  const pathname = new URL(input, globalThis.location?.origin || 'https://invalid.local').pathname;
+  const method = String(options.method || 'GET').toUpperCase();
+  const changesAuthority = method !== 'GET' && method !== 'HEAD'
+    && ['/__stage3/auth/login', '/__stage3/auth/signup', '/__stage3/auth/logout',
+      '/__stage3/auth/account', '/__stage3/auth/recovery/password',
+      '/__stage3/auth/refresh', '/__stage3/auth/profile/email',
+      '/__stage3/auth/profile/password'].includes(pathname);
+  return changesAuthority
+    ? withDetailTransition(() => performServerAuthFetch(input, options, settings))
+    : performServerAuthFetch(input, options, settings);
+}
+
+async function performServerAuthFetch(input, options = {}, { fetchImpl = fetch,
   unauthenticated = false, operationContext, recoveryOperationContext } = {}) {
   if (!serverManagedAuth) throw new Error('Cookie authentication is disabled.');
   const method = String(options.method || 'GET').toUpperCase();

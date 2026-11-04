@@ -111,6 +111,7 @@ test('detail routes require a verified server session, exact selectors and separ
     next();
   };
   registerMorningSummaryRoutes({ app, requireAuth: verified,
+    config:{ morningSummaryDetailDisplayEnabled:true },
     service: { loadDetail: async id => {
       calls.push(['load', id]);
       return { enabled: false, deliveryTime: '07:00', revision: 0, academicYearId: null,
@@ -141,13 +142,14 @@ test('detail routes require a verified server session, exact selectors and separ
     assert.equal(missing.status, 400);
     const headers = { 'x-plannix-notification-reference': notificationRef,
       'x-plannix-installation-hash': 'a'.repeat(64),
-      'x-plannix-installation-version': yearId };
+      'x-plannix-installation-version': yearId,
+      'x-plannix-detail-policy-version':yearId };
     const detail = await fetch(`${base}/detail`, { headers });
     assert.equal(detail.status, 200);
     assert.match(detail.headers.get('cache-control'), /no-store/);
     assert.equal(detail.headers.get('vary'), 'Cookie');
     assert.deepEqual(calls[2], ['detail', { sessionId: yearId, userId, endpointHash: 'a'.repeat(64),
-      installationVersion: yearId, notificationRef }]);
+      installationVersion: yearId, detailPolicyVersion:yearId, notificationRef }]);
     const invalid = await fetch(`${base}/detail?userId=${userId}`, { headers });
     assert.equal(invalid.status, 400);
     assert.equal(calls.length, 3);

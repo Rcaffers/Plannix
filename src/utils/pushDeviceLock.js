@@ -1,4 +1,4 @@
-const DEVICE_LOCK_NAME = 'plannix-push-device';
+export const DEVICE_LOCK_NAME = 'plannix-push-device';
 
 export const PUSH_LOCK_UNAVAILABLE = 'This browser cannot safely coordinate notifications across tabs. Notifications are unavailable here.';
 

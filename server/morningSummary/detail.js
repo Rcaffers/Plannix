@@ -10,19 +10,22 @@ const unavailable = () => new Error('Notification detail is unavailable.');
 // verified cookie guard; the pilot scope comes from server configuration.
 export function createMorningSummaryDetailService({ config = env, createClientImpl = createClient,
   delivery = createMorningSummaryDelivery() } = {}) {
-  async function authorize({ sessionId, userId, endpointHash, installationVersion, notificationRef }) {
+  async function authorize({ sessionId, userId, endpointHash, installationVersion,
+    detailPolicyVersion, notificationRef }) {
     if (!UUID.test(sessionId) || !UUID.test(userId) || !HASH.test(endpointHash)
-      || !UUID.test(installationVersion) || !UUID.test(notificationRef)
+      || !UUID.test(installationVersion) || !UUID.test(detailPolicyVersion)
+      || !UUID.test(notificationRef)
       || !UUID.test(config.morningSummaryPilotUserId || '')) throw unavailable();
     try {
       const { url, secretKey } = requireSupabaseAdminConfig(config);
       const client = createClientImpl(url, secretKey, {
         auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
       });
-      const { data, error } = await client.rpc('plannix_authorize_morning_summary_detail', {
+      const { data, error } = await client.rpc('plannix_authorize_morning_summary_detail_v2', {
         target_session: sessionId, target_hash: endpointHash,
         target_version: installationVersion, target_reference: notificationRef,
         target_pilot: config.morningSummaryPilotUserId,
+        target_policy_version: detailPolicyVersion,
       });
       if (error || !data || Object.keys(data).sort().join(',') !== 'eventTitleConsent,ownerId'
         || data.ownerId !== userId || typeof data.eventTitleConsent !== 'boolean') throw unavailable();

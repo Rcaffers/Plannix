@@ -14,6 +14,20 @@ select extensions.ok(has_function_privilege('service_role',
 select extensions.ok(not has_table_privilege('service_role',
   'private.plannix_morning_summary_preferences','SELECT,UPDATE'),
   'service role cannot bypass preference RPC');
+select extensions.ok(not has_function_privilege('anon',
+  'public.plannix_push_set_detail_eligibility(uuid,text,uuid,uuid,uuid,boolean)','EXECUTE')
+  and not has_function_privilege('authenticated',
+  'public.plannix_push_set_detail_eligibility(uuid,text,uuid,uuid,uuid,boolean)','EXECUTE')
+  and has_function_privilege('service_role',
+  'public.plannix_push_set_detail_eligibility(uuid,text,uuid,uuid,uuid,boolean)','EXECUTE'),
+  'only the server role can change detail eligibility');
+select extensions.ok(not has_function_privilege('anon',
+  'public.plannix_authorize_morning_summary_detail_v2(uuid,text,uuid,uuid,uuid,uuid)','EXECUTE')
+  and not has_function_privilege('authenticated',
+  'public.plannix_authorize_morning_summary_detail_v2(uuid,text,uuid,uuid,uuid,uuid)','EXECUTE')
+  and has_function_privilege('service_role',
+  'public.plannix_authorize_morning_summary_detail_v2(uuid,text,uuid,uuid,uuid,uuid)','EXECUTE'),
+  'versioned detail authorization is server-only');
 
 insert into auth.users(instance_id,id,aud,role,email,encrypted_password,email_confirmed_at,
   raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
@@ -123,6 +137,87 @@ select extensions.is(public.plannix_authorize_morning_summary_detail(
   'cf000000-0000-4000-8000-000000000031',
   'cf000000-0000-4000-8000-000000000001')->>'eventTitleConsent','true',
   'separate event consent is returned only after an eligible lesson decision');
+reset role;
+savepoint detail_policy_case;
+select pg_catalog.set_config('test.detail_policy',detail_policy_version::text,true)
+  from private.plannix_push_subscriptions where endpoint_hash=pg_catalog.repeat('c',64);
+set local role service_role;
+select extensions.is(public.plannix_push_detail_policy_status(
+  'cf000000-0000-4000-8000-000000000022',pg_catalog.repeat('c',64),
+  pg_catalog.current_setting('test.detail_version')::uuid,
+  'cf000000-0000-4000-8000-000000000001')->>'enabled','true',
+  'current session observes the test-only enabled policy');
+select extensions.is(public.plannix_push_set_detail_eligibility(
+  'cf000000-0000-4000-8000-000000000022',pg_catalog.repeat('c',64),
+  pg_catalog.current_setting('test.detail_version')::uuid,
+  pg_catalog.current_setting('test.detail_policy')::uuid,
+  'cf000000-0000-4000-8000-000000000001',false)->>'enabled','false',
+  'current binding can disable its exact policy generation');
+select extensions.is(public.plannix_push_set_detail_eligibility(
+  'cf000000-0000-4000-8000-000000000022',pg_catalog.repeat('c',64),
+  pg_catalog.current_setting('test.detail_version')::uuid,
+  pg_catalog.current_setting('test.detail_policy')::uuid,
+  'cf000000-0000-4000-8000-000000000001',true),null::jsonb,
+  'a stale enable cannot reuse an older policy generation');
+select extensions.is(public.plannix_authorize_morning_summary_detail_v2(
+  'cf000000-0000-4000-8000-000000000022',pg_catalog.repeat('c',64),
+  pg_catalog.current_setting('test.detail_version')::uuid,
+  'cf000000-0000-4000-8000-000000000031',
+  'cf000000-0000-4000-8000-000000000001',
+  pg_catalog.current_setting('test.detail_policy')::uuid),null::jsonb,
+  'stale policy cannot authorize a detailed display');
+select pg_catalog.set_config('test.next_policy',
+  public.plannix_push_detail_policy_status(
+    'cf000000-0000-4000-8000-000000000022',pg_catalog.repeat('c',64),
+    pg_catalog.current_setting('test.detail_version')::uuid,
+    'cf000000-0000-4000-8000-000000000001')->>'policyVersion',true);
+select pg_catalog.set_config('test.enabled_policy',
+  public.plannix_push_set_detail_eligibility(
+    'cf000000-0000-4000-8000-000000000022',pg_catalog.repeat('c',64),
+    pg_catalog.current_setting('test.detail_version')::uuid,
+    pg_catalog.current_setting('test.next_policy')::uuid,
+    'cf000000-0000-4000-8000-000000000001',true)->>'policyVersion',true);
+select extensions.is(public.plannix_authorize_morning_summary_detail_v2(
+  'cf000000-0000-4000-8000-000000000022',pg_catalog.repeat('c',64),
+  pg_catalog.current_setting('test.detail_version')::uuid,
+  'cf000000-0000-4000-8000-000000000031',
+  'cf000000-0000-4000-8000-000000000001',
+  pg_catalog.current_setting('test.enabled_policy')::uuid)->>'eventTitleConsent','true',
+  'fresh policy and separate event consent permit the test-only detail fixture');
+select public.plannix_save_morning_summary_detail_preferences(
+  'cf000000-0000-4000-8000-000000000001',3,true,'07:00',
+  'cf000000-0000-4000-8000-000000000013',false,true);
+select extensions.is(public.plannix_authorize_morning_summary_detail_v2(
+  'cf000000-0000-4000-8000-000000000022',pg_catalog.repeat('c',64),
+  pg_catalog.current_setting('test.detail_version')::uuid,
+  'cf000000-0000-4000-8000-000000000031',
+  'cf000000-0000-4000-8000-000000000001',
+  pg_catalog.current_setting('test.enabled_policy')::uuid),null::jsonb,
+  'consent withdrawal invalidates an already issued policy version');
+reset role;
+select extensions.is((select detail_disabled from private.plannix_push_subscriptions
+  where endpoint_hash=pg_catalog.repeat('c',64)),true,
+  'consent withdrawal disables detail on the bound device');
+rollback to savepoint detail_policy_case;
+-- This fixture is otherwise fully eligible. Observe session expiry through
+-- the authorization RPC itself, then roll back only this expiry case so the
+-- later independent recovery/revocation assertions retain a valid fixture.
+savepoint expired_session_case;
+update private.plannix_auth_sessions set expires_at=pg_catalog.clock_timestamp()-interval '1 second'
+  where id='cf000000-0000-4000-8000-000000000022';
+set local role service_role;
+select extensions.is(public.plannix_authorize_morning_summary_detail(
+  'cf000000-0000-4000-8000-000000000022',pg_catalog.repeat('c',64),
+  pg_catalog.current_setting('test.detail_version')::uuid,
+  'cf000000-0000-4000-8000-000000000031',
+  'cf000000-0000-4000-8000-000000000001'),null::jsonb,
+  'expired ordinary session is denied by the direct detail authorization RPC');
+reset role;
+select extensions.is((select expired and revoked from private.plannix_auth_sessions
+  where id='cf000000-0000-4000-8000-000000000022'),true,
+  'direct authorization observes expiry as terminal');
+rollback to savepoint expired_session_case;
+set local role service_role;
 select extensions.is(public.plannix_authorize_morning_summary_detail(
   'cf000000-0000-4000-8000-000000000022',pg_catalog.repeat('c',64),
   pg_catalog.current_setting('test.detail_version')::uuid,

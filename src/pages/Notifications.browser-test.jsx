@@ -50,12 +50,14 @@ export const pushRequest = async (path, body) => {
   calls.push(path);
   if (['status', 'register', 'test'].includes(path) && !lockDepth) throw Error('Device operation occurred outside Web Lock');
   if (path === 'config') return { configured: configEnabled, publicKey: configEnabled ? 'synthetic-public-key' : null };
-  if (path === 'status') { if (failStatus) throw Error('Synthetic status failure'); return { registered: false }; }
+  if (path === 'status') { if (failStatus) throw Error('Synthetic status failure');
+    return { registered: false, version:null, boundToCurrentSession:false }; }
   if (path === 'observe') return { state:'absent', version:null };
   if (path === 'register') {
     if (body.subscription.expirationTime !== undefined) throw Error('Unexpected expirationTime');
     if (serverManagedAuth && body.expectedVersion !== null) throw Error('First registration omitted the observed absent version');
-    return { registered: true };
+    return serverManagedAuth ? { registered: true, version:'ca000000-0000-4000-8000-000000000099' }
+      : { registered: true };
   }
   if (path === 'test') return { accepted: true };
   return { registered: false };

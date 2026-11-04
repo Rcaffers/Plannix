@@ -6,11 +6,17 @@ import { currentPushSubscription, disableCurrentDevice, pushRequest, pushSupport
 import { pushCoordinationSupported, PUSH_LOCK_UNAVAILABLE, withPushDeviceLock } from '../utils/pushDeviceLock';
 import { serverManagedAuth, captureServerOperationContext,
   assertServerOperationContext } from '../utils/serverAuthTransport';
+import { commitDetailSelector, invalidateDetailSelector,
+  observeDetailSelector } from '../utils/pushDetailSelector.js';
 import './Settings.css';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export default function Notifications({ userId, organisationId }) {
   const [configured, setConfigured] = useState(false);
   const [registered, setRegistered] = useState(null);
+  const [detailAvailable, setDetailAvailable] = useState(false);
+  const [detailEnabled, setDetailEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [configLoaded, setConfigLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -19,6 +25,7 @@ export default function Notifications({ userId, organisationId }) {
   const [permission, setPermission] = useState(globalThis.Notification?.permission || 'unavailable');
   const [reloadKey, setReloadKey] = useState(0);
   const publicKey = useRef(null);
+  const bindingVersion = useRef(null);
   const generation = useRef(0);
   const busyRef = useRef(null);
   const supported = pushSupport();
@@ -28,9 +35,25 @@ export default function Notifications({ userId, organisationId }) {
   const standalone = navigator.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches;
 
   useEffect(() => {
+    if (!serverManagedAuth) return undefined;
+    const changed = () => {
+      bindingVersion.current = null;
+      setDetailEnabled(false);
+      setReloadKey(value => value + 1);
+    };
+    window.addEventListener('plannix-server-session-change', changed);
+    window.addEventListener('plannix-server-session-mismatch', changed);
+    return () => {
+      window.removeEventListener('plannix-server-session-change', changed);
+      window.removeEventListener('plannix-server-session-mismatch', changed);
+    };
+  }, []);
+
+  useEffect(() => {
     const ticket = ++generation.current;
     busyRef.current = null; setBusy(false);
     setLoading(true); setRegistered(null); setConfigured(false); setConfigLoaded(false); setError(''); setNotice('');
+    setDetailAvailable(false); setDetailEnabled(false); bindingVersion.current = null;
     if (!supported || !coordinated || !userId) { setLoading(false); return () => { generation.current++; busyRef.current = null; }; }
     (async () => {
       try {
@@ -41,6 +64,7 @@ export default function Notifications({ userId, organisationId }) {
         publicKey.current = config?.publicKey || null;
         setConfigLoaded(true);
         setConfigured(config?.configured === true && Boolean(publicKey.current));
+        setDetailAvailable(serverManagedAuth && config?.detailDisplayAvailable === true);
         await withPushDeviceLock(async () => {
           if (context) assertServerOperationContext(context);
           if (ticket !== generation.current) return;
@@ -50,7 +74,23 @@ export default function Notifications({ userId, organisationId }) {
           const status = await pushRequest('status', { endpoint: subscription.endpoint },
             { expectedUserId: userId, operationContext:context });
           if (typeof status?.registered !== 'boolean') throw new Error('Invalid device status.');
-          if (ticket === generation.current) setRegistered(status.registered === true ? true : null);
+          if (ticket === generation.current) {
+            setRegistered(status.registered === true ? true : null);
+            bindingVersion.current = status.boundToCurrentSession === true ? status.version : null;
+            if (config?.detailDisplayAvailable === true && bindingVersion.current) {
+              const policy = await pushRequest('detail-policy/status', {
+                endpoint:subscription.endpoint, installationVersion:bindingVersion.current,
+              }, { expectedUserId:userId, operationContext:context });
+              if (ticket === generation.current && context) {
+                assertServerOperationContext(context);
+                const stored = await observeDetailSelector().catch(() => null);
+                if (ticket === generation.current) setDetailEnabled(policy.enabled === true
+                  && stored?.selector?.sessionName === context.sessionName
+                  && stored.selector.installationVersion === bindingVersion.current
+                  && stored.selector.policyVersion === policy.policyVersion);
+              }
+            }
+          }
         });
       } catch {
         if (ticket === generation.current) setError('Could not load notification settings. Please retry.');
@@ -100,9 +140,14 @@ export default function Notifications({ userId, organisationId }) {
         : null;
       if (context) assertServerOperationContext(context);
       if (ticket !== generation.current) return;
-      await pushRequest('register', serverManagedAuth
+      if (serverManagedAuth) await invalidateDetailSelector().catch(() => {});
+      const committed = await pushRequest('register', serverManagedAuth
         ? { subscription:payload, expectedVersion:observed.version } : { subscription:payload },
         { expectedUserId: userId, operationContext:context });
+      if (serverManagedAuth && !UUID.test(committed?.version || ''))
+        throw new Error('Notification binding confirmation is unavailable.');
+      if (context) assertServerOperationContext(context);
+      if (serverManagedAuth && ticket === generation.current) bindingVersion.current = committed.version;
     });
     if (ticket !== generation.current) { void reconcilePushAccount().catch(() => {}); return; }
     setRegistered(true);
@@ -110,14 +155,46 @@ export default function Notifications({ userId, organisationId }) {
   });
   const disable = () => run(async (ticket, context) => {
     if (context) assertServerOperationContext(context);
+    if (serverManagedAuth) await invalidateDetailSelector().catch(() => {});
     const result = await disableCurrentDevice({ expectedUserId: userId,
       isCurrent: () => generation.current === ticket,
       operationContext:context });
     if (ticket !== generation.current) return;
     setRegistered(false);
+    setDetailEnabled(false); bindingVersion.current = null;
     setNotice(result?.state === 'absent'
       ? 'This account has no registered notification subscription on this device.'
       : 'Notifications are disabled on this device.');
+  });
+  const setDetails = enabled => run(async (ticket, context) => {
+    if (!serverManagedAuth || !detailAvailable || !bindingVersion.current || !context)
+      throw new Error('Notification detail is unavailable.');
+    const version = bindingVersion.current;
+    await withPushDeviceLock(async () => {
+      assertServerOperationContext(context);
+      if (ticket !== generation.current || version !== bindingVersion.current) return;
+      const selector = enabled ? await observeDetailSelector() : null;
+      const subscription = await currentPushSubscription();
+      if (!subscription) throw new Error('This device is no longer subscribed.');
+      if (!enabled) await invalidateDetailSelector().catch(() => {});
+      const policy = await pushRequest('detail-policy/status', {
+        endpoint:subscription.endpoint, installationVersion:version,
+      }, { expectedUserId:userId, operationContext:context });
+      assertServerOperationContext(context);
+      if (ticket !== generation.current || version !== bindingVersion.current) return;
+      const saved = await pushRequest('detail-policy/set', {
+        endpoint:subscription.endpoint, installationVersion:version,
+        policyVersion:policy.policyVersion, enabled,
+      }, { expectedUserId:userId, operationContext:context });
+      assertServerOperationContext(context);
+      if (ticket !== generation.current || version !== bindingVersion.current) return;
+      if (enabled) await commitDetailSelector({ expectedEpoch:selector.epoch,
+        sessionName:context.sessionName, installationVersion:version,
+        policyVersion:saved.policyVersion });
+      setDetailEnabled(enabled);
+    });
+    if (ticket === generation.current) setNotice(enabled
+      ? 'Lesson details are enabled for this device.' : 'Lesson details are disabled for this device.');
   });
   const test = () => run(async (ticket, context) => {
     await withPushDeviceLock(async () => {
@@ -164,6 +241,15 @@ export default function Notifications({ userId, organisationId }) {
           <button className="settings-reset" type="button" disabled={!supported || !coordinated || !configured || loading || busy || !registered || permission !== 'granted'} onClick={test}>Send test notification</button>
         </div>
         <p className="settings-hint">A successful test request means the push service accepted it; your device may still delay or suppress delivery.</p>
+        {detailAvailable ? <div className="settings-timetable-form">
+          <h2 className="settings-section-title">Details on this device</h2>
+          <p className="settings-hint">Lesson details and, with separate consent, event titles may appear on lock screens and connected watches. Displayed notifications cannot be recalled.</p>
+          <p role="status">{detailEnabled ? 'Details enabled' : 'Details disabled'}</p>
+          <button className="settings-save" type="button" disabled={busy || loading || !registered || detailEnabled || !bindingVersion.current}
+            onClick={() => setDetails(true)}>Enable details on this device</button>
+          <button className="settings-reset" type="button" disabled={busy || loading || !detailEnabled}
+            onClick={() => setDetails(false)}>Disable details on this device</button>
+        </div> : null}
         <MorningSummaryPanel userId={userId} organisationId={organisationId} />
       </div>
     </div>

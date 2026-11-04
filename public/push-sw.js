@@ -1,4 +1,185 @@
-/* Push-only worker. It does not cache, fetch or intercept app requests. */
+/* Push-only worker. Detail display remains inert until both an explicit device
+   selector and the server's default-off activation gate are present. */
+const DETAIL_LOCK = 'plannix-push-device';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const SESSION = /^__Host-plannix-s-[1-9]\d{0,15}$/;
+const DETAIL_DEADLINE_MS = 4000;
+let selectorQueue = Promise.resolve();
+
+function openSelectorDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('plannix-push-detail-selector', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('state');
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(new Error('storage unavailable'));
+  });
+}
+
+async function selectorTransaction(change) {
+  const db = await openSelectorDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction('state', change ? 'readwrite' : 'readonly');
+      const store = tx.objectStore('state');
+      const request = store.get('current');
+      let answer;
+      request.onsuccess = () => {
+        const previous = request.result || { epoch: 0, selector: null };
+        try {
+          if (!Number.isSafeInteger(previous.epoch) || previous.epoch < 0
+            || previous.epoch === Number.MAX_SAFE_INTEGER) throw new Error('storage unavailable');
+          answer = change ? change(previous) : previous;
+          if (change && answer?.next) store.put(answer.next, 'current');
+        } catch { tx.abort(); }
+      };
+      tx.oncomplete = () => resolve(change ? answer?.result : answer);
+      tx.onabort = () => reject(new Error('storage unavailable'));
+      tx.onerror = () => reject(new Error('storage unavailable'));
+    });
+  } finally { db.close(); }
+}
+
+function validSelector(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).sort().join(',') === 'installationVersion,policyVersion,sessionName'
+    && SESSION.test(value.sessionName) && UUID.test(value.installationVersion)
+    && UUID.test(value.policyVersion);
+}
+
+async function selectorMessage(message) {
+  if (!message || typeof message !== 'object' || !Number.isSafeInteger(message.expectedEpoch))
+    return { ok: false };
+  if (message.kind === 'observe') {
+    const current = await selectorTransaction();
+    return { ok: true, epoch: current.epoch, selector: current.selector };
+  }
+  if (message.kind === 'invalidate') {
+    return selectorTransaction(previous => ({ next: { epoch: previous.epoch + 1, selector: null },
+      result: { ok: true, epoch: previous.epoch + 1 } }));
+  }
+  if (message.kind === 'commit' && validSelector(message.selector)) {
+    return selectorTransaction(previous => previous.epoch === message.expectedEpoch
+      ? { next: { epoch: previous.epoch + 1, selector: message.selector },
+        result: { ok: true, epoch: previous.epoch + 1 } }
+      : { result: { ok: false } });
+  }
+  return { ok: false };
+}
+
+self.addEventListener('message', event => {
+  if (event.data?.type !== 'plannix-detail-selector' || !event.ports?.[0]) return;
+  const port = event.ports[0];
+  // Serialize messages from tabs in this worker; IndexedDB also enforces CAS
+  // across worker restarts. A failed write never promotes stale selectors.
+  const work = selectorQueue.then(() => selectorMessage(event.data));
+  selectorQueue = work.catch(() => {});
+  event.waitUntil?.(work.then(result => port.postMessage(result), () => port.postMessage({ ok:false })));
+});
+
+function deadline(work, milliseconds, controller) {
+  let timer;
+  return Promise.race([Promise.resolve().then(work), new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller?.abort();
+      reject(new Error('detail deadline'));
+    }, milliseconds);
+  })]).finally(() => clearTimeout(timer));
+}
+
+async function smallJson(response) {
+  if (!response.ok) throw new Error('detail unavailable');
+  const reader = response.body?.getReader?.();
+  if (!reader) throw new Error('detail unavailable');
+  const chunks = []; let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > 8192) { void reader.cancel().catch(() => {}); throw new Error('detail unavailable'); }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total); let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+}
+
+function notificationText(detail) {
+  if (!detail || !Array.isArray(detail.lessons) || !Array.isArray(detail.events)
+    || typeof detail.eventTitlesIncluded !== 'boolean') throw new Error('detail unavailable');
+  const parts = detail.lessons.slice(0, 3).map(item => {
+    if (!Number.isInteger(item.period) || typeof item.className !== 'string'
+      || typeof item.title !== 'string' || typeof item.isPpa !== 'boolean')
+      throw new Error('detail unavailable');
+    return item.isPpa ? `Period ${item.period}: PPA`
+      : `Period ${item.period}: ${item.className}${item.title ? ` — ${item.title}` : ''}`;
+  });
+  if (detail.eventTitlesIncluded) {
+    for (const event of detail.events.slice(0, 2)) {
+      if (typeof event.title !== 'string') throw new Error('detail unavailable');
+      parts.push(event.title);
+    }
+  } else if (detail.events.length) throw new Error('detail unavailable');
+  if (!parts.length) throw new Error('detail unavailable');
+  return parts.join(' · ').slice(0, 180);
+}
+
+async function showMorning(payload) {
+  const generic = () => self.registration.showNotification(payload.title, {
+    body: payload.body, tag: 'plannix-morning-summary',
+    data: { type: 'morning', notificationRef: payload.notificationRef },
+  });
+  let displayStarted = false;
+  const controller = new AbortController();
+  try {
+    const stored = await deadline(() => selectorTransaction(), 1000, controller);
+    const selector = stored.selector;
+    if (!validSelector(selector) || typeof self.navigator?.locks?.request !== 'function'
+      || !self.crypto?.subtle || !self.registration.pushManager?.getSubscription) throw new Error('detail unavailable');
+    await deadline(() => self.navigator.locks.request(DETAIL_LOCK,
+      { mode: 'exclusive', signal: controller.signal }, async lock => {
+        if (!lock || controller.signal.aborted) throw new Error('detail unavailable');
+        const current = await selectorTransaction();
+        if (current.epoch !== stored.epoch || !validSelector(current.selector))
+          throw new Error('detail unavailable');
+        const subscription = await self.registration.pushManager.getSubscription();
+        if (!subscription?.endpoint) throw new Error('detail unavailable');
+        const bytes = new TextEncoder().encode(subscription.endpoint);
+        const hash = [...new Uint8Array(await self.crypto.subtle.digest('SHA-256', bytes))]
+          .map(byte => byte.toString(16).padStart(2, '0')).join('');
+        const request = (path, headers = {}) => self.fetch(new URL(path, self.location.origin), {
+          method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error',
+          signal: controller.signal, headers,
+        });
+        const config = await smallJson(await request('/api/notifications/morning-summary/detail-display-config',
+          { 'X-Plannix-Expected-Session': selector.sessionName }));
+        if (config?.enabled !== true) throw new Error('detail unavailable');
+        const status = await smallJson(await request('/__stage3/auth/status'));
+        if (status?.authenticated !== true || status?.recovery === true
+          || status.sessionName !== selector.sessionName) throw new Error('detail unavailable');
+        const detail = await smallJson(await request('/api/notifications/morning-summary/detail', {
+          'X-Plannix-Expected-Session': selector.sessionName,
+          'X-Plannix-Notification-Reference': payload.notificationRef,
+          'X-Plannix-Installation-Hash': hash,
+          'X-Plannix-Installation-Version': selector.installationVersion,
+          'X-Plannix-Detail-Policy-Version': selector.policyVersion,
+        }));
+        const body = notificationText(detail);
+        const latest = await selectorTransaction();
+        if (controller.signal.aborted || latest.epoch !== stored.epoch)
+          throw new Error('detail unavailable');
+        displayStarted = true;
+        // After this call starts, failure or timeout is uncertain. A second
+        // generic display could duplicate an OS notification.
+        await deadline(() => self.registration.showNotification(payload.title, {
+          body, tag: 'plannix-morning-summary',
+          data: { type: 'morning', notificationRef: payload.notificationRef },
+        }), 1000);
+      }), DETAIL_DEADLINE_MS, controller);
+  } catch {
+    if (!displayStarted) await generic();
+  }
+}
+
 self.addEventListener('push', (event) => {
   let payload;
   try { payload = event.data?.json(); } catch { return; }
@@ -15,10 +196,7 @@ self.addEventListener('push', (event) => {
     || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(payload.notificationRef)
     || payload.title !== 'Your Plannix day'
     || payload.body !== 'Open Plannix to view your morning summary.') return;
-  event.waitUntil(self.registration.showNotification(payload.title, {
-    body: payload.body, tag: 'plannix-morning-summary',
-    data: { type: 'morning', notificationRef: payload.notificationRef },
-  }));
+  event.waitUntil(showMorning(payload));
 });
 
 self.addEventListener('notificationclick', (event) => {

@@ -14,7 +14,9 @@ async function loadServerMode() {
   const transformed=original.replace('import.meta.env?.VITE_PLANNIX_AUTH_MODE',
     `({VITE_PLANNIX_AUTH_MODE:'server'}).VITE_PLANNIX_AUTH_MODE`)
     .replace("import { observeAuthTestOperation } from './serverAuthTestObserver.js';",
-      'const observeAuthTestOperation = () => {};');
+      'const observeAuthTestOperation = () => {};')
+    .replace("import { invalidateDetailSelector, withDetailTransition } from './pushDetailSelector.js';",
+      'const invalidateDetailSelector = async () => {}; const withDetailTransition = async task => task();');
   const file=path.join(directory,'transport.mjs');
   await writeFile(file,transformed);
   return {module:await import(`file://${file}`),cleanup:()=>rm(directory,{recursive:true,force:true})};

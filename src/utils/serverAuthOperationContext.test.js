@@ -26,7 +26,8 @@ async function fixture() {
   await writeFile(path.join(root,'transport.mjs'),(await source('serverAuthTransport.js'))
     .replace('import.meta.env?.VITE_PLANNIX_AUTH_MODE',
       `({VITE_PLANNIX_AUTH_MODE:'server'}).VITE_PLANNIX_AUTH_MODE`)
-    .replace("'./serverAuthTestObserver.js'","'./serverAuthTestObserver.mjs'"));
+    .replace("'./serverAuthTestObserver.js'","'./serverAuthTestObserver.mjs'")
+    .replace("'./pushDetailSelector.js'","'./pushDetailSelector.mjs'"));
   await writeFile(path.join(root,'supabase.mjs'),
     'export const getSupabaseClient=()=>{throw Error("No provider access in server mode.");};');
   await writeFile(path.join(root,'api.mjs'),`export const API_BASE_URL='';
@@ -36,6 +37,8 @@ async function fixture() {
       super(message);Object.assign(this,details); } }
     export const parseJsonSafe=response=>response.json();`);
   await writeFile(path.join(root,'pushDeviceLock.mjs'),await source('pushDeviceLock.js'));
+  await writeFile(path.join(root,'pushDetailSelector.mjs'),
+    (await source('pushDetailSelector.js')).replace("'./pushDeviceLock.js'","'./pushDeviceLock.mjs'"));
   await writeFile(path.join(root,'timetableSessionState.mjs'),await source('timetableSessionState.js'));
   await writeFile(path.join(root,'timetableOperationContext.mjs'),
     (await source('timetableOperationContext.js')).replace("'./serverAuthTransport.js'","'./transport.mjs'"));
@@ -47,6 +50,9 @@ async function fixture() {
       .replace("'./api.js'","'./api.mjs'")
       .replace("'./pushDeviceLock.js'","'./pushDeviceLock.mjs'"));
   }
+  const summaryPath=path.join(root,'morningSummaryApi.mjs');
+  await writeFile(summaryPath,(await readFile(summaryPath,'utf8'))
+    .replace("'./pushDetailSelector.js'","'./pushDetailSelector.mjs'"));
   const transport=await import(`file://${root}/transport.mjs`);
   const push=await import(`file://${root}/pushNotifications.mjs`);
   const summary=await import(`file://${root}/morningSummaryApi.mjs`);

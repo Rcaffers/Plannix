@@ -50,7 +50,8 @@ export function createPushService({ config = env, createClientImpl = createClien
           target_session:serverSession(options), target_hash:endpointHash(endpoint),
         });
         if (result?.state !== 'current' || typeof result.registered !== 'boolean'
-          || typeof result.boundToCurrentSession !== 'boolean' || result.detailEligible !== false)
+          || typeof result.boundToCurrentSession !== 'boolean' || result.detailEligible !== false
+          || (result.version !== null && !USER_ID.test(result.version)))
           throw unavailable();
         return result;
       }
@@ -85,13 +86,38 @@ export function createPushService({ config = env, createClientImpl = createClien
         });
         if (result?.state === 'conflict') throw changed();
         if (result?.state !== 'registered' || !USER_ID.test(result.version)) throw unavailable();
-        return;
+        return { version: result.version };
       }
       const result = await rpc('plannix_push_register_device', {
         validated_user_id: user(userId), target_hash: endpointHash(subscription.endpoint),
         target_endpoint: subscription.endpoint, target_p256dh: subscription.keys.p256dh, target_auth: subscription.keys.auth,
       });
       if (result !== true) throw unavailable();
+    },
+    async detailPolicy(userId, endpoint, installationVersion, options) {
+      if (config.authMode !== 'server' || !validPushEndpoint(endpoint)
+        || !USER_ID.test(installationVersion) || !USER_ID.test(config.morningSummaryPilotUserId || '')
+        || user(userId) !== config.morningSummaryPilotUserId) throw unavailable();
+      const result = await rpc('plannix_push_detail_policy_status', {
+        target_session:serverSession(options), target_hash:endpointHash(endpoint),
+        expected_version:installationVersion, target_pilot:config.morningSummaryPilotUserId,
+      });
+      if (!result || typeof result.enabled !== 'boolean'
+        || !USER_ID.test(result.policyVersion)) throw unavailable();
+      return result;
+    },
+    async setDetailPolicy(userId, endpoint, installationVersion, policyVersion, enabled, options) {
+      if (config.authMode !== 'server' || !validPushEndpoint(endpoint)
+        || !USER_ID.test(installationVersion) || !USER_ID.test(policyVersion)
+        || typeof enabled !== 'boolean' || !USER_ID.test(config.morningSummaryPilotUserId || '')
+        || user(userId) !== config.morningSummaryPilotUserId) throw unavailable();
+      const result = await rpc('plannix_push_set_detail_eligibility', {
+        target_session:serverSession(options), target_hash:endpointHash(endpoint),
+        expected_version:installationVersion, expected_policy_version:policyVersion,
+        target_pilot:config.morningSummaryPilotUserId, target_enabled:enabled,
+      });
+      if (!result || result.enabled !== enabled || !USER_ID.test(result.policyVersion)) throw changed();
+      return result;
     },
     async claim(userId, subscription, options) {
       if (!validPushSubscription(subscription)) throw unavailable();

@@ -5,9 +5,10 @@ import { createMorningSummaryDetailService } from './detail.js';
 const userId = 'cb000000-0000-4000-8000-000000000001';
 const sessionId = 'cb000000-0000-4000-8000-000000000002';
 const installationVersion = 'cb000000-0000-4000-8000-000000000003';
+const detailPolicyVersion = 'cb000000-0000-4000-8000-000000000005';
 const notificationRef = 'cb000000-0000-4000-8000-000000000004';
 const endpointHash = 'a'.repeat(64);
-const input = { userId, sessionId, installationVersion, notificationRef, endpointHash };
+const input = { userId, sessionId, installationVersion, detailPolicyVersion, notificationRef, endpointHash };
 const config = { supabaseUrl: 'https://example.test', supabaseSecretKey: 'synthetic',
   morningSummaryPilotUserId: userId };
 const summary = { date: '2026-11-03', week: 'A', lessons: [
@@ -40,7 +41,8 @@ test('detail authorization uses verified session and rechecks after snapshot; ev
   });
   assert.deepEqual(first.calls.map(call => call[0]), ['authorize', 'snapshot', 'authorize']);
   assert.deepEqual(first.calls[0][2], { target_session: sessionId, target_hash: endpointHash,
-    target_version: installationVersion, target_reference: notificationRef, target_pilot: userId });
+    target_version: installationVersion, target_reference: notificationRef, target_pilot: userId,
+    target_policy_version:detailPolicyVersion });
   const second = fixture({ decisions: [
     { ownerId: userId, eventTitleConsent: false }, { ownerId: userId, eventTitleConsent: true },
   ] });

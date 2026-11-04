@@ -3,6 +3,7 @@ import { requireSupabaseAuth } from '../middleware/requireSupabaseAuth.js';
 import { createMorningSummaryPreferenceService, MorningSummaryPreferenceConflict, validDeliveryTime } from '../morningSummary/preferences.js';
 import { createMorningSummaryDelivery } from '../morningSummary/delivery.js';
 import { createMorningSummaryDetailService } from '../morningSummary/detail.js';
+import { env } from '../config/env.js';
 
 const fail = (statusCode, message) => Object.assign(new Error(message), { expose: true, statusCode });
 const noQuery = req => Object.keys(req.query).length === 0;
@@ -18,7 +19,7 @@ function oneHeader(req, name) {
 
 export function registerMorningSummaryRoutes({ app, requireAuth = requireSupabaseAuth,
   service = createMorningSummaryPreferenceService(), delivery = createMorningSummaryDelivery(),
-  detail = createMorningSummaryDetailService() } = {}) {
+  detail = createMorningSummaryDetailService(), config = env } = {}) {
   const parse = express.json({ limit: '2kb', strict: true });
   app.get('/api/notifications/morning-summary/preferences', requireAuth, async (req, res, next) => {
     try {
@@ -67,19 +68,31 @@ export function registerMorningSummaryRoutes({ app, requireAuth = requireSupabas
       ? fail(409, 'Morning summary preferences changed elsewhere. Reload latest before saving.')
       : caught?.expose ? caught : fail(503, 'Could not save morning summary preferences.')); }
   });
+  app.get('/api/notifications/morning-summary/detail-display-config', requireAuth, (req, res, next) => {
+    res.set('Cache-Control', 'no-store, private, max-age=0');
+    try {
+      if (!noQuery(req) || !req.serverSession || !config.morningSummaryDetailDisplayEnabled)
+        throw fail(404, 'Notification detail is unavailable.');
+      res.json({ enabled: true });
+    } catch (caught) { next(caught?.expose ? caught : fail(404, 'Notification detail is unavailable.')); }
+  });
   app.get('/api/notifications/morning-summary/detail', requireAuth, async (req, res, next) => {
     res.set('Cache-Control', 'no-store, private, max-age=0');
     res.set('Pragma', 'no-cache');
     res.vary('Cookie');
     try {
-      if (!req.serverSession) throw fail(404, 'Notification detail is unavailable.');
+      if (!req.serverSession || !config.morningSummaryDetailDisplayEnabled)
+        throw fail(404, 'Notification detail is unavailable.');
       const notificationRef = oneHeader(req, 'x-plannix-notification-reference');
       const endpointHash = oneHeader(req, 'x-plannix-installation-hash');
       const installationVersion = oneHeader(req, 'x-plannix-installation-version');
+      const detailPolicyVersion = oneHeader(req, 'x-plannix-detail-policy-version');
       if (!noQuery(req) || !UUID.test(notificationRef || '') || !HASH.test(endpointHash || '')
-        || !UUID.test(installationVersion || '')) throw fail(400, 'Notification detail request is invalid.');
+        || !UUID.test(installationVersion || '') || !UUID.test(detailPolicyVersion || ''))
+        throw fail(400, 'Notification detail request is invalid.');
       res.json(await detail.resolve({ sessionId: req.serverSession.sessionId,
-        userId: req.auth.userId, endpointHash, installationVersion, notificationRef }));
+        userId: req.auth.userId, endpointHash, installationVersion,
+        detailPolicyVersion, notificationRef }));
     } catch (caught) { next(caught?.expose ? caught : fail(404, 'Notification detail is unavailable.')); }
   });
   app.get('/api/notifications/morning-summary/day', requireAuth, async (req, res, next) => {

@@ -1,6 +1,7 @@
 import express from 'express';
 import { requireSupabaseAuth } from '../middleware/requireSupabaseAuth.js';
 import { createPushService } from '../push/service.js';
+import { env } from '../config/env.js';
 import { validPushEndpoint, validPushSubscription } from '../push/subscription.js';
 
 const fail = (statusCode, message) => Object.assign(new Error(message), { expose: true, statusCode });
@@ -8,7 +9,8 @@ const only = (object, keys) => object && typeof object === 'object' && !Array.is
   && Object.keys(object).sort().join(',') === keys.sort().join(',');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-export function registerPushRoutes({ app, requireAuth = requireSupabaseAuth, service = createPushService() } = {}) {
+export function registerPushRoutes({ app, requireAuth = requireSupabaseAuth,
+  service = createPushService(), config = env } = {}) {
   const parse = express.json({ limit: '8kb', strict: true });
   function guard(req) {
     if (Object.keys(req.query).length) throw fail(400, 'Notification request is invalid.');
@@ -20,7 +22,9 @@ export function registerPushRoutes({ app, requireAuth = requireSupabaseAuth, ser
   app.get('/api/notifications/config', requireAuth, (req, res, next) => {
     try {
       if (Object.keys(req.query).length) throw fail(400, 'Notification request is invalid.');
-      res.json({ configured: service.configured(), publicKey: service.publicKey() });
+      res.json({ configured: service.configured(), publicKey: service.publicKey(),
+        ...(req.serverSession ? { detailDisplayAvailable: config.morningSummaryDetailDisplayEnabled === true
+          && req.auth.userId === config.morningSummaryPilotUserId } : {}) });
     } catch { error(next); }
   });
   app.post('/api/notifications/status', requireAuth, parse, async (req, res, next) => {
@@ -39,10 +43,37 @@ export function registerPushRoutes({ app, requireAuth = requireSupabaseAuth, ser
         || (scoped && req.body.expectedVersion !== null
           && (typeof req.body.expectedVersion !== 'string' || !UUID.test(req.body.expectedVersion))))
         throw fail(400, 'Notification request is invalid.');
-      await service.register(req.auth.userId, req.body.subscription,
+      const committed = await service.register(req.auth.userId, req.body.subscription,
         { ...sessionOptions(req), expectedVersion:req.body.expectedVersion });
-      res.json({ registered: true });
+      res.json(scoped ? { registered: true, version: committed.version } : { registered: true });
     } catch (caught) { next(caught?.expose ? caught : fail(503, 'Could not enable notifications.')); }
+  });
+  app.post('/api/notifications/detail-policy/status', requireAuth, parse, async (req, res, next) => {
+    res.set('Cache-Control', 'no-store, private');
+    try {
+      if (!config.morningSummaryDetailDisplayEnabled || !req.serverSession)
+        throw fail(404, 'Notification detail is unavailable.');
+      guard(req);
+      if (!only(req.body, ['endpoint','installationVersion'])
+        || !validPushEndpoint(req.body.endpoint) || !UUID.test(req.body.installationVersion))
+        throw fail(400, 'Notification request is invalid.');
+      res.json(await service.detailPolicy(req.auth.userId, req.body.endpoint,
+        req.body.installationVersion, sessionOptions(req)));
+    } catch (caught) { next(caught?.expose ? caught : fail(404, 'Notification detail is unavailable.')); }
+  });
+  app.post('/api/notifications/detail-policy/set', requireAuth, parse, async (req, res, next) => {
+    res.set('Cache-Control', 'no-store, private');
+    try {
+      if (!config.morningSummaryDetailDisplayEnabled || !req.serverSession)
+        throw fail(404, 'Notification detail is unavailable.');
+      guard(req);
+      if (!only(req.body, ['endpoint','enabled','installationVersion','policyVersion'])
+        || !validPushEndpoint(req.body.endpoint) || !UUID.test(req.body.installationVersion)
+        || !UUID.test(req.body.policyVersion) || typeof req.body.enabled !== 'boolean')
+        throw fail(400, 'Notification request is invalid.');
+      res.json(await service.setDetailPolicy(req.auth.userId, req.body.endpoint,
+        req.body.installationVersion, req.body.policyVersion, req.body.enabled, sessionOptions(req)));
+    } catch (caught) { next(caught?.expose ? caught : fail(404, 'Notification detail is unavailable.')); }
   });
   app.post('/api/notifications/observe', requireAuth, parse, async (req, res, next) => {
     try {

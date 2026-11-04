@@ -120,7 +120,7 @@ test('server-mode registration carries the verified session and exact observed v
     }
     if (name === 'plannix_push_claim_installation') return { data:{state:'current',version},error:null };
     if (name === 'plannix_push_status_installation') return { data:{state:'current',registered:true,
-      boundToCurrentSession:false,detailEligible:false},error:null };
+      boundToCurrentSession:false,version:null,detailEligible:false},error:null };
     if (name === 'plannix_push_remove_installation') return { data:true,error:null };
     throw Error('Unexpected RPC');
   } };
@@ -133,7 +133,7 @@ test('server-mode registration carries the verified session and exact observed v
   await assert.rejects(service.register(user,subscription,{sessionId,expectedVersion:null}),error => error.statusCode === 409);
   assert.deepEqual(await service.claim(user,subscription,{sessionId}),{state:'current',version});
   assert.deepEqual(await service.status(user,endpoint,{sessionId}),{state:'current',registered:true,
-    boundToCurrentSession:false,detailEligible:false});
+    boundToCurrentSession:false,version:null,detailEligible:false});
   assert.equal(await service.remove(user,endpoint,version,{sessionId}),true);
   assert.deepEqual(calls.map(([name]) => name),[
     'plannix_push_observe_installation','plannix_push_register_installation',
@@ -154,7 +154,7 @@ test('removed endpoint requires its newly observed tombstone version and status 
     if(name==='plannix_push_observe_installation') return {data:{state:'absent',version:tombstone},error:null};
     if(name==='plannix_push_register_installation') return {data:{state:'registered',version},error:null};
     if(name==='plannix_push_status_installation') return {data:{state:'current',registered:true,
-      boundToCurrentSession:false,detailEligible:false},error:null};
+      boundToCurrentSession:false,version:null,detailEligible:false},error:null};
     throw Error('Unexpected RPC');
   }};
   const service=createPushService({config:{...config,authMode:'server'},createClientImpl:()=>fake});
@@ -163,6 +163,32 @@ test('removed endpoint requires its newly observed tombstone version and status 
   await service.register(user,subscription,{sessionId,expectedVersion:observed.version});
   assert.equal(calls[1][1].expected_version,tombstone);
   assert.deepEqual(await service.status(user,endpoint,{sessionId}),{state:'current',registered:true,
-    boundToCurrentSession:false,detailEligible:false});
+    boundToCurrentSession:false,version:null,detailEligible:false});
   assert.ok(calls.every(([,args])=>args.target_session===sessionId));
+});
+
+test('detail policy changes use only the verified session and a separate expected generation', async () => {
+  const sessionId='ca000000-0000-4000-8000-000000000077';
+  const policy='ca000000-0000-4000-8000-000000000088';
+  const calls=[];
+  const fake={rpc:async(name,args)=>{
+    calls.push([name,args]);
+    if(name==='plannix_push_detail_policy_status') return {
+      data:{enabled:false,policyVersion:policy},error:null};
+    if(name==='plannix_push_set_detail_eligibility') return {
+      data:{enabled:true,policyVersion:version},error:null};
+    throw Error('Unexpected RPC');
+  }};
+  const service=createPushService({config:{...config,authMode:'server',
+    morningSummaryPilotUserId:user},createClientImpl:()=>fake});
+  assert.deepEqual(await service.detailPolicy(user,endpoint,version,{sessionId}),
+    {enabled:false,policyVersion:policy});
+  assert.deepEqual(await service.setDetailPolicy(user,endpoint,version,policy,true,{sessionId}),
+    {enabled:true,policyVersion:version});
+  assert.equal(calls.length,2);
+  assert.deepEqual(calls[1][1],{target_session:sessionId,target_hash:endpointHash(endpoint),
+    expected_version:version,expected_policy_version:policy,target_pilot:user,target_enabled:true});
+  await assert.rejects(service.setDetailPolicy('ca000000-0000-4000-8000-000000000099',
+    endpoint,version,policy,true,{sessionId}));
+  assert.equal(calls.length,2,'a caller cannot select another owner through the service');
 });

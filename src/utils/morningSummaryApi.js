@@ -2,6 +2,7 @@ import { getSupabaseClient } from '../lib/supabase.js';
 import { serverManagedAuth, serverAuthFetch, serverSessionStatus,
   captureServerOperationContext, assertServerOperationContext } from './serverAuthTransport.js';
 import { API_BASE_URL, ApiError, JSON_POST_HEADERS, parseJsonSafe } from './api.js';
+import { withDetailTransition } from './pushDetailSelector.js';
 
 const TIME = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -37,8 +38,8 @@ async function currentSession() {
 }
 
 export function createMorningSummaryApi({ fetchImpl = fetch, getSession = currentSession } = {}) {
-  async function request(method, expectedUserId, value, signal) {
-    const context = serverManagedAuth ? captureServerOperationContext(expectedUserId) : null;
+  async function request(method, expectedUserId, value, signal, capturedContext) {
+    const context = capturedContext || (serverManagedAuth ? captureServerOperationContext(expectedUserId) : null);
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     if (typeof expectedUserId !== 'string' || !UUID.test(expectedUserId)) throw new ApiError('Authentication is required.', { status: 401 });
     const submitted = method === 'PUT' && !serverManagedAuth ? {
@@ -79,7 +80,11 @@ export function createMorningSummaryApi({ fetchImpl = fetch, getSession = curren
   }
   return {
     load: (userId, { signal } = {}) => request('GET', userId, null, signal),
-    save: (userId, value, { signal } = {}) => request('PUT', userId, value, signal),
+    save: async (userId, value, { signal } = {}) => {
+      if (!serverManagedAuth) return request('PUT', userId, value, signal);
+      const context = captureServerOperationContext(userId);
+      return withDetailTransition(() => request('PUT', userId, value, signal, context));
+    },
     async day(userId, summaryRef, { signal } = {}) {
       const context = serverManagedAuth ? captureServerOperationContext(userId) : null;
       if (!UUID.test(userId) || !UUID.test(summaryRef))
