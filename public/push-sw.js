@@ -3,6 +3,8 @@
 const DETAIL_LOCK = 'plannix-push-device';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SESSION = /^__Host-plannix-s-[1-9]\d{0,15}$/;
+// Require the absolute end; a JavaScript $ anchor also matches before a final newline.
+const PERIOD_LABEL = /^P[1-9]\d*(?![\s\S])/;
 const DETAIL_DEADLINE_MS = 4000;
 let selectorQueue = Promise.resolve();
 
@@ -124,11 +126,16 @@ function notificationText(detail) {
   if (!detail || !Array.isArray(detail.lessons) || !Array.isArray(detail.events)
     || typeof detail.eventTitlesIncluded !== 'boolean') throw new Error('detail unavailable');
   const parts = detail.lessons.slice(0, 3).map(item => {
-    if (!Number.isInteger(item.period) || typeof item.className !== 'string'
+    if (!item || typeof item.period !== 'string' || !PERIOD_LABEL.test(item.period)
       || typeof item.title !== 'string' || typeof item.isPpa !== 'boolean')
       throw new Error('detail unavailable');
-    return item.isPpa ? `Period ${item.period}: PPA`
-      : `Period ${item.period}: ${item.className}${item.title ? ` — ${item.title}` : ''}`;
+    if (item.isPpa) {
+      if (item.className !== null || item.title !== '') throw new Error('detail unavailable');
+      return `${item.period}: PPA`;
+    }
+    if (typeof item.className !== 'string' || !item.className.trim())
+      throw new Error('detail unavailable');
+    return `${item.period}: ${item.className}${item.title ? ` — ${item.title}` : ''}`;
   });
   if (detail.eventTitlesIncluded) {
     for (const event of detail.events.slice(0, 2)) {

@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { webcrypto } from 'node:crypto';
 import test from 'node:test';
+import { buildMorningSummary } from '../../src/utils/morningSummary.js';
+import { createMorningSummaryDelivery } from '../morningSummary/delivery.js';
+import { createMorningSummaryDetailService } from '../morningSummary/detail.js';
 
 const script = readFileSync(new URL('../../public/push-sw.js', import.meta.url), 'utf8');
 const consoleScript = readFileSync(new URL('../../docs/notification-worker-capability-check.md', import.meta.url), 'utf8')
@@ -207,7 +210,7 @@ function detailFixture({ fetchImpl, showImpl, locks, timerImpl = setTimeout } = 
       if (path.endsWith('detail-display-config')) return Response.json({enabled:true});
       if (path.endsWith('/status')) return Response.json({authenticated:true,
         sessionName:selector.sessionName});
-      return Response.json({date:'2026-11-03',week:'A',lessons:[{period:1,
+      return Response.json({date:'2026-11-03',week:'A',lessons:[{period:'P1',
         className:'Synthetic class',title:'Synthetic lesson',isPpa:false}],
         events:[],eventTitlesIncluded:false});
     }),
@@ -236,7 +239,7 @@ test('worker uses fresh session and authorization before one detailed display', 
     if (path.endsWith('detail-display-config')) return Response.json({enabled:true});
     if (path.endsWith('/status')) return Response.json({authenticated:true,
       sessionName:'__Host-plannix-s-2'});
-    return Response.json({date:'2026-11-03',week:'A',lessons:[{period:1,
+    return Response.json({date:'2026-11-03',week:'A',lessons:[{period:'P1',
       className:'Synthetic class',title:'Synthetic lesson',isPpa:false}],
       events:[{title:'Private event'}],eventTitlesIncluded:true});
   }});
@@ -247,6 +250,100 @@ test('worker uses fresh session and authorization before one detailed display', 
   assert.equal(paths.length,3);
   assert.equal(paths[2][1]['X-Plannix-Expected-Session'],'__Host-plannix-s-2');
   assert.equal(h.state().selector.sessionName,'__Host-plannix-s-2');
+});
+
+test('real summary, detail service and worker display ordinary lessons and PPA without unconsented events', async () => {
+  const userId = 'cf000000-0000-4000-8000-000000000011';
+  const sessionId = 'cf000000-0000-4000-8000-000000000012';
+  const yearId = 'cf000000-0000-4000-8000-000000000013';
+  const weekId = 'cf000000-0000-4000-8000-000000000014';
+  const date = '2026-11-02';
+  const snapshot = {
+    date, year: { id:yearId, startDate:'2026-09-01', endDate:'2027-07-31', holidays:[] },
+    dated: { weekStartDate:date, repeatingWeekId:weekId, sessions:[
+      { day:0, periodId:'one', classId:'class-a', title:'Fractions' },
+      { day:0, periodId:'three', classId:'class-a', title:'Geometry' },
+    ] },
+    periods: [
+      { id:'one', type:'teaching', order:1, startTime:'09:00', endTime:'10:00' },
+      { id:'two', type:'teaching', order:2, startTime:'10:15', endTime:'11:15' },
+      { id:'three', type:'teaching', order:3, startTime:'11:30', endTime:'12:30' },
+    ],
+    classes:[{ id:'class-a', name:'Synthetic class' }], weeks:[{ id:weekId, code:'A' }],
+    events:[{ id:'event-a', date, title:'Synthetic event', startTime:null, endTime:null }],
+  };
+  const canonical = buildMorningSummary(snapshot);
+  assert.deepEqual(canonical.lessons.map(lesson => [lesson.period, lesson.className, lesson.isPpa]), [
+    ['P1','Synthetic class',false], ['P2',null,true], ['P3','Synthetic class',false],
+  ]);
+  const config = { supabaseUrl:'https://example.test', supabaseSecretKey:'synthetic',
+    morningSummaryPilotUserId:userId };
+  const delivery = createMorningSummaryDelivery({ config, createClientImpl:() => ({
+    rpc:async name => {
+      assert.equal(name,'plannix_morning_summary_notification_snapshot');
+      return { data:snapshot, error:null };
+    },
+  }) });
+  let authorizations = 0; let detailResponse;
+  const detail = createMorningSummaryDetailService({ config, delivery,
+    createClientImpl:() => ({ rpc:async name => {
+      assert.equal(name,'plannix_authorize_morning_summary_detail_v2');
+      authorizations++;
+      return { data:{ ownerId:userId, eventTitleConsent:false }, error:null };
+    } }),
+  });
+  const h = detailFixture({ fetchImpl:async (input, init) => {
+    const path = new URL(input).pathname;
+    if (path.endsWith('detail-display-config')) return Response.json({ enabled:true });
+    if (path.endsWith('/status')) return Response.json({ authenticated:true,
+      sessionName:'__Host-plannix-s-2' });
+    detailResponse = await detail.resolve({ userId, sessionId,
+      endpointHash:init.headers['X-Plannix-Installation-Hash'],
+      installationVersion:init.headers['X-Plannix-Installation-Version'],
+      detailPolicyVersion:init.headers['X-Plannix-Detail-Policy-Version'],
+      notificationRef:init.headers['X-Plannix-Notification-Reference'] });
+    return Response.json(detailResponse);
+  } });
+  await h.deliver();
+  assert.equal(authorizations,2);
+  assert.deepEqual(detailResponse.lessons, canonical.lessons.map(lesson => ({
+    period:lesson.period, className:lesson.className, title:lesson.title, isPpa:lesson.isPpa,
+  })));
+  assert.deepEqual(detailResponse.events, []);
+  assert.equal(detailResponse.eventTitlesIncluded,false);
+  assert.equal(h.shown.length,1);
+  assert.equal(h.shown[0][0],'Your Plannix day');
+  assert.equal(h.shown[0][1].body,
+    'P1: Synthetic class — Fractions · P2: PPA · P3: Synthetic class — Geometry');
+  assert.doesNotMatch(JSON.stringify(h.shown),/Synthetic event/);
+});
+
+test('malformed detail shapes remain generic and never display their text', async () => {
+  const ordinary = { period:'P1', className:'Synthetic class', title:'Private lesson', isPpa:false };
+  const invalid = [
+    { lessons:[{ ...ordinary, period:1 }] },
+    { lessons:[{ ...ordinary, period:'P0' }] },
+    { lessons:[{ ...ordinary, period:'P1\n' }] },
+    { lessons:[{ ...ordinary, className:null }] },
+    { lessons:[{ period:'P1', className:'Synthetic class', title:'', isPpa:true }] },
+    { lessons:[{ period:'P1', className:null, title:'Private lesson', isPpa:true }] },
+    { lessons:[ordinary], events:[{ title:'Private event' }] },
+  ];
+  for (const change of invalid) {
+    const response = { date:'2026-11-02', week:'A', lessons:[ordinary],
+      events:[], eventTitlesIncluded:false, ...change };
+    const h = detailFixture({ fetchImpl:async input => {
+      const path = new URL(input).pathname;
+      if (path.endsWith('detail-display-config')) return Response.json({ enabled:true });
+      if (path.endsWith('/status')) return Response.json({ authenticated:true,
+        sessionName:'__Host-plannix-s-2' });
+      return Response.json(response);
+    } });
+    await h.deliver();
+    assert.equal(h.shown.length,1);
+    assert.equal(h.shown[0][1].body,h.payload.body);
+    assert.doesNotMatch(JSON.stringify(h.shown),/Private lesson|Private event/);
+  }
 });
 
 test('network failure and stale selector fall back once before display', async () => {
