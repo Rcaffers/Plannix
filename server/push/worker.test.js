@@ -5,15 +5,121 @@ import { webcrypto } from 'node:crypto';
 import test from 'node:test';
 
 const script = readFileSync(new URL('../../public/push-sw.js', import.meta.url), 'utf8');
-function worker() {
+const consoleScript = readFileSync(new URL('../../docs/notification-worker-capability-check.md', import.meta.url), 'utf8')
+  .match(/```js\n([\s\S]*?)\n```/)[1];
+function worker(features = {}) {
   const listeners = new Map(); const notifications = []; const opened = [];
   const self = { location: { origin: 'https://plannix.example.test' },
     addEventListener: (name, handler) => listeners.set(name, handler),
     registration: { showNotification: async (...args) => notifications.push(args) },
-    clients: { matchAll: async () => [], openWindow: async url => opened.push(url) } };
+    clients: { matchAll: async () => [], openWindow: async url => opened.push(url) },
+    ...features };
   vm.runInNewContext(script, { self, URL, AbortController, setTimeout, clearTimeout });
   return { listeners, notifications, opened };
 }
+test('capability diagnostic reads only worker API presence and returns four booleans', () => {
+  let subscriptionReads = 0; let storageReads = 0;
+  const w = worker({
+    navigator: { locks: { request() {} } },
+    indexedDB: { open() { storageReads++; } },
+    crypto: { subtle: { digest() {} } },
+    registration: { showNotification() { throw Error('displayed'); },
+      pushManager: { getSubscription() { subscriptionReads++; } } },
+  });
+  const replies = [];
+  w.listeners.get('message')({
+    data: { type: 'plannix-worker-capabilities', version: 1, secret: 'not echoed' },
+    source: { type: 'window', url: 'https://plannix.example.test/settings/notifications?private=value' },
+    ports: [{ postMessage: reply => replies.push(reply) }],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(replies)), [{
+    webLocks: true, indexedDB: true, cryptoSubtle: true, pushSubscriptionAccess: true,
+  }]);
+  assert.equal(subscriptionReads, 0);
+  assert.equal(storageReads, 0);
+  assert.equal(w.notifications.length, 0);
+  const absent = worker();
+  const absentReplies = [];
+  absent.listeners.get('message')({ data: { type: 'plannix-worker-capabilities', version: 1 },
+    source: { type: 'window', url: 'https://plannix.example.test/' },
+    ports: [{ postMessage: reply => absentReplies.push(reply) }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(absentReplies)), [{
+    webLocks: false, indexedDB: false, cryptoSubtle: false, pushSubscriptionAccess: false,
+  }]);
+});
+test('capability diagnostic ignores missing ports and non-origin or non-window clients', () => {
+  const w = worker(); const replies = [];
+  const send = (source, ports = [{ postMessage: reply => replies.push(reply) }], version = 1) =>
+    w.listeners.get('message')({ data: { type: 'plannix-worker-capabilities', version }, source, ports });
+  send({ type: 'window', url: 'https://plannix.example.test/' }, []);
+  send({ type: 'window', url: 'https://plannix.example.test/' }, [{ postMessage() {} }, { postMessage() {} }]);
+  send({ type: 'window', url: 'https://other.example.test/' });
+  send({ type: 'worker', url: 'https://plannix.example.test/' });
+  send({ type: 'window', url: 'not a URL' });
+  send(null);
+  send({ type: 'window', url: 'https://plannix.example.test/' }, undefined, 2);
+  assert.equal(replies.length, 0);
+  assert.doesNotThrow(() => w.listeners.get('message')({
+    data: { type: 'plannix-worker-capabilities', version: 1 },
+    source: { type: 'window', url: 'https://plannix.example.test/' },
+    ports: [{ postMessage() { throw Error('closed port'); } }],
+  }));
+  assert.equal(w.notifications.length, 0);
+});
+test('copyable Console probe reports an unanswered worker as unverified and ignores late registration', async () => {
+  let resolveRegistration; let expire; let postCount = 0;
+  const registration = new Promise(resolve => { resolveRegistration = resolve; });
+  const output = [];
+  class Channel {
+    constructor() {
+      this.port1 = { close() {} };
+      this.port2 = { close() {} };
+    }
+  }
+  vm.runInNewContext(consoleScript, {
+    navigator: { serviceWorker: { getRegistration: () => registration } },
+    MessageChannel: Channel,
+    setTimeout: callback => { expire = callback; return 1; },
+    clearTimeout() {},
+    console: { log: value => output.push(value) },
+  });
+  expire();
+  assert.deepEqual(JSON.parse(JSON.stringify(output)), [{ verified: false }]);
+  resolveRegistration({ active: { postMessage() { postCount++; } } });
+  await registration;
+  await Promise.resolve();
+  assert.equal(postCount, 0);
+  assert.equal(output.length, 1);
+});
+test('copyable Console probe accepts only the four worker booleans', async () => {
+  const output = []; let channel;
+  class Channel {
+    constructor() {
+      this.port1 = { close() {}, onmessage: null };
+      this.port2 = { close() {} };
+      channel = this;
+    }
+  }
+  vm.runInNewContext(consoleScript, {
+    navigator: { serviceWorker: { getRegistration: async () => ({ active: {
+      postMessage(message, ports) {
+        assert.deepEqual(JSON.parse(JSON.stringify(message)),
+          { type: 'plannix-worker-capabilities', version: 1 });
+        assert.equal(ports[0], channel.port2);
+        channel.port1.onmessage({ data: { webLocks: true, indexedDB: true,
+          cryptoSubtle: false, pushSubscriptionAccess: true } });
+      },
+    } }) } },
+    MessageChannel: Channel,
+    setTimeout: () => 1,
+    clearTimeout() {},
+    console: { log: value => output.push(value) },
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(JSON.parse(JSON.stringify(output)), [{ webLocks: true,
+    indexedDB: true, cryptoSubtle: false, pushSubscriptionAccess: true }]);
+});
 test('worker ignores malformed or unapproved payloads and displays only generic test content', async () => {
   const w = worker(); const jobs = [];
   for (const payload of [{ type: 'other', version: 1, title: 'private' }, { type: 'plannix-test', version: 1, url: 'https://evil.test' }, { type: 'plannix-test', version: 1 }]) {

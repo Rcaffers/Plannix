@@ -67,6 +67,23 @@ async function selectorMessage(message) {
 }
 
 self.addEventListener('message', event => {
+  if (event.data?.type === 'plannix-worker-capabilities' && event.data.version === 1) {
+    // This diagnostic has no authorization role. The browser supplies the
+    // source Client; never accept an origin claimed in message data.
+    try {
+      const port = event.ports?.length === 1 ? event.ports[0] : null;
+      if (!port || typeof port.postMessage !== 'function'
+        || event.source?.type !== 'window'
+        || new URL(event.source.url).origin !== self.location.origin) return;
+      port.postMessage({
+        webLocks: typeof self.navigator?.locks?.request === 'function',
+        indexedDB: typeof self.indexedDB?.open === 'function',
+        cryptoSubtle: typeof self.crypto?.subtle?.digest === 'function',
+        pushSubscriptionAccess: typeof self.registration?.pushManager?.getSubscription === 'function',
+      });
+    } catch { /* A failed diagnostic leaves capabilities unverified. */ }
+    return;
+  }
   if (event.data?.type !== 'plannix-detail-selector' || !event.ports?.[0]) return;
   const port = event.ports[0];
   // Serialize messages from tabs in this worker; IndexedDB also enforces CAS
