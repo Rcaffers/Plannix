@@ -6,7 +6,9 @@ const SESSION = /^__Host-plannix-s-[1-9]\d{0,15}$/;
 // Require the absolute end; a JavaScript $ anchor also matches before a final newline.
 const PERIOD_LABEL = /^P[1-9]\d*(?![\s\S])/;
 const DETAIL_DEADLINE_MS = 4000;
+const LOCK_PROBE_LIMIT_MS = 5000;
 let selectorQueue = Promise.resolve();
+let lockProbeActive = false;
 
 function openSelectorDatabase() {
   return new Promise((resolve, reject) => {
@@ -68,7 +70,69 @@ async function selectorMessage(message) {
   return { ok: false };
 }
 
+async function runLockProbe(port) {
+  const send = phase => {
+    try { port.postMessage({ phase }); return true; } catch { return false; }
+  };
+  if (lockProbeActive) { send('inconclusive'); try { port.close(); } catch {} return; }
+  lockProbeActive = true;
+  const controller = new AbortController();
+  let releaseHold;
+  const released = new Promise(resolve => { releaseHold = resolve; });
+  let finished = false;
+  let timer;
+  try {
+    port.onmessage = message => {
+      if (message.data?.phase === 'release') releaseHold();
+    };
+    port.onmessageerror = () => releaseHold();
+    port.start?.();
+    const expired = new Promise(resolve => {
+      timer = setTimeout(() => {
+        finished = true;
+        controller.abort();
+        releaseHold();
+        resolve('expired');
+      }, LOCK_PROBE_LIMIT_MS);
+    });
+    if (typeof self.navigator?.locks?.request !== 'function') {
+      send('inconclusive');
+      return;
+    }
+    if (!send('queued')) return;
+    const request = Promise.resolve(self.navigator.locks.request(DETAIL_LOCK,
+      { mode: 'exclusive', signal: controller.signal }, async lock => {
+        if (!lock || finished || controller.signal.aborted) return;
+        if (!send('entered')) { releaseHold(); return; }
+        await released;
+      }));
+    // A timed-out request may settle later. Observe it without reopening the port.
+    const outcome = await Promise.race([request.then(() => 'released', () => 'failed'), expired]);
+    if (!finished) send(outcome === 'released' ? 'released' : 'inconclusive');
+  } catch { if (!finished) send('inconclusive'); }
+  finally {
+    finished = true;
+    clearTimeout(timer);
+    controller.abort();
+    releaseHold();
+    port.onmessage = null;
+    port.onmessageerror = null;
+    try { port.close(); } catch {}
+    lockProbeActive = false;
+  }
+}
+
 self.addEventListener('message', event => {
+  if (event.data?.type === 'plannix-worker-lock-probe' && event.data.version === 1) {
+    try {
+      const port = event.ports?.length === 1 ? event.ports[0] : null;
+      if (!port || typeof port.postMessage !== 'function' || typeof event.waitUntil !== 'function'
+        || event.source?.type !== 'window'
+        || new URL(event.source.url).origin !== self.location.origin) return;
+      event.waitUntil(runLockProbe(port));
+    } catch { /* An unavailable probe cannot affect notification handling. */ }
+    return;
+  }
   if (event.data?.type === 'plannix-worker-capabilities' && event.data.version === 1) {
     // This diagnostic has no authorization role. The browser supplies the
     // source Client; never accept an origin claimed in message data.

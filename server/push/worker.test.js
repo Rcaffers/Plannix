@@ -10,16 +10,235 @@ import { createMorningSummaryDetailService } from '../morningSummary/detail.js';
 const script = readFileSync(new URL('../../public/push-sw.js', import.meta.url), 'utf8');
 const consoleScript = readFileSync(new URL('../../docs/notification-worker-capability-check.md', import.meta.url), 'utf8')
   .match(/```js\n([\s\S]*?)\n```/)[1];
-function worker(features = {}) {
+const lockConsoleScript = readFileSync(new URL('../../docs/notification-worker-lock-probe.md', import.meta.url), 'utf8')
+  .match(/```js\n([\s\S]*?)\n```/)[1];
+function worker(features = {}, timers = {}) {
   const listeners = new Map(); const notifications = []; const opened = [];
   const self = { location: { origin: 'https://plannix.example.test' },
     addEventListener: (name, handler) => listeners.set(name, handler),
     registration: { showNotification: async (...args) => notifications.push(args) },
     clients: { matchAll: async () => [], openWindow: async url => opened.push(url) },
     ...features };
-  vm.runInNewContext(script, { self, URL, AbortController, setTimeout, clearTimeout });
+  vm.runInNewContext(script, { self, URL, AbortController, setTimeout, clearTimeout, ...timers });
   return { listeners, notifications, opened };
 }
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+function lockManager() {
+  let held = false;
+  const pending = [];
+  const drain = () => {
+    if (held || !pending.length) return;
+    const next = pending.shift();
+    if (next.signal?.aborted) { next.reject(new Error('aborted')); drain(); return; }
+    held = true;
+    Promise.resolve().then(() => next.task({ name:'plannix-push-device' }))
+      .then(next.resolve, next.reject).finally(() => { held = false; drain(); });
+  };
+  return {
+    request(name, options, task) {
+      assert.equal(name,'plannix-push-device');
+      return new Promise((resolve,reject) => {
+        const entry = { signal:options.signal, task, resolve, reject };
+        pending.push(entry);
+        options.signal?.addEventListener('abort', () => {
+          const index = pending.indexOf(entry);
+          if (index !== -1) { pending.splice(index,1); reject(new Error('aborted')); }
+        }, { once:true });
+        drain();
+      });
+    },
+    state:() => ({ held, pending:pending.length }),
+    query:async () => ({ held:held ? [{name:'plannix-push-device'}] : [],
+      pending:pending.map(() => ({name:'plannix-push-device'})) }),
+  };
+}
+async function until(condition) {
+  for (let attempt=0;attempt<100;attempt++) {
+    if (condition()) return;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  throw new Error('Expected lock transition was not observed.');
+}
+function probe(w, source = { type:'window', url:'https://plannix.example.test/notifications' }) {
+  const phases = [];
+  let job; let closed = false;
+  const port = { postMessage:value => phases.push(value.phase), close:() => { closed = true; } };
+  w.listeners.get('message')({ data:{type:'plannix-worker-lock-probe',version:1},
+    source, ports:[port], waitUntil:value => { job = value; } });
+  return { phases, port, job, closed:() => closed,
+    release:() => port.onmessage?.({data:{phase:'release'}}) };
+}
+test('lock probe serializes page-held then worker-held orders with terminal release acknowledgements', async () => {
+  const locks = lockManager();
+  const w = worker({ navigator:{locks} });
+  const pageRelease = deferred();
+  const pageHolding = locks.request('plannix-push-device',{},async () => pageRelease.promise);
+  await until(() => locks.state().held);
+  const first = probe(w);
+  await until(() => locks.state().pending === 1);
+  assert.deepEqual(first.phases,['queued']);
+  pageRelease.resolve();
+  await pageHolding;
+  await until(() => first.phases.includes('entered'));
+  first.release();
+  await first.job;
+  assert.deepEqual(first.phases,['queued','entered','released']);
+  assert.equal(first.closed(),true);
+  assert.deepEqual(locks.state(),{held:false,pending:0});
+  const second = probe(w);
+  await until(() => second.phases.includes('entered'));
+  let pageEntered = false;
+  const pageWaiting = locks.request('plannix-push-device',{},async () => { pageEntered = true; });
+  await until(() => locks.state().pending === 1);
+  assert.equal(pageEntered,false);
+  second.release();
+  await second.job;
+  await pageWaiting;
+  assert.deepEqual(second.phases,['queued','entered','released']);
+  assert.equal(pageEntered,true);
+  assert.deepEqual(locks.state(),{held:false,pending:0});
+  assert.equal(w.notifications.length,0);
+});
+test('lock probe rejects foreign clients and missing ports without lock or notification work', () => {
+  let claims=0;
+  const w = worker({ navigator:{locks:{ request() {claims++;} }},
+    indexedDB:{open() {throw new Error('storage accessed');}},
+    registration:{showNotification() {throw new Error('display attempted');},
+      pushManager:{getSubscription() {throw new Error('subscription accessed');}}},
+    fetch() {throw new Error('network accessed');} });
+  const foreign = probe(w,{type:'window',url:'https://other.example.test/'});
+  assert.equal(foreign.job,undefined);
+  assert.equal(probe(w,{type:'worker',url:'https://plannix.example.test/'}).job,undefined);
+  assert.equal(probe(w,{type:'window',url:'not a URL'}).job,undefined);
+  w.listeners.get('message')({data:{type:'plannix-worker-lock-probe',version:1},
+    source:{type:'window',url:'https://plannix.example.test/'},ports:[],
+    waitUntil() {throw new Error('missing port accepted');}});
+  assert.equal(claims,0);
+  assert.equal(w.notifications.length,0);
+});
+test('lock probe deadline aborts queued work, closes the port and ignores late acquisition', async () => {
+  let expire; let lateTask; let aborted = false;
+  const w = worker({navigator:{locks:{request(_name,{signal},task) {
+    lateTask = task;
+    signal.addEventListener('abort',() => {aborted = true;});
+    return new Promise(() => {});
+  }}}}, {setTimeout:callback => {expire=callback;return 1;},clearTimeout() {}});
+  const p = probe(w);
+  assert.deepEqual(p.phases,['queued']);
+  expire();
+  await p.job;
+  assert.equal(aborted,true);
+  assert.equal(p.closed(),true);
+  assert.deepEqual(p.phases,['queued']);
+  await lateTask({name:'plannix-push-device'});
+  assert.deepEqual(p.phases,['queued']);
+});
+test('lock probe bounds an entered hold without a release message', async () => {
+  let expire;
+  const locks = lockManager();
+  const w = worker({navigator:{locks}},
+    {setTimeout:callback => {expire=callback;return 1;},clearTimeout() {}});
+  const p = probe(w);
+  await until(() => p.phases.includes('entered'));
+  assert.equal(locks.state().held,true);
+  expire();
+  await p.job;
+  await until(() => !locks.state().held);
+  assert.deepEqual(p.phases,['queued','entered']);
+  assert.equal(p.closed(),true);
+});
+test('lock probe releases on message error and rejects a concurrent probe', async () => {
+  const locks = lockManager();
+  const w = worker({navigator:{locks}});
+  const first = probe(w);
+  await until(() => first.phases.includes('entered'));
+  const second = probe(w);
+  await second.job;
+  assert.deepEqual(second.phases,['inconclusive']);
+  first.port.onmessageerror();
+  await first.job;
+  assert.deepEqual(first.phases,['queued','entered','released']);
+  assert.deepEqual(locks.state(),{held:false,pending:0});
+});
+test('documented page Console runner proves both lock orders with worker acknowledgements', async () => {
+  const locks = lockManager();
+  const w = worker({navigator:{locks}});
+  const output = [];
+  const pending = [];
+  class Channel {
+    constructor() {
+      const left = {closed:false};
+      const right = {closed:false};
+      left.postMessage = data => { if (!right.closed) queueMicrotask(() => right.onmessage?.({data})); };
+      right.postMessage = data => { if (!left.closed) queueMicrotask(() => left.onmessage?.({data})); };
+      left.close = () => { left.closed=true; };
+      right.close = () => { right.closed=true; };
+      this.port1=left; this.port2=right;
+    }
+  }
+  const active = {postMessage(data,ports) {
+    w.listeners.get('message')({data,ports,
+      source:{type:'window',url:'https://plannix.example.test/notifications'},
+      waitUntil:job => pending.push(job)});
+  }};
+  await vm.runInNewContext(lockConsoleScript, {
+    navigator:{locks,serviceWorker:{getRegistration:async () => ({active})}},
+    MessageChannel:Channel,AbortController,setTimeout,clearTimeout,
+    console:{log:value => output.push(value)},
+  });
+  await Promise.all(pending);
+  assert.deepEqual(JSON.parse(JSON.stringify(output)),
+    [{workerBehindPage:true,pageBehindWorker:true}]);
+  assert.deepEqual(locks.state(),{held:false,pending:0});
+  assert.equal(w.notifications.length,0);
+});
+test('documented Console runner treats a missing worker acknowledgement as inconclusive', async () => {
+  const locks = lockManager();
+  const output = [];
+  let expire;
+  let posted = false;
+  class Channel {
+    constructor() {
+      this.port1 = {close() {},postMessage() {}};
+      this.port2 = {close() {}};
+    }
+  }
+  const run = vm.runInNewContext(lockConsoleScript, {
+    navigator:{locks,serviceWorker:{getRegistration:async () => ({
+      active:{postMessage() { posted=true; }},
+    })}},
+    MessageChannel:Channel,AbortController,
+    setTimeout:(callback,delay) => {
+      if (delay === 12000) expire=callback;
+      return setTimeout(callback,delay === 12000 ? 60000 : delay);
+    },
+    clearTimeout,
+    console:{log:value => output.push(value)},
+  });
+  await until(() => posted);
+  expire();
+  await run;
+  assert.deepEqual(JSON.parse(JSON.stringify(output)),[{inconclusive:true}]);
+  await until(() => !locks.state().held && locks.state().pending === 0);
+});
+test('valid lock probe never accesses notification data, storage or network', async () => {
+  const locks = lockManager();
+  const w = worker({navigator:{locks},
+    indexedDB:{open() {throw new Error('storage accessed');}},
+    registration:{showNotification() {throw new Error('display attempted');},
+      pushManager:{getSubscription() {throw new Error('subscription accessed');}}},
+    fetch() {throw new Error('network accessed');}});
+  const p = probe(w);
+  await until(() => p.phases.includes('entered'));
+  p.release();
+  await p.job;
+  assert.deepEqual(p.phases,['queued','entered','released']);
+  assert.deepEqual(locks.state(),{held:false,pending:0});
+});
 test('capability diagnostic reads only worker API presence and returns four booleans', () => {
   let subscriptionReads = 0; let storageReads = 0;
   const w = worker({
