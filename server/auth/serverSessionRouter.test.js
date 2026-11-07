@@ -171,7 +171,9 @@ async function fixture({identity=fakeIdentity(),repository=fakeRepository(),prov
         ...(csrf?{'X-Plannix-CSRF':csrf}:{}),...(body?{'Content-Type':'application/json'}:{}),...headers},
       body:body?JSON.stringify(body):undefined});
     const raw=await response.text();
-    return {status:response.status,body:raw && response.headers.get('content-type')?.includes('json')
+    return {status:response.status,contentType:response.headers.get('content-type'),
+      html:response.headers.get('content-type')?.includes('text/html') ? raw : null,
+      body:raw && response.headers.get('content-type')?.includes('json')
       ? JSON.parse(raw):null,
       cookies:response.headers.getSetCookie(),location:response.headers.get('location'),
       cache:response.headers.get('cache-control'),
@@ -395,6 +397,60 @@ test('callback diagnostics default off and classify query shape without values',
     }
     assert.equal(records.length,cases.length);
   } finally { await on.close(); }
+});
+
+test('expired and reused browser recovery links show a fixed useful page without exchange',async()=>{
+  const ctx=await fixture();
+  try {
+    const expired=await ctx.request('/callback?error=access_denied&error_code=otp_expired'
+      + '&error_description=private-link-value',{originHeader:null,
+        headers:{Accept:'text/html,application/xhtml+xml'}});
+    assert.equal(expired.status,400);
+    assert.match(expired.contentType,/^text\/html/);
+    assert.equal(expired.cache,'no-store');
+    assert.deepEqual(expired.cookies,[]);
+    assert.match(expired.html,/email link is invalid or has expired/i);
+    assert.match(expired.html,/href="\/"/);
+    assert.doesNotMatch(expired.html,/private-link-value|otp_expired|error_description/);
+    assert.equal(ctx.identity.calls.filter(call=>call[0]==='exchange').length,0);
+
+    const expiredConfirmation=await ctx.request('/callback?kind=confirmation&error_code=otp_expired'
+      + '&error_description=private-confirmation-value',{originHeader:null,
+        headers:{Accept:'text/html'}});
+    assert.equal(expiredConfirmation.status,400);
+    assert.match(expiredConfirmation.html,/email link is invalid or has expired/i);
+    assert.match(expiredConfirmation.html,/start again or request a new link/i);
+    assert.doesNotMatch(expiredConfirmation.html,/private-confirmation-value|confirmation/);
+    assert.equal(ctx.identity.calls.filter(call=>call[0]==='exchange').length,0);
+
+    const boot=await ctx.request('/bootstrap');
+    const initiated=await ctx.request('/recover',{method:'POST',cookie:marker,
+      csrf:boot.body.csrfToken,body:{email:'synthetic@example.test'}});
+    assert.equal(initiated.status,200);
+    const redirect=new URL(ctx.identity.calls.find(call=>call[0]==='recover')[1]);
+    const callback='/callback?state='+redirect.searchParams.get('state')
+      +'&kind=recovery&sb_flow_id='+flowId+'&code=synthetic-code';
+    const fresh=await ctx.request(callback,{cookie:marker,originHeader:null,
+      headers:{Accept:'text/html'}});
+    assert.equal(fresh.status,303);
+    assert.equal(fresh.location,'/reset-password');
+    const recoveryCookie=fresh.cookies[0].split(';')[0];
+    const status=await ctx.request('/status',{cookie:`${marker}; ${recoveryCookie}`});
+    assert.equal(status.status,200);
+    assert.equal(status.body.recovery,true);
+    const reused=await ctx.request(callback,{cookie:marker,originHeader:null,
+      headers:{Accept:'text/html'}});
+    assert.equal(reused.status,400);
+    assert.equal(reused.cache,'no-store');
+    assert.deepEqual(reused.cookies,[]);
+    assert.match(reused.html,/email link is invalid or has expired/i);
+    assert.doesNotMatch(reused.html,/synthetic-code|state=|sb_flow_id/);
+    assert.equal(ctx.identity.calls.filter(call=>call[0]==='exchange').length,1);
+
+    const api=await ctx.request(callback,{cookie:marker,originHeader:null});
+    assert.equal(api.status,400);
+    assert.deepEqual(api.body,{message:'Authentication callback is invalid.'});
+  } finally { await ctx.close(); }
 });
 
 test('callback claim rejection logs only an existing safe outcome',async()=>{

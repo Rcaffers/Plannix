@@ -15,6 +15,20 @@ const only = (value, keys) => value && typeof value === 'object' && !Array.isArr
 const clearCookie = name => `${name}=; Max-Age=0; ${COOKIE_FLAGS}`;
 const CALLBACK_KEYS = ['code','kind','sb_flow_id','state'];
 const CALLBACK_CLAIM_OUTCOMES = new Set(['invalid','ambiguous','expired','unavailable']);
+const INVALID_CALLBACK_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Link unavailable · Plannix</title>
+</head><body><main><h1>This email link is invalid or has expired</h1>
+<p>Return to Plannix to start again or request a new link.</p>
+<p><a href="/">Return to Plannix</a></p></main></body></html>`;
+
+function rejectCallback(req,res) {
+  // A top-level email-link navigation accepts HTML. Programmatic callers keep
+  // the existing generic JSON error. Neither response includes query data.
+  if (/(?:^|,)\s*text\/html(?:\s*;|\s*,|\s*$)/i.test(req.get('accept') || '')) {
+    return res.status(400).type('html').send(INVALID_CALLBACK_HTML);
+  }
+  throw fail(400,'Authentication callback is invalid.');
+}
 
 function callbackQueryReason(pairs) {
   const keys = [...pairs.keys()];
@@ -460,7 +474,7 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
       || !AUTH_CODE.test(pairs.get('code') || '')
       || !['confirmation','recovery'].includes(pairs.get('kind'))) {
       diagnostic('query_invalid',callbackQueryReason(pairs));
-      throw fail(400,'Authentication callback is invalid.');
+      return rejectCallback(req,res);
     }
     const chosen = await resolve(req,res);
     await rate(req,'callback',chosen);
@@ -470,7 +484,7 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     if (claimed.state!=='claimed') {
       diagnostic('claim_rejected',CALLBACK_CLAIM_OUTCOMES.has(claimed.state)
         ? claimed.state : 'other');
-      throw fail(400,'Authentication callback is invalid.');
+      return rejectCallback(req,res);
     }
     try {
       const result = await deadline(identity.exchange({ code:pairs.get('code'),
