@@ -28,6 +28,10 @@ generic. `detail_disabled` starts true and this stage has no way to enable it.
   `boundToCurrentSession` separately reports whether it names the selected
   session. `detailEligible` is always false. Generic ownership never implies
   future detail authorization.
+  After `20261107120000_require_morning_summary_current_session.sql`, generic
+  ownership alone also does not qualify a device for a **scheduled** morning
+  summary: its bound ordinary session must still be current at claim and at
+  final per-device dispatch. The generic test-push path is unchanged.
 - **Auth invalidation:** each installation records its originating session ID.
   Login, signup confirmation, recovery, refresh, logout, account deletion,
   explicit “Sign out anyway,” and cross-tab account/session changes cannot make

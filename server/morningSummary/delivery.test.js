@@ -28,27 +28,35 @@ const snapshot = {
 };
 
 function harness({ claim = true, send = async () => ({ statusCode: 201 }), snapshotValue = snapshot,
-  dispatchSeconds = 600, monotonicNow = () => 0, onDeviceClaim = () => {}, referenceDenied = false } = {}) {
+  dispatchSeconds = 600, monotonicNow = () => 0, onDeviceClaim = () => {}, referenceDenied = false,
+  hashes = [hash], deviceForHash = () => ({ endpoint, keys, version }) } = {}) {
   const calls = []; const pushes = [];
   const service = createMorningSummaryDelivery({ config, getPushConfiguration: () => vapid,
     createClientImpl: () => ({ rpc: async (name, args) => {
       calls.push([name, args]);
       if (referenceDenied && name === 'plannix_morning_summary_notification_snapshot')
         return { data: null, error: { code: 'P0002', message: 'Synthetic foreign reference' } };
-      const data = name === 'plannix_claim_morning_summary_pilot_jobs'
+      const data = await (name === 'plannix_claim_morning_summary_pilot_jobs'
         ? claim ? [{ userId, academicYearId: yearId, date: '2026-10-05', token, revision: 1, notificationRef }] : []
         : name === 'plannix_morning_summary_snapshot'
-          || name === 'plannix_morning_summary_notification_snapshot' ? snapshotValue
-          : name === 'plannix_morning_summary_device_hashes' ? [hash]
-            : name === 'plannix_claim_morning_summary_device' ? (onDeviceClaim(), { endpoint, keys, version })
+          || name === 'plannix_morning_summary_notification_snapshot'
+          ? typeof snapshotValue === 'function' ? snapshotValue() : snapshotValue
+          : name === 'plannix_morning_summary_device_hashes' ? hashes
+            : name === 'plannix_claim_morning_summary_device' ? (onDeviceClaim(args), deviceForHash(args.target_hash))
               : name === 'plannix_morning_summary_dispatch_seconds'
-                ? typeof dispatchSeconds === 'function' ? dispatchSeconds() : dispatchSeconds : true;
+                ? typeof dispatchSeconds === 'function' ? dispatchSeconds(args) : dispatchSeconds : true);
       return { data, error: null };
     } }),
     monotonicNow,
     pushImpl: { sendNotification: async (...args) => { pushes.push(args); return send(...args); } },
   });
   return { service, calls, pushes };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
 }
 
 test('snapshot and preview share canonical Week A ordering while the push contains generic text only', async () => {
@@ -131,6 +139,69 @@ test('reassignment after claim skips transport; reassignment immediately before 
   assert.equal(beforeSend.pushes.length, 1);
   const foreign = harness({ referenceDenied: true });
   await assert.rejects(foreign.service.resolveReference(userId, notificationRef), /unavailable/);
+});
+
+test('logout, session replacement, expiry and reassignment during snapshot preparation skip the provider', async () => {
+  for (const transition of ['logout', 'replacement', 'expiry', 'reassignment']) {
+    const snapshotReached = deferred();
+    const releaseSnapshot = deferred();
+    let bound = true;
+    const { service, calls, pushes } = harness({
+      snapshotValue: () => { snapshotReached.resolve(); return releaseSnapshot.promise; },
+      dispatchSeconds: () => bound ? 600 : null,
+    });
+    const running = service.run({ pilotUserId: userId });
+    await snapshotReached.promise;
+    assert.equal(pushes.length, 0, `${transition}: no provider call during preparation`);
+    bound = false;
+    releaseSnapshot.resolve(snapshot);
+    await running;
+    assert.equal(calls.filter(([name]) => name === 'plannix_morning_summary_dispatch_seconds').length, 1,
+      `${transition}: final binding check is still reached`);
+    assert.equal(calls.find(([name]) => name === 'plannix_finish_morning_summary_device')[1].target_state,
+      'skipped', `${transition}: ineligible attempt is recorded as skipped`);
+    assert.equal(pushes.length, 0, `${transition}: no provider call after binding invalidation`);
+  }
+});
+
+test('binding invalidation while the final dispatch check is pending skips the provider', async () => {
+  const checkReached = deferred();
+  const releaseCheck = deferred();
+  const { service, calls, pushes } = harness({
+    dispatchSeconds: () => { checkReached.resolve(); return releaseCheck.promise; },
+  });
+  const running = service.run({ pilotUserId: userId });
+  await checkReached.promise;
+  assert.equal(pushes.length, 0);
+  releaseCheck.resolve(null);
+  await running;
+  assert.equal(pushes.length, 0);
+  assert.equal(calls.find(([name]) => name === 'plannix_finish_morning_summary_device')[1].target_state,
+    'skipped');
+});
+
+test('an unbound or stale device does not prevent another current bound device from receiving the generic send', async () => {
+  const currentEndpoint = 'https://fcm.googleapis.com/fcm/send/synthetic-current-device';
+  const currentHash = endpointHash(currentEndpoint);
+  const staleCheckReached = deferred();
+  const releaseStaleCheck = deferred();
+  const { service, calls, pushes } = harness({
+    hashes: [hash, currentHash],
+    deviceForHash: targetHash => ({ endpoint: targetHash === hash ? endpoint : currentEndpoint, keys, version }),
+    dispatchSeconds: args => args.target_hash === hash
+      ? (staleCheckReached.resolve(), releaseStaleCheck.promise) : 600,
+  });
+  const running = service.run({ pilotUserId: userId });
+  await staleCheckReached.promise;
+  assert.equal(pushes.length, 0, 'the valid device has not been reached while the stale check is held');
+  releaseStaleCheck.resolve(null);
+  await running;
+  assert.equal(pushes.length, 1);
+  assert.equal(pushes[0][0].endpoint, currentEndpoint);
+  assert.equal(JSON.parse(pushes[0][1]).body, GENERIC_SUMMARY_BODY);
+  assert.deepEqual(calls.filter(([name]) => name === 'plannix_finish_morning_summary_device')
+    .map(([, args]) => [args.target_hash, args.target_state]),
+  [[hash, 'skipped'], [currentHash, 'accepted']]);
 });
 
 test('delivery-window check bounds TTL and skips an attempt crossing the cutoff, including retries', async () => {

@@ -101,9 +101,18 @@ set local role service_role;
 select public.plannix_save_morning_summary_preferences('cc000000-0000-4000-8000-000000000001',0,true,'07:00',
   'cc000000-0000-4000-8000-000000000004');
 reset role;
-insert into private.plannix_push_subscriptions(endpoint_hash,user_id,endpoint,p256dh,auth_key)
+insert into private.plannix_auth_browser_bindings(id,marker_hash,expires_at,current_session_id)
+values ('cc000000-0000-4000-8000-000000000061',pg_catalog.repeat('1',64),
+  pg_catalog.clock_timestamp()+interval '1 day','cc000000-0000-4000-8000-000000000062');
+insert into private.plannix_auth_sessions(id,binding_id,generation,owner_id,kind,secret_hash,
+  access_envelope,refresh_envelope,expires_at)
+values ('cc000000-0000-4000-8000-000000000062','cc000000-0000-4000-8000-000000000061',
+  pg_catalog.nextval('private.plannix_auth_generation_seq'),'cc000000-0000-4000-8000-000000000001',
+  'ordinary',pg_catalog.repeat('2',64),'{}','{}',pg_catalog.clock_timestamp()+interval '1 day');
+insert into private.plannix_push_subscriptions(endpoint_hash,user_id,endpoint,p256dh,auth_key,bound_session_id)
 values (pg_catalog.repeat('a',64),'cc000000-0000-4000-8000-000000000001',
-  'https://fcm.googleapis.com/fcm/send/synthetic-summary-device',pg_catalog.repeat('x',88),pg_catalog.repeat('y',22));
+  'https://fcm.googleapis.com/fcm/send/synthetic-summary-device',pg_catalog.repeat('x',88),pg_catalog.repeat('y',22),
+  'cc000000-0000-4000-8000-000000000062');
 create temp table summary_claim_fixture(claim jsonb);
 grant select on summary_claim_fixture to service_role;
 insert into summary_claim_fixture
@@ -187,11 +196,13 @@ select extensions.ok(public.plannix_finish_morning_summary_device(
   (select subscription_version from private.plannix_morning_summary_deliveries where endpoint_hash=pg_catalog.repeat('d',64)),
   'skipped'),'stale claim is recorded without a transport attempt');
 
-insert into private.plannix_push_subscriptions(endpoint_hash,user_id,endpoint,p256dh,auth_key)
+insert into private.plannix_push_subscriptions(endpoint_hash,user_id,endpoint,p256dh,auth_key,bound_session_id)
 values (pg_catalog.repeat('b',64),'cc000000-0000-4000-8000-000000000001',
-  'https://fcm.googleapis.com/fcm/send/synthetic-retry-device',pg_catalog.repeat('x',88),pg_catalog.repeat('y',22)),
+  'https://fcm.googleapis.com/fcm/send/synthetic-retry-device',pg_catalog.repeat('x',88),pg_catalog.repeat('y',22),
+  'cc000000-0000-4000-8000-000000000062'),
   (pg_catalog.repeat('c',64),'cc000000-0000-4000-8000-000000000001',
-  'https://fcm.googleapis.com/fcm/send/synthetic-crash-device',pg_catalog.repeat('x',88),pg_catalog.repeat('y',22));
+  'https://fcm.googleapis.com/fcm/send/synthetic-crash-device',pg_catalog.repeat('x',88),pg_catalog.repeat('y',22),
+  'cc000000-0000-4000-8000-000000000062');
 select extensions.ok(private.plannix_claim_morning_summary_device_at(
   'cc000000-0000-4000-8000-000000000001','2026-10-05',
   (select (claim->0->>'token')::uuid from summary_claim_fixture),pg_catalog.repeat('b',64),1,

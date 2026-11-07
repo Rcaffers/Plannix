@@ -90,11 +90,24 @@ await race('update', 1, '07:15', '10:00', 2);
 
 // A real contended unique-key insert: B reaches the production job claim's
 // user/day key while A holds the uncommitted claim transaction.
-await query(`insert into private.plannix_push_subscriptions(endpoint_hash,user_id,endpoint,p256dh,auth_key)
-values (repeat('a',64),'${user}','https://fcm.googleapis.com/fcm/send/synthetic-summary-race',repeat('x',88),repeat('y',22));
+await query(`insert into private.plannix_auth_browser_bindings(id,marker_hash,expires_at,current_session_id)
+values ('cb000000-0000-4000-8000-000000000075',repeat('1',64),now()+interval '1 day',
+  'cb000000-0000-4000-8000-000000000076'),
+  ('cb000000-0000-4000-8000-000000000085',repeat('2',64),now()+interval '1 day',
+  'cb000000-0000-4000-8000-000000000086');
+insert into private.plannix_auth_sessions(id,binding_id,generation,owner_id,kind,secret_hash,
+  access_envelope,refresh_envelope,expires_at)
+values ('cb000000-0000-4000-8000-000000000076','cb000000-0000-4000-8000-000000000075',
+  nextval('private.plannix_auth_generation_seq'),'${user}','ordinary',repeat('3',64),'{}','{}',now()+interval '1 day'),
+  ('cb000000-0000-4000-8000-000000000086','cb000000-0000-4000-8000-000000000085',
+  nextval('private.plannix_auth_generation_seq'),'${otherUser}','ordinary',repeat('4',64),'{}','{}',now()+interval '1 day');
+insert into private.plannix_push_subscriptions(endpoint_hash,user_id,endpoint,p256dh,auth_key,bound_session_id)
+values (repeat('a',64),'${user}','https://fcm.googleapis.com/fcm/send/synthetic-summary-race',
+  repeat('x',88),repeat('y',22),'cb000000-0000-4000-8000-000000000076');
 select public.plannix_save_morning_summary_preferences('${otherUser}',0,true,'07:15','${otherYear}');
-insert into private.plannix_push_subscriptions(endpoint_hash,user_id,endpoint,p256dh,auth_key)
-values (repeat('b',64),'${otherUser}','https://fcm.googleapis.com/fcm/send/synthetic-other-race',repeat('x',88),repeat('y',22))`);
+insert into private.plannix_push_subscriptions(endpoint_hash,user_id,endpoint,p256dh,auth_key,bound_session_id)
+values (repeat('b',64),'${otherUser}','https://fcm.googleapis.com/fcm/send/synthetic-other-race',
+  repeat('x',88),repeat('y',22),'cb000000-0000-4000-8000-000000000086')`);
 const aName = `summary_job_a_${process.pid}`;
 const bName = `summary_job_b_${process.pid}`;
 const a = session(aName); const b = session(bName);
@@ -169,5 +182,143 @@ select coalesce(private.plannix_morning_summary_dispatch_seconds_at(
   console.log(`dispatch cutoff: competing check blocked on ${blocked}; post-lock clock skipped the attempt.`);
 } finally { cutoffA.stop(); cutoffB.stop(); }
 
+// Registration takes B's binding and then the endpoint. A dispatch takes its
+// own browser binding before the job, preference and endpoint. A committed
+// reassignment must make the waiting dispatch return no allowance.
+const installationVersion = await query(`select installation_version from private.plannix_push_subscriptions
+  where endpoint_hash=repeat('a',64)`);
+const reassignmentAName = `summary_reassign_a_${process.pid}`;
+const reassignmentBName = `summary_reassign_b_${process.pid}`;
+const reassignmentA = session(reassignmentAName); const reassignmentB = session(reassignmentBName);
+try {
+  reassignmentA.send(`begin; set local application_name='${reassignmentAName}'; set local statement_timeout='12s';
+set local role service_role;
+select public.plannix_push_register_installation('cb000000-0000-4000-8000-000000000086',
+  repeat('a',64),'https://fcm.googleapis.com/fcm/send/synthetic-summary-race',repeat('x',88),repeat('y',22),
+  '${installationVersion}');
+\\echo REASSIGN_HELD
+`);
+  await reassignmentA.waitFor('REASSIGN_HELD');
+  reassignmentB.send(`begin; set local application_name='${reassignmentBName}'; set local statement_timeout='12s';
+select coalesce(private.plannix_morning_summary_dispatch_seconds_at(
+  '${user}','2026-10-05','${jobToken}',repeat('a',64),'${deviceVersion}',2,'${year}',
+  '2026-10-05 06:20:00+00')::text,'REASSIGN_SKIP');
+\\echo DISPATCH_DONE
+`);
+  let blocked = '';
+  const end = Date.now() + 7000;
+  while (Date.now() < end) {
+    blocked = await query(`select wait_event_type || ':' || wait_event from pg_stat_activity
+      where application_name='${reassignmentBName}' and wait_event_type='Lock'`);
+    if (blocked) break;
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+  assert.match(blocked, /^Lock:/, 'dispatch did not wait for the registration endpoint lock');
+  reassignmentA.send('commit;\n\\echo REASSIGN_COMMITTED\n');
+  await reassignmentA.waitFor('REASSIGN_COMMITTED'); reassignmentA.send('\\q\n');
+  assert.equal(await reassignmentA.finished, 0);
+  await reassignmentB.waitFor('DISPATCH_DONE'); reassignmentB.send('commit;\n\\q\n');
+  assert.equal(await reassignmentB.finished, 0);
+  assert.match(reassignmentB.result().output, /REASSIGN_SKIP/, 'reassignment did not stop stale dispatch');
+  assert.equal(await query(`select user_id from private.plannix_push_subscriptions where endpoint_hash=repeat('a',64)`),
+    otherUser, 'B must retain the endpoint');
+  console.log(`registration versus dispatch: observed ${blocked}; committed B ownership skipped A.`);
+} finally { reassignmentA.stop(); reassignmentB.stop(); }
+
+// A job candidate can pass the initial binding test, then wait for a unique
+// job key while logout commits. The post-insert check must roll back the new
+// job rather than prepare a snapshot from stale eligibility.
+const staleClaimHolderName = `summary_stale_claim_holder_${process.pid}`;
+const staleClaimWorkerName = `summary_stale_claim_worker_${process.pid}`;
+const staleClaimHolder = session(staleClaimHolderName);
+const staleClaimWorker = session(staleClaimWorkerName);
+try {
+  staleClaimHolder.send(`begin; set local application_name='${staleClaimHolderName}'; set local statement_timeout='12s';
+insert into private.plannix_morning_summary_jobs
+  (user_id,london_date,preference_revision,academic_year_id,lease_claim_id,lease_until)
+values ('${otherUser}','2026-10-06',1,'${otherYear}',pg_catalog.gen_random_uuid(),
+  pg_catalog.clock_timestamp()+interval '90 seconds');
+\\echo JOB_HELD
+`);
+  await staleClaimHolder.waitFor('JOB_HELD');
+  staleClaimWorker.send(`begin; set local application_name='${staleClaimWorkerName}'; set local statement_timeout='12s';
+select private.plannix_claim_morning_summary_pilot_jobs_at('2026-10-06 06:15:00+00',1,'${otherUser}');
+\\echo CLAIM_DONE
+`);
+  let blocked = '';
+  const end = Date.now() + 7000;
+  while (Date.now() < end) {
+    blocked = await query(`select wait_event_type || ':' || wait_event from pg_stat_activity
+      where application_name='${staleClaimWorkerName}' and wait_event_type='Lock'`);
+    if (blocked) break;
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+  assert.match(blocked, /^Lock:/, 'claim did not wait on the held job key');
+  await query(`select public.plannix_auth_logout(
+    (select '__Host-plannix-b-'||generation from private.plannix_auth_browser_bindings
+      where id='cb000000-0000-4000-8000-000000000085'),repeat('2',64),
+    (select '__Host-plannix-s-'||generation from private.plannix_auth_sessions
+      where id='cb000000-0000-4000-8000-000000000086'),repeat('4',64))`);
+  staleClaimHolder.send('rollback;\n\\echo JOB_RELEASED\n');
+  await staleClaimHolder.waitFor('JOB_RELEASED'); staleClaimHolder.send('\\q\n');
+  assert.equal(await staleClaimHolder.finished, 0);
+  assert.notEqual(await staleClaimWorker.finished, 0, 'stale claim unexpectedly succeeded');
+  assert.match(staleClaimWorker.result().errors, /Morning summary binding changed\./);
+  assert.equal(await query(`select count(*) from private.plannix_morning_summary_jobs
+    where user_id='${otherUser}' and london_date='2026-10-06'`), '0',
+  'stale claim must leave no job after the lock wait');
+  console.log(`claim versus logout: observed ${blocked}; stale post-lock claim rolled back.`);
+} finally { staleClaimHolder.stop(); staleClaimWorker.stop(); }
+
+await query(`insert into private.plannix_push_subscriptions(endpoint_hash,user_id,endpoint,p256dh,auth_key,bound_session_id)
+values (repeat('c',64),'${user}','https://fcm.googleapis.com/fcm/send/synthetic-logout-race',
+  repeat('x',88),repeat('y',22),'cb000000-0000-4000-8000-000000000076');
+insert into private.plannix_morning_summary_deliveries
+  (user_id,london_date,endpoint_hash,subscription_version,state)
+select '${user}','2026-10-05',endpoint_hash,subscription_version,'in_flight'
+from private.plannix_push_subscriptions where endpoint_hash=repeat('c',64)`);
+const logoutVersion = await query(`select subscription_version from private.plannix_push_subscriptions
+  where endpoint_hash=repeat('c',64)`);
+const logoutAName = `summary_logout_a_${process.pid}`;
+const logoutBName = `summary_logout_b_${process.pid}`;
+const logoutA = session(logoutAName); const logoutB = session(logoutBName);
+try {
+  logoutA.send(`begin; set local application_name='${logoutAName}'; set local statement_timeout='12s';
+select public.plannix_auth_logout(
+  (select '__Host-plannix-b-'||generation from private.plannix_auth_browser_bindings
+    where id='cb000000-0000-4000-8000-000000000075'),repeat('1',64),
+  (select '__Host-plannix-s-'||generation from private.plannix_auth_sessions
+    where id='cb000000-0000-4000-8000-000000000076'),repeat('3',64));
+\\echo LOGOUT_HELD
+`);
+  await logoutA.waitFor('LOGOUT_HELD');
+  logoutB.send(`begin; set local application_name='${logoutBName}'; set local statement_timeout='12s';
+select coalesce(private.plannix_morning_summary_dispatch_seconds_at(
+  '${user}','2026-10-05','${jobToken}',repeat('c',64),'${logoutVersion}',2,'${year}',
+  '2026-10-05 06:20:00+00')::text,'LOGOUT_SKIP');
+\\echo DISPATCH_DONE
+`);
+  let blocked = '';
+  const end = Date.now() + 7000;
+  while (Date.now() < end) {
+    blocked = await query(`select wait_event_type || ':' || wait_event from pg_stat_activity
+      where application_name='${logoutBName}' and wait_event_type='Lock'`);
+    if (blocked) break;
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+  assert.match(blocked, /^Lock:/, 'dispatch did not wait for the auth binding lock');
+  logoutA.send('commit;\n\\echo LOGOUT_COMMITTED\n');
+  await logoutA.waitFor('LOGOUT_COMMITTED'); logoutA.send('\\q\n');
+  assert.equal(await logoutA.finished, 0);
+  await logoutB.waitFor('DISPATCH_DONE'); logoutB.send('commit;\n\\q\n');
+  assert.equal(await logoutB.finished, 0);
+  assert.match(logoutB.result().output, /LOGOUT_SKIP/, 'logout did not stop stale dispatch');
+  assert.equal(await query(`select revoked::text from private.plannix_auth_sessions
+    where id='cb000000-0000-4000-8000-000000000076'`), 'true');
+  console.log(`logout versus dispatch: observed ${blocked}; committed revocation skipped device.`);
+} finally { logoutA.stop(); logoutB.stop(); }
+
 await query(`delete from public.plannix_organisations where id in ('${organisation}','${otherOrganisation}');
-  delete from auth.users where id in ('${user}','${otherUser}')`);
+  delete from auth.users where id in ('${user}','${otherUser}');
+  delete from private.plannix_auth_browser_bindings where id in
+    ('cb000000-0000-4000-8000-000000000075','cb000000-0000-4000-8000-000000000085')`);

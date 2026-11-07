@@ -53,6 +53,30 @@ the generic notification prevents the previous account's details appearing
 if a device is reassigned after the check. Push-service acceptance and actual
 device display can occur later and cannot be guaranteed inside the window.
 
+The additive `20261107120000_require_morning_summary_current_session.sql`
+migration narrows **scheduled** delivery: the pilot job requires at least one
+subscription bound to a current, unexpired ordinary server session before the
+snapshot is prepared. The final per-device dispatch check also requires that
+the exact device still belongs to that current session. Logout, session
+replacement, expiry or reassignment before that check skips the device without
+calling Web Push. An unbound legacy subscription cannot receive a scheduled
+summary, even if the account still owns its generic push row. Generic test
+pushes and their existing ownership/version cleanup are unchanged. A device
+whose session changed must sign in, then use Notifications settings to
+**Disable on this device** and **Enable notifications** again before a
+subsequent eligible dispatch. The current page reports generic ownership as
+subscribed even when the session binding is stale; its Enable button is then
+disabled until the old registration is removed. If removal cannot be
+confirmed, use the page's status/reconciliation path rather than clearing
+the browser subscription manually.
+A skipped or uncertain device attempt is not replayed under the replacement
+session. Deploy this migration
+before relying on its claim and dispatch behavior. Database checks cannot
+cancel a send already accepted by the push service or a notification already
+displayed by the phone. Remote provider revocation becomes known to this
+check when the stored server session is revoked or expires; the scheduler does
+not call the identity provider for every device.
+
 The pilot migration revokes service-role execution of the unrestricted claim
 RPC and adds a service-role-only atomic claim filtered to the configured pilot
 UUID **before** any daily job is reserved. Missing or malformed pilot

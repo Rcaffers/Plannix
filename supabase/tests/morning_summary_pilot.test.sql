@@ -23,11 +23,26 @@ select public.plannix_save_morning_summary_preferences('dd000000-0000-4000-8000-
 select public.plannix_save_morning_summary_preferences('dd000000-0000-4000-8000-000000000002',0,true,'07:00',
   'dd000000-0000-4000-8000-000000000032');
 reset role;
-insert into private.plannix_push_subscriptions(endpoint_hash,user_id,endpoint,p256dh,auth_key)
+insert into private.plannix_auth_browser_bindings(id,marker_hash,expires_at,current_session_id)
+values ('dd000000-0000-4000-8000-000000000041',pg_catalog.repeat('1',64),pg_catalog.clock_timestamp()+interval '1 day',
+    'dd000000-0000-4000-8000-000000000051'),
+  ('dd000000-0000-4000-8000-000000000042',pg_catalog.repeat('2',64),pg_catalog.clock_timestamp()+interval '1 day',
+    'dd000000-0000-4000-8000-000000000052');
+insert into private.plannix_auth_sessions(id,binding_id,generation,owner_id,kind,secret_hash,
+  access_envelope,refresh_envelope,expires_at)
+values ('dd000000-0000-4000-8000-000000000051','dd000000-0000-4000-8000-000000000041',
+    pg_catalog.nextval('private.plannix_auth_generation_seq'),'dd000000-0000-4000-8000-000000000001',
+    'ordinary',pg_catalog.repeat('3',64),'{}','{}',pg_catalog.clock_timestamp()+interval '1 day'),
+  ('dd000000-0000-4000-8000-000000000052','dd000000-0000-4000-8000-000000000042',
+    pg_catalog.nextval('private.plannix_auth_generation_seq'),'dd000000-0000-4000-8000-000000000002',
+    'ordinary',pg_catalog.repeat('4',64),'{}','{}',pg_catalog.clock_timestamp()+interval '1 day');
+insert into private.plannix_push_subscriptions(endpoint_hash,user_id,endpoint,p256dh,auth_key,bound_session_id)
 values (pg_catalog.repeat('a',64),'dd000000-0000-4000-8000-000000000001',
-  'https://fcm.googleapis.com/fcm/send/synthetic-pilot-one',pg_catalog.repeat('x',88),pg_catalog.repeat('y',22)),
+  'https://fcm.googleapis.com/fcm/send/synthetic-pilot-one',pg_catalog.repeat('x',88),pg_catalog.repeat('y',22),
+  'dd000000-0000-4000-8000-000000000051'),
   (pg_catalog.repeat('b',64),'dd000000-0000-4000-8000-000000000002',
-  'https://fcm.googleapis.com/fcm/send/synthetic-pilot-two',pg_catalog.repeat('x',88),pg_catalog.repeat('y',22));
+  'https://fcm.googleapis.com/fcm/send/synthetic-pilot-two',pg_catalog.repeat('x',88),pg_catalog.repeat('y',22),
+  'dd000000-0000-4000-8000-000000000052');
 
 select extensions.ok(not has_function_privilege('service_role',
   'public.plannix_claim_morning_summary_jobs(integer)','EXECUTE'),
