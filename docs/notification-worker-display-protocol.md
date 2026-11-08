@@ -11,11 +11,25 @@ Server-mode registration returns the installation version committed by its
 versioned RPC. The client does not infer a later version to repair a conflict.
 A separate `plannix_push_set_detail_eligibility` operation requires the
 verified ordinary session, current binding and installation version, expected
-detail-policy version, server-configured pilot, enabled preferences and lesson
-consent. It rotates the policy version on every enable or disable. A binding
-change rotates it and forces details off. Lesson-consent withdrawal disables
-bound devices and rotates their policy versions. Separate event-title consent
-is checked by every authorization and again after summary loading.
+detail-policy version, server-configured pilot, enabled preferences and at
+least one of the independent lesson-detail or event-title consents. The
+function-only migration `20261108120000_allow_independent_morning_details.sql`
+must precede matching server and worker code; the detail-display gate remains
+off during rollout. The operation rotates the policy version on every enable
+or disable. A binding change rotates it and forces details off. Withdrawal of
+the last consent disables bound devices and rotates their policy versions.
+Every detail response rechecks both consents after summary loading and omits
+lesson fields or event titles when their respective consent is off.
+
+For deployment, first keep `MORNING_SUMMARY_DETAIL_DISPLAY_ENABLED` and
+`MORNING_SUMMARY_WORKER_ENABLED` off and pause `MORNING_SUMMARY_POLLING_ENABLED`
+before a scheduled window. Apply the function migration, then deploy the
+matching server, page and worker code. The old server rejects the new RPC
+response shape, so an old instance uses generic fallback during rollout;
+an old worker also receives only server-filtered fields. Do not resume polling
+or activate detail display until all instances and the target worker are
+verified separately. The migration leaves existing consents and device
+policies unchanged and does not change generic push payloads.
 
 The worker's IndexedDB record holds only the originating session cookie
 **name**, installation version, detail-policy version and a monotonic epoch.

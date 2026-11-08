@@ -188,7 +188,9 @@ async function smallJson(response) {
 
 function notificationText(detail) {
   if (!detail || !Array.isArray(detail.lessons) || !Array.isArray(detail.events)
-    || typeof detail.eventTitlesIncluded !== 'boolean') throw new Error('detail unavailable');
+    || typeof detail.lessonDetailsIncluded !== 'boolean'
+    || typeof detail.eventTitlesIncluded !== 'boolean'
+    || (!detail.lessonDetailsIncluded && detail.lessons.length)) throw new Error('detail unavailable');
   const parts = detail.lessons.slice(0, 3).map(item => {
     if (!item || typeof item.period !== 'string' || !PERIOD_LABEL.test(item.period)
       || typeof item.title !== 'string' || typeof item.isPpa !== 'boolean')

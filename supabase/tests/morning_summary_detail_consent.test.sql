@@ -109,8 +109,14 @@ select extensions.is(public.plannix_authorize_morning_summary_detail(
   'cf000000-0000-4000-8000-000000000022',pg_catalog.repeat('c',64),
   pg_catalog.current_setting('test.detail_version')::uuid,
   'cf000000-0000-4000-8000-000000000031',
-  'cf000000-0000-4000-8000-000000000001'),null::jsonb,
-  'event consent cannot substitute for lesson consent');
+  'cf000000-0000-4000-8000-000000000001')->>'eventTitleConsent','true',
+  'event-only consent is eligible on a current bound device');
+select extensions.is(public.plannix_authorize_morning_summary_detail(
+  'cf000000-0000-4000-8000-000000000022',pg_catalog.repeat('c',64),
+  pg_catalog.current_setting('test.detail_version')::uuid,
+  'cf000000-0000-4000-8000-000000000031',
+  'cf000000-0000-4000-8000-000000000001')->>'lessonDetailConsent','false',
+  'event-only authorization omits lesson details');
 select public.plannix_save_morning_summary_detail_preferences(
   'cf000000-0000-4000-8000-000000000001',1,true,'07:00',
   'cf000000-0000-4000-8000-000000000013',true,false);
@@ -187,17 +193,29 @@ select extensions.is(public.plannix_authorize_morning_summary_detail_v2(
 select public.plannix_save_morning_summary_detail_preferences(
   'cf000000-0000-4000-8000-000000000001',3,true,'07:00',
   'cf000000-0000-4000-8000-000000000013',false,true);
+reset role;
+update private.plannix_morning_summary_jobs set preference_revision=4
+  where user_id='cf000000-0000-4000-8000-000000000001';
+set local role service_role;
 select extensions.is(public.plannix_authorize_morning_summary_detail_v2(
   'cf000000-0000-4000-8000-000000000022',pg_catalog.repeat('c',64),
   pg_catalog.current_setting('test.detail_version')::uuid,
   'cf000000-0000-4000-8000-000000000031',
   'cf000000-0000-4000-8000-000000000001',
-  pg_catalog.current_setting('test.enabled_policy')::uuid),null::jsonb,
-  'consent withdrawal invalidates an already issued policy version');
+  pg_catalog.current_setting('test.enabled_policy')::uuid)->>'lessonDetailConsent','false',
+  'withdrawing lessons preserves separately authorized event-only display');
+reset role;
+select extensions.is((select detail_disabled from private.plannix_push_subscriptions
+  where endpoint_hash=pg_catalog.repeat('c',64)),false,
+  'one remaining consent keeps the shared device policy enabled');
+set local role service_role;
+select public.plannix_save_morning_summary_detail_preferences(
+  'cf000000-0000-4000-8000-000000000001',4,true,'07:00',
+  'cf000000-0000-4000-8000-000000000013',false,false);
 reset role;
 select extensions.is((select detail_disabled from private.plannix_push_subscriptions
   where endpoint_hash=pg_catalog.repeat('c',64)),true,
-  'consent withdrawal disables detail on the bound device');
+  'withdrawing the last consent disables the shared device policy');
 rollback to savepoint detail_policy_case;
 -- This fixture is otherwise fully eligible. Observe session expiry through
 -- the authorization RPC itself, then roll back only this expiry case so the

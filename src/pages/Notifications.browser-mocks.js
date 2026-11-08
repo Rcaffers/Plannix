@@ -55,6 +55,8 @@ export const morningSummaryApi = {
   },
   save: async (userId, value) => {
     window.summaryPreferenceSaves = [...(window.summaryPreferenceSaves || []), value];
+    if (window.summaryPreferenceFailSave) { window.summaryPreferenceFailSave=false;
+      throw Error('Synthetic preference failure'); }
     const current = currentPreference(userId);
     if (value.revision !== current.revision) throw Object.assign(Error('Synthetic conflict'), { status: 409 });
     const saved = { enabled: value.enabled, deliveryTime: value.deliveryTime,
@@ -62,6 +64,8 @@ export const morningSummaryApi = {
       lessonDetailConsent: value.lessonDetailConsent === true,
       eventTitleConsent: value.eventTitleConsent === true };
     preferencesByUser.set(userId, saved);
+    if (window.summaryPreferenceFailAfterSave) { window.summaryPreferenceFailAfterSave=false;
+      throw Error('Synthetic lost preference response'); }
     return saved;
   },
 };

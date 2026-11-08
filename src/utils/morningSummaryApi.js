@@ -79,10 +79,11 @@ export function createMorningSummaryApi({ fetchImpl = fetch, getSession = curren
     return { ...preferences(payload), requestId };
   }
   return {
-    load: (userId, { signal } = {}) => request('GET', userId, null, signal),
-    save: async (userId, value, { signal } = {}) => {
+    load: (userId, { signal, operationContext } = {}) => request('GET', userId, null, signal, operationContext),
+    save: async (userId, value, { signal, operationContext } = {}) => {
       if (!serverManagedAuth) return request('PUT', userId, value, signal);
-      const context = captureServerOperationContext(userId);
+      const context = operationContext || captureServerOperationContext(userId);
+      assertServerOperationContext(context);
       return withDetailTransition(() => request('PUT', userId, value, signal, context));
     },
     async day(userId, summaryRef, { signal } = {}) {

@@ -15,7 +15,8 @@ const summary = { date: '2026-11-03', week: 'A', lessons: [
   { period: 1, className: 'Synthetic class', title: 'Synthetic lesson', isPpa: false },
 ], events: [{ title: 'Synthetic event' }] };
 
-function fixture({ decisions = [{ ownerId: userId, eventTitleConsent: false }], delayed } = {}) {
+function fixture({ decisions = [{ ownerId: userId, lessonDetailConsent: true,
+  eventTitleConsent: false }], delayed } = {}) {
   const calls = [];
   const service = createMorningSummaryDetailService({ config,
     createClientImpl: () => ({ rpc: async (name, args) => {
@@ -33,26 +34,37 @@ function fixture({ decisions = [{ ownerId: userId, eventTitleConsent: false }], 
 
 test('detail authorization uses verified session and rechecks after snapshot; event titles have separate consent', async () => {
   const first = fixture({ decisions: [
-    { ownerId: userId, eventTitleConsent: false }, { ownerId: userId, eventTitleConsent: false },
+    { ownerId: userId, lessonDetailConsent: true, eventTitleConsent: false },
+    { ownerId: userId, lessonDetailConsent: true, eventTitleConsent: false },
   ] });
   assert.deepEqual(await first.service.resolve(input), {
     date: summary.date, week: 'A', lessons: summary.lessons,
-    events: [], eventTitlesIncluded: false,
+    events: [], lessonDetailsIncluded: true, eventTitlesIncluded: false,
   });
   assert.deepEqual(first.calls.map(call => call[0]), ['authorize', 'snapshot', 'authorize']);
   assert.deepEqual(first.calls[0][2], { target_session: sessionId, target_hash: endpointHash,
     target_version: installationVersion, target_reference: notificationRef, target_pilot: userId,
     target_policy_version:detailPolicyVersion });
   const second = fixture({ decisions: [
-    { ownerId: userId, eventTitleConsent: false }, { ownerId: userId, eventTitleConsent: true },
+    { ownerId: userId, lessonDetailConsent: true, eventTitleConsent: false },
+    { ownerId: userId, lessonDetailConsent: true, eventTitleConsent: true },
   ] });
   assert.deepEqual((await second.service.resolve(input)).events, [{ title: 'Synthetic event' }]);
+  const eventOnly = fixture({ decisions: [
+    { ownerId:userId, lessonDetailConsent:false, eventTitleConsent:true },
+    { ownerId:userId, lessonDetailConsent:false, eventTitleConsent:true },
+  ] });
+  assert.deepEqual(await eventOnly.service.resolve(input), {
+    date:summary.date, week:'A', lessons:[], events:[{title:'Synthetic event'}],
+    lessonDetailsIncluded:false, eventTitlesIncluded:true,
+  });
 });
 
 test('revocation, reassignment or consent change during delayed snapshot denies all detail', async () => {
   let release;
   const delayed = new Promise(resolve => { release = resolve; });
-  const h = fixture({ delayed, decisions: [{ ownerId: userId, eventTitleConsent: true }, null] });
+  const h = fixture({ delayed, decisions: [{ ownerId: userId, lessonDetailConsent:true,
+    eventTitleConsent:true }, null] });
   const pending = h.service.resolve(input);
   while (!h.calls.some(call => call[0] === 'snapshot')) await new Promise(resolve => setImmediate(resolve));
   release();
@@ -61,7 +73,8 @@ test('revocation, reassignment or consent change during delayed snapshot denies 
 });
 
 test('wrong account, invalid selectors and database errors fail without resolving the snapshot or exposing data', async () => {
-  const foreign = fixture({ decisions: [{ ownerId: 'cb000000-0000-4000-8000-000000000099', eventTitleConsent: true }] });
+  const foreign = fixture({ decisions: [{ ownerId: 'cb000000-0000-4000-8000-000000000099',
+    lessonDetailConsent:true, eventTitleConsent:true }] });
   await assert.rejects(foreign.service.resolve(input), /unavailable/);
   assert.equal(foreign.calls.length, 1);
   await assert.rejects(foreign.service.resolve({ ...input, endpointHash: 'invalid' }), /unavailable/);

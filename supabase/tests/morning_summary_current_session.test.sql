@@ -1,6 +1,9 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select extensions.no_plan();
+-- Savepoint rollbacks restore pgTAP's internal finish count, while the TAP
+-- assertions already emitted remain visible. Let the TAP runner enforce the
+-- exact count and result of all 21 assertions.
+select extensions.plan(21);
 
 select extensions.ok(not has_function_privilege('service_role',
   'private.plannix_morning_summary_has_current_bound_device(uuid)','EXECUTE')
@@ -168,5 +171,4 @@ select extensions.is(private.plannix_morning_summary_dispatch_seconds_at(
   'old owner and version cannot dispatch after B takes the binding');
 rollback to savepoint before_reassignment;
 
-select * from extensions.finish();
 rollback;

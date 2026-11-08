@@ -62,9 +62,9 @@ try {
       response.end(JSON.stringify({authenticated:true,sessionName:currentSessionName}));return;}
     if (request.url === '/api/notifications/morning-summary/detail') {
       const respond = () => {response.setHeader('Content-Type','application/json');
-        response.end(JSON.stringify({date:'2026-11-03',week:'A',lessons:[{period:1,
+        response.end(JSON.stringify({date:'2026-11-03',week:'A',lessons:[{period:'P1',
           className:'Synthetic class',title:'Synthetic lesson',isPpa:false}],
-          events:[],eventTitlesIncluded:false}));};
+          events:[],lessonDetailsIncluded:true,eventTitlesIncluded:false}));};
       if (!holdNextDetail) {respond();return;}
       heldDetail?.();
       releaseDetail = respond;

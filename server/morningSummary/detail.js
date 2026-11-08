@@ -27,8 +27,10 @@ export function createMorningSummaryDetailService({ config = env, createClientIm
         target_pilot: config.morningSummaryPilotUserId,
         target_policy_version: detailPolicyVersion,
       });
-      if (error || !data || Object.keys(data).sort().join(',') !== 'eventTitleConsent,ownerId'
-        || data.ownerId !== userId || typeof data.eventTitleConsent !== 'boolean') throw unavailable();
+      if (error || !data || Object.keys(data).sort().join(',') !== 'eventTitleConsent,lessonDetailConsent,ownerId'
+        || data.ownerId !== userId || typeof data.lessonDetailConsent !== 'boolean'
+        || typeof data.eventTitleConsent !== 'boolean'
+        || (!data.lessonDetailConsent && !data.eventTitleConsent)) throw unavailable();
       return data;
     } catch { throw unavailable(); }
   }
@@ -45,10 +47,11 @@ export function createMorningSummaryDetailService({ config = env, createClientIm
         || !Array.isArray(summary.lessons) || !Array.isArray(summary.events)) throw unavailable();
       return {
         date: summary.date, week: summary.week,
-        lessons: summary.lessons.map(lesson => ({ period: lesson.period,
-          className: lesson.className, title: lesson.title, isPpa: lesson.isPpa })),
+        lessons: current.lessonDetailConsent ? summary.lessons.map(lesson => ({ period: lesson.period,
+          className: lesson.className, title: lesson.title, isPpa: lesson.isPpa })) : [],
         events: current.eventTitleConsent
           ? summary.events.map(event => ({ title: event.title })) : [],
+        lessonDetailsIncluded: current.lessonDetailConsent,
         eventTitlesIncluded: current.eventTitleConsent,
       };
     },

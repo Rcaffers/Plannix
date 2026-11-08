@@ -6,15 +6,20 @@ import { useTimetableLayout } from '../context/TimetableLayoutContext.jsx';
 import { fetchDatedTimetableSessions } from '../utils/timetableSessionApi.js';
 import { eventApi } from '../utils/eventApi.js';
 import { morningSummaryApi } from '../utils/morningSummaryApi.js';
-import { serverManagedAuth } from '../utils/serverAuthTransport.js';
+import { serverManagedAuth, captureServerOperationContext, assertServerOperationContext } from '../utils/serverAuthTransport.js';
 import { buildMorningSummary, londonToday, summaryDateInfo } from '../utils/morningSummary.js';
 import { safeRequestReference } from '../utils/requestReference.js';
 import './MorningSummaryPanel.css';
 
 const DEFAULT_PREFERENCES = { enabled: false, deliveryTime: '07:00', revision: 0,
   academicYearId: null, lessonDetailConsent: false, eventTitleConsent: false };
+const savedPreferences = result => ({ enabled:result.enabled, deliveryTime:result.deliveryTime,
+  revision:result.revision, academicYearId:result.academicYearId ?? null,
+  lessonDetailConsent:result.lessonDetailConsent === true,
+  eventTitleConsent:result.eventTitleConsent === true });
 
-export default function MorningSummaryPanel({ userId, organisationId, preferenceApi = morningSummaryApi,
+export default function MorningSummaryPanel({ userId, organisationId, detailDevice = null,
+  preferenceApi = morningSummaryApi,
   loadDated = fetchDatedTimetableSessions, listEvents = eventApi.list }) {
   const year = useAcademicYear();
   const location = useLocation();
@@ -30,6 +35,8 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
   const [saveError, setSaveError] = useState('');
   const [saveReference, setSaveReference] = useState('');
   const [savedNotice, setSavedNotice] = useState('');
+  const [detailMessage, setDetailMessage] = useState('');
+  const [detailUnknown, setDetailUnknown] = useState(false);
   const [preferenceRetry, setPreferenceRetry] = useState(0);
   const preferenceGeneration = useRef(0);
   const savingRef = useRef(false);
@@ -43,6 +50,7 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
     setDraft(DEFAULT_PREFERENCES); draftVersion.current++; setSaving(false); savingRef.current = false;
     reloadingRef.current = false; setReloading(false); setConflict(false); setReloadError('');
     setSaveError(''); setSaveReference(''); setSavedNotice('');
+    setDetailMessage(''); setDetailUnknown(false);
     if (userId) preferenceApi.load(userId, { signal: controller.signal }).then(result => {
       if (ticket !== preferenceGeneration.current || controller.signal.aborted) return;
       const value = { enabled: result.enabled, deliveryTime: result.deliveryTime, revision: result.revision,
@@ -72,7 +80,11 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
     if (savingRef.current || reloadingRef.current || conflict || currentPreferences.status !== 'ready' || !userId) return;
     savingRef.current = true; setSaving(true); setSaveError(''); setSaveReference(''); setSavedNotice('');
     const ticket = preferenceGeneration.current;
-    const value = { ...draft, revision: currentPreferences.value.revision };
+    // The general Save button only edits scheduling. Detail consent is granted
+    // or withdrawn exclusively by its own clearly labelled action button.
+    const value = { ...draft, revision: currentPreferences.value.revision,
+      lessonDetailConsent: currentPreferences.value.lessonDetailConsent,
+      eventTitleConsent: currentPreferences.value.eventTitleConsent };
     const version = draftVersion.current;
     try {
       const result = await preferenceApi.save(userId, value);
@@ -101,9 +113,7 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
     if (!conflict || reloadingRef.current || savingRef.current || currentPreferences.status !== 'ready') return;
     const changed = draft.enabled !== currentPreferences.value.enabled
       || draft.deliveryTime !== currentPreferences.value.deliveryTime
-      || draft.academicYearId !== currentPreferences.value.academicYearId
-      || draft.lessonDetailConsent !== currentPreferences.value.lessonDetailConsent
-      || draft.eventTitleConsent !== currentPreferences.value.eventTitleConsent;
+      || draft.academicYearId !== currentPreferences.value.academicYearId;
     if (changed && !window.confirm('Discard your unsaved morning summary preference changes and reload latest?')) return;
     reloadingRef.current = true; setReloading(true); setReloadError('');
     const ticket = preferenceGeneration.current;
@@ -139,6 +149,119 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
     setDraft(value => ({ ...value, ...update }));
     setSavedNotice('');
   };
+
+  async function toggleDetail(kind) {
+    if (!serverManagedAuth || !detailDevice || !userId || savingRef.current
+      || reloadingRef.current || conflict || currentPreferences.status !== 'ready') return;
+    const field = kind === 'lesson' ? 'lessonDetailConsent' : 'eventTitleConsent';
+    const desired = !currentPreferences.value[field];
+    const choice = kind === 'lesson' ? 'Lesson-detail' : 'Event-title';
+    if (desired && (!detailDevice.available || !detailDevice.bound
+      || detailDevice.registered !== true || detailDevice.loading || detailDevice.busy)) return;
+    let context;
+    try { context = captureServerOperationContext(userId); }
+    catch { setDetailUnknown(true);
+      setDetailMessage('Your account session changed. Reload Notifications before trying again.'); return; }
+    const ticket = preferenceGeneration.current;
+    const stillCurrent = () => {
+      assertServerOperationContext(context);
+      if (ticket !== preferenceGeneration.current) throw new DOMException('Account changed.', 'AbortError');
+    };
+    savingRef.current = true; setSaving(true); setDetailMessage(''); setDetailUnknown(false);
+    try {
+      await detailDevice.perform(context, async deviceTicket => {
+        const source = currentPreferences.value;
+        const refreshDevice = async () => {
+          try { await detailDevice.read(context,deviceTicket); stillCurrent(); return true; }
+          catch { stillCurrent(); setDetailUnknown(true); return false; }
+        };
+        let saved;
+        try {
+          saved = await preferenceApi.save(userId, { ...source, [field]:desired },
+            { operationContext:context });
+        } catch {
+          stillCurrent();
+          try {
+            const latest = savedPreferences(await preferenceApi.load(userId,{ operationContext:context }));
+            stillCurrent();
+            setPreferences({ userId, status:'ready', value:latest, error:'', reference:'' });
+            setDraft(value => ({ ...value, lessonDetailConsent:latest.lessonDetailConsent,
+              eventTitleConsent:latest.eventTitleConsent }));
+            const deviceKnown = await refreshDevice();
+            setDetailMessage(deviceKnown
+              ? 'The account preference request was not confirmed. Current saved choices and device status were reloaded; try again if needed.'
+              : 'The account preference request was not confirmed. Saved choices were reloaded, but device status is unknown. Reload Notifications before trying again.');
+          } catch {
+            stillCurrent(); setDetailUnknown(true);
+            setDetailMessage('The account preference request could not be confirmed. Reload Notifications before trying again.');
+          }
+          return;
+        }
+        stillCurrent();
+        let latest;
+        try {
+          latest = savedPreferences(await preferenceApi.load(userId,{ operationContext:context }));
+          stillCurrent();
+        } catch {
+          stillCurrent(); setDetailUnknown(true);
+          setDetailMessage('The account preference may have saved, but readback failed. Reload Notifications before trying again.');
+          return;
+        }
+        setPreferences({ userId, status:'ready', value:latest, error:'', reference:'' });
+        setDraft(value => ({ ...value, lessonDetailConsent:latest.lessonDetailConsent,
+          eventTitleConsent:latest.eventTitleConsent }));
+        if (latest.revision !== saved.revision || latest[field] !== desired) {
+          const deviceKnown = await refreshDevice();
+          setDetailMessage(deviceKnown
+            ? 'Account preferences changed during this action. Current saved choices and device status are shown; no device policy was changed.'
+            : 'Account preferences changed during this action. Device status is unknown; reload Notifications before trying again.');
+          return;
+        }
+        if (!detailDevice.available) {
+          setDetailMessage(`${choice} consent ${desired ? 'enabled' : 'withdrawn'} for this account. Detailed display is unavailable on this device while its server gate is off.`);
+          return;
+        }
+        let policyError = false;
+        try { await detailDevice.setPolicy(latest.lessonDetailConsent || latest.eventTitleConsent,
+          context,deviceTicket); }
+        catch { policyError = true; }
+        stillCurrent();
+        let actual;
+        try { actual = await detailDevice.read(context,deviceTicket); stillCurrent(); }
+        catch {
+          stillCurrent(); setDetailUnknown(true);
+          setDetailMessage(`${choice} consent ${desired ? 'enabled' : 'withdrawn'} for this account, but this device policy could not be confirmed. Reload Notifications before trying again.`);
+          return;
+        }
+        if (!actual.bound) {
+          setDetailMessage(`${choice} consent ${desired ? 'enabled' : 'withdrawn'} for this account, but this device binding is stale. Use Disable on this device, then Enable notifications to reconnect.`);
+        } else if (actual.enabled !== Boolean(latest.lessonDetailConsent || latest.eventTitleConsent)) {
+          setDetailMessage(`${choice} consent ${desired ? 'enabled' : 'withdrawn'} for this account, but this device is not displaying details. Reconnect notifications, or turn an enabled detail choice off and back on to retry device enablement.`);
+        } else {
+          setDetailMessage(policyError
+            ? 'The device request was uncertain, but readback confirms the current consent and display state.'
+            : 'Account consent and this device’s detail state were saved and verified.');
+        }
+      });
+    } catch {
+      if (ticket === preferenceGeneration.current) {
+        setDetailUnknown(true);
+        setDetailMessage('This detail change could not be confirmed. Reload Notifications before trying again.');
+      }
+    } finally {
+      if (ticket === preferenceGeneration.current) { savingRef.current = false; setSaving(false); }
+    }
+  }
+
+  const detailPreferences = currentPreferences.value || DEFAULT_PREFERENCES;
+  const effectiveDetails = detailDevice?.enabled && !detailUnknown;
+  const detailStatus = currentPreferences.status !== 'ready' || detailDevice?.loading
+    ? 'Checking details…' : detailUnknown ? 'Detail status could not be verified'
+      : !effectiveDetails ? 'Details disabled'
+        : detailPreferences.lessonDetailConsent && detailPreferences.eventTitleConsent
+          ? 'Lesson details and event titles enabled'
+          : detailPreferences.lessonDetailConsent ? 'Lesson details enabled'
+            : detailPreferences.eventTitleConsent ? 'Event titles enabled' : 'Details disabled';
 
   const selectedYear = year.selectedAcademicYearId && year.academicYear?.id === year.selectedAcademicYearId
     && !year.isLoading ? year.academicYear : null;
@@ -239,24 +362,10 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
             {year.academicYears.map(item => <option key={item.id} value={item.id}>{item.label || item.name}</option>)}
           </select></div>
         <p className="settings-hint">Saved notification year: <strong>{year.academicYears.find(item => item.id === currentPreferences.value?.academicYearId)?.label || 'Not confirmed'}</strong></p>
-        {serverManagedAuth ? <div className="morning-detail-consent">
-          <p className="settings-hint">If you enable notification details, lesson and class names may appear on your phone lock screen and connected watches. These names are entered by users and may contain pupil or other sensitive information. Notifications already displayed or mirrored cannot be recalled.</p>
-          <label className="morning-opt-in"><input type="checkbox" checked={draft.lessonDetailConsent}
-            disabled={currentPreferences.status !== 'ready' || saving || reloading}
-            onChange={event => editDraft({ lessonDetailConsent: event.target.checked })} />
-            Allow lesson details in morning notifications</label>
-          <label className="morning-opt-in"><input type="checkbox" checked={draft.eventTitleConsent}
-            disabled={currentPreferences.status !== 'ready' || saving || reloading}
-            onChange={event => editDraft({ eventTitleConsent: event.target.checked })} />
-            Separately allow event titles in morning notifications</label>
-          <p className="settings-hint">Event titles may also contain pupil or other sensitive information. Detailed notifications are not active yet; these choices alone do not send or display details.</p>
-        </div> : null}
         <button type="button" className="settings-save" disabled={currentPreferences.status !== 'ready' || saving || reloading || conflict
           || !draft.academicYearId || (draft.enabled === currentPreferences.value.enabled
             && draft.deliveryTime === currentPreferences.value.deliveryTime
-            && draft.academicYearId === currentPreferences.value.academicYearId
-            && draft.lessonDetailConsent === currentPreferences.value.lessonDetailConsent
-            && draft.eventTitleConsent === currentPreferences.value.eventTitleConsent)}
+            && draft.academicYearId === currentPreferences.value.academicYearId)}
           onClick={savePreferences}>Save preferences</button>
       </div>
       {saveError ? <div className="settings-error" role="alert"><p>{saveError}</p>
@@ -268,6 +377,29 @@ export default function MorningSummaryPanel({ userId, organisationId, preference
         ? 'Loading morning summary preferences.' : reloading ? 'Reloading morning summary preferences.'
           : saving ? 'Saving morning summary preferences.' : savedNotice}</p>
     </section>
+    {serverManagedAuth && detailDevice ? <section aria-labelledby="morning-detail-heading" className="morning-notification-details">
+      <h2 id="morning-detail-heading" className="settings-section-title">Morning notification details</h2>
+      <p role="status" aria-live="polite"><strong>{detailStatus}</strong></p>
+      <p className="settings-hint">Lesson and class names or event titles may appear on lock screens and connected watches. Displayed notifications cannot be recalled.</p>
+      <p className="settings-hint">Changing either consent affects this account across devices. Enabling display applies only to this device.</p>
+      {!detailDevice.available ? <p className="settings-hint">Detailed display is unavailable on this server. Account consent can still be withdrawn.</p> : null}
+      {detailDevice.registered === true && !detailDevice.bound ? <p className="settings-error" role="alert">
+        This subscription needs reconnecting for the current session. Use “Disable on this device” above, then “Enable notifications”.
+      </p> : null}
+      <div className="morning-detail-actions">
+        {['lesson','event'].map(kind => {
+          const field = kind === 'lesson' ? 'lessonDetailConsent' : 'eventTitleConsent';
+          const enabled = detailPreferences[field] === true;
+          const label = kind === 'lesson' ? 'lesson details' : 'event titles';
+          return <button key={kind} type="button" className={enabled ? 'settings-reset' : 'settings-save'}
+            disabled={currentPreferences.status !== 'ready' || saving || reloading || conflict
+              || detailDevice.loading || detailDevice.busy || detailUnknown
+              || (!enabled && (!detailDevice.available || !detailDevice.bound || detailDevice.registered !== true))}
+            onClick={() => toggleDetail(kind)}>{enabled ? 'Disable' : 'Enable'} {label}</button>;
+        })}
+      </div>
+      {detailMessage ? <p className="settings-hint" role="alert">{detailMessage}</p> : null}
+    </section> : null}
     <section aria-labelledby="morning-preview-heading">
       <h2 id="morning-preview-heading" className="settings-section-title">Daily summary preview</h2>
       <p className="settings-hint">Read-only preview for the academic year selected in Settings. No summary is sent.</p>

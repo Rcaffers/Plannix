@@ -12,6 +12,12 @@ let subscribed = false;
 let supported = true;
 let configEnabled = true;
 let failStatus = false;
+let policyEnabled = false;
+let policyNumber = 1;
+let selectorEpoch = 0;
+let selector = null;
+window.staleDetailBinding = false;
+window.failNextDetailPolicy = false;
 let lockDepth = 0;
 const subscription = { endpoint: 'https://fcm.googleapis.com/fcm/send/synthetic-device-token',
   toJSON: () => ({ endpoint: subscription.endpoint, keys: { p256dh: 'p'.repeat(87), auth: 'a'.repeat(22) }, expirationTime: null }),
@@ -23,10 +29,22 @@ window.Notification = { permission: 'default', requestPermission: async () => {
   }; });
   window.Notification.permission = 'granted'; return 'granted';
 } };
-Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { register: async () => ({ pushManager: {
+const registration = { active:{ postMessage(message, ports) {
+  const port=ports?.[0];
+  if (message.type !== 'plannix-detail-selector' || !port) return;
+  if (message.kind === 'observe') port.postMessage({ok:true,epoch:selectorEpoch,selector});
+  else if (message.kind === 'invalidate') {
+    selectorEpoch++; selector=null; port.postMessage({ok:true,epoch:selectorEpoch});
+  } else if (message.kind === 'commit' && message.expectedEpoch === selectorEpoch) {
+    selector=message.selector; port.postMessage({ok:true,epoch:selectorEpoch,selector});
+  } else port.postMessage({ok:false});
+} }, pushManager: {
   getSubscription: async () => subscribed ? subscription : null,
   subscribe: async () => { calls.push('subscribe'); subscribed = true; return subscription; },
-} }) } });
+} };
+Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: {
+  register: async () => registration, getRegistration: async () => registration,
+} });
 let lockTail = Promise.resolve();
 Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: (_name, _options, callback) => {
   const work = lockTail.then(async () => {
@@ -49,9 +67,24 @@ export const disableCurrentDevice = async () => { calls.push('remove'); subscrib
 export const pushRequest = async (path, body) => {
   calls.push(path);
   if (['status', 'register', 'test'].includes(path) && !lockDepth) throw Error('Device operation occurred outside Web Lock');
-  if (path === 'config') return { configured: configEnabled, publicKey: configEnabled ? 'synthetic-public-key' : null };
+  if (path === 'config') return { configured: configEnabled, publicKey: configEnabled ? 'synthetic-public-key' : null,
+    detailDisplayAvailable:serverManagedAuth };
   if (path === 'status') { if (failStatus) throw Error('Synthetic status failure');
-    return { registered: false, version:null, boundToCurrentSession:false }; }
+    const registered=subscribed && !window.forceUnregisteredStatus;
+    return { registered, version:registered && !window.staleDetailBinding
+      ? 'ca000000-0000-4000-8000-000000000099' : null,
+    boundToCurrentSession:registered && !window.staleDetailBinding }; }
+  if (path === 'detail-policy/status') {
+    if (window.staleDetailBinding) throw Error('Synthetic stale binding');
+    return {enabled:policyEnabled,policyVersion:`ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}`};
+  }
+  if (path === 'detail-policy/set') {
+    if (window.failNextDetailPolicy) {window.failNextDetailPolicy=false;throw Error('Synthetic policy failure');}
+    if (body.policyVersion !== `ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}`)
+      throw Error('Synthetic stale policy version');
+    policyEnabled=body.enabled; policyNumber++;
+    return {enabled:policyEnabled,policyVersion:`ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}`};
+  }
   if (path === 'observe') return { state:'absent', version:null };
   if (path === 'register') {
     if (body.subscription.expirationTime !== undefined) throw Error('Unexpected expirationTime');
@@ -81,7 +114,16 @@ const router = createMemoryRouter([{ path: '/settings/notifications', element: <
   { path: '/settings', element: <main>Settings</main> }], { initialEntries: ['/settings/notifications'] });
 root.render(<RouterProvider router={router} />);
 const tick = () => new Promise(resolve => setTimeout(resolve, 25));
+const waitFor = async (condition, label) => {
+  for(let attempt=0;attempt<160;attempt++) { if (condition()) return; await tick(); }
+  throw Error(`${label} did not settle`);
+};
 const button = label => [...document.querySelectorAll('button')].find(node => node.textContent === label);
+const clickButton = label => {
+  const target = button(label);
+  if (!target) throw Error(`Missing button: ${label}`);
+  target.click();
+};
 const check = (condition, message) => { if (!condition) throw Error(message); };
 const chooseDate = value => {
   const input = document.querySelector('#morning-preview-date');
@@ -103,27 +145,21 @@ const chooseTime = value => {
     && document.body.textContent.includes('Saved notification year: Not confirmed'),
   'current Settings year is offered but an old preference has no confirmed delivery year');
   check(document.querySelector('#morning-preview-date')?.value, 'London preview date selector is present');
-  const lessonConsent = [...document.querySelectorAll('.morning-opt-in')].find(label =>
-    label.textContent.includes('Allow lesson details'))?.querySelector('input');
-  const eventConsent = [...document.querySelectorAll('.morning-opt-in')].find(label =>
-    label.textContent.includes('Separately allow event titles'))?.querySelector('input');
   if (serverManagedAuth) {
-    check(lessonConsent && eventConsent && !lessonConsent.checked && !eventConsent.checked,
-      'lesson and event-title consents are independently off by default');
-    check(document.body.textContent.includes('phone lock screen and connected watches')
+    check(button('Enable lesson details')?.disabled && button('Enable event titles')?.disabled
+      && document.body.textContent.includes('Details disabled'),
+      'both detail actions default off until the current device is bound');
+    check(document.body.textContent.includes('lock screens and connected watches')
       && document.body.textContent.includes('cannot be recalled'),
     'detail risk and irreversibility are explained before consent');
-    lessonConsent.click(); await tick();
-    check(document.querySelector('.morning-opt-in input')?.checked === false,
-      'lesson consent does not silently enable generic delivery');
-    eventConsent.click(); await tick();
-  } else check(!lessonConsent && !eventConsent, 'bearer UI keeps its established controls');
+  } else check(!button('Enable lesson details') && !button('Enable event titles'),
+    'bearer UI keeps its established controls');
   const optIn = document.querySelector('.morning-opt-in input');
   optIn.click(); await tick();
   button('Save preferences').click(); await tick();
-  if (serverManagedAuth) check(window.summaryPreferenceSaves?.at(-1)?.lessonDetailConsent === true
-    && window.summaryPreferenceSaves?.at(-1)?.eventTitleConsent === true,
-  'both independent consents reach only the preferences API');
+  if (serverManagedAuth) check(window.summaryPreferenceSaves?.at(-1)?.lessonDetailConsent === false
+    && window.summaryPreferenceSaves?.at(-1)?.eventTitleConsent === false,
+  'generic preferences do not grant either detail consent');
   check(window.summaryPreferenceSaves?.at(-1)?.enabled === true, 'opt-in preference reaches only the preference API');
   check(window.summaryPreferenceSaves.at(-1).academicYearId === 'cb000000-0000-4000-8000-000000000010',
     'saving explicitly confirms the notification academic year');
@@ -202,6 +238,92 @@ const chooseTime = value => {
   if (serverManagedAuth) check(calls.includes('observe')
     && calls.indexOf('observe') < calls.indexOf('register'),
   'server mode observes the installation version before registration');
+  if (serverManagedAuth) {
+    await waitFor(() => Boolean(button('Enable event titles') && !button('Enable event titles').disabled),
+      'bound detail controls');
+    const consentSaves = window.summaryPreferenceSaves.length;
+    const policyWrites = calls.filter(item => item === 'detail-policy/set').length;
+    clickButton('Enable event titles');
+    await waitFor(() => document.body.textContent.includes('Event titles enabled'),'event-only readback');
+    check(window.summaryPreferenceSaves.at(-1).eventTitleConsent === true
+      && window.summaryPreferenceSaves.at(-1).lessonDetailConsent === false
+      && window.summaryPreferenceSaves.at(-1).deliveryTime === '08:45'
+      && window.summaryPreferenceSaves.at(-1).academicYearId === 'cb000000-0000-4000-8000-000000000010'
+      && window.summaryPreferenceSaves.length === consentSaves + 1
+      && calls.filter(item => item === 'detail-policy/set').length === policyWrites + 1,
+    'one event button action saves only event consent and enables this device without a separate Save');
+    await waitFor(() => !button('Disable event titles').disabled, 'event button completion');
+    chooseTime('08:50'); await tick();
+    clickButton('Save preferences');
+    await waitFor(() => window.summaryPreferenceSaves.at(-1).deliveryTime === '08:50', 'schedule-only save');
+    check(window.summaryPreferenceSaves.at(-1).eventTitleConsent === true
+      && window.summaryPreferenceSaves.at(-1).lessonDetailConsent === false,
+    'general scheduling Save preserves button-granted consent');
+    await waitFor(() => Boolean(button('Enable lesson details') && !button('Enable lesson details').disabled),
+      'schedule save completion');
+    clickButton('Enable lesson details');
+    await waitFor(() => document.body.textContent.includes('Lesson details and event titles enabled'),'both-detail readback');
+    clickButton('Disable event titles');
+    await waitFor(() => document.body.textContent.includes('Lesson details enabled'),'event withdrawal');
+    check(window.summaryPreferenceSaves.at(-1).lessonDetailConsent === true
+      && window.summaryPreferenceSaves.at(-1).eventTitleConsent === false,
+    'withdrawing events preserves lesson consent');
+    clickButton('Enable event titles');
+    await waitFor(() => document.body.textContent.includes('Lesson details and event titles enabled'),'event re-enable');
+    clickButton('Disable lesson details');
+    await waitFor(() => document.body.textContent.includes('Event titles enabled'),'lesson withdrawal');
+    check(window.summaryPreferenceSaves.at(-1).lessonDetailConsent === false
+      && window.summaryPreferenceSaves.at(-1).eventTitleConsent === true,
+    'withdrawing lessons preserves event consent');
+    clickButton('Disable event titles');
+    await waitFor(() => document.body.textContent.includes('Details disabled'),'last consent withdrawal');
+    const beforePreferenceFailure=calls.filter(item=>item==='detail-policy/set').length;
+    window.summaryPreferenceFailSave=true;
+    clickButton('Enable lesson details');
+    await waitFor(() => document.body.textContent.includes('preference request was not confirmed'),
+      'failed account preference readback');
+    check(calls.filter(item=>item==='detail-policy/set').length===beforePreferenceFailure
+      && !window.summaryPreferenceSaves.at(-1).eventTitleConsent,
+    'a failed preference save never enables device policy');
+    window.failNextDetailPolicy=true;
+    clickButton('Enable lesson details');
+    await waitFor(() => document.body.textContent.includes('Lesson-detail consent enabled for this account, but this device is not displaying details'),
+      'partial device-policy failure');
+    check(window.summaryPreferenceSaves.at(-1).lessonDetailConsent===true
+      && document.body.textContent.includes('Details disabled'),
+    'partial failure reports saved account consent and generic device state');
+    clickButton('Disable lesson details');
+    await waitFor(() => document.body.textContent.includes('Details disabled')
+      && window.summaryPreferenceSaves.at(-1).lessonDetailConsent===false,
+    'partial failure can withdraw consent');
+    window.staleDetailBinding=true;
+    await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+    await waitFor(() => document.body.textContent.includes('needs reconnecting for the current session'),
+      'stale binding guidance');
+    check(button('Enable lesson details').disabled && button('Enable event titles').disabled,
+      'stale binding cannot enable account details on this device');
+    window.staleDetailBinding=false;
+    await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+    await waitFor(() => Boolean(button('Enable lesson details') && !button('Enable lesson details').disabled),
+      'recovered current binding');
+    // Simulate the pilot device returning with its already saved lesson-only
+    // account consent, current binding, policy version and worker selector.
+    window.setSummaryPreference('ca000000-0000-4000-8000-000000000001', {
+      enabled:true, deliveryTime:'08:50', revision:100,
+      academicYearId:'cb000000-0000-4000-8000-000000000010',
+      lessonDetailConsent:true, eventTitleConsent:false,
+    });
+    policyEnabled=true;
+    selector={ sessionName:'__Host-plannix-s-1',
+      installationVersion:'ca000000-0000-4000-8000-000000000099',
+      policyVersion:`ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}` };
+    await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+    await waitFor(() => document.body.textContent.includes('Lesson details enabled')
+      && Boolean(button('Disable lesson details') && button('Enable event titles')),
+    'existing lesson-only setting and current device policy');
+    check(!button('Disable lesson details').disabled && !button('Enable event titles').disabled,
+      'saved lesson-only pilot setting needs no new consent or device action');
+  }
   button('Send test notification').click(); await tick();
   check(calls.includes('test') && document.body.textContent.includes('not guaranteed'), 'server test path and truthful feedback');
   button('Disable on this device').click(); await tick();
@@ -218,7 +340,8 @@ const chooseTime = value => {
   supported = true; subscribed = true; failStatus = true;
   await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications'); await tick(); await tick();
   check(document.body.textContent.includes('Unknown') && button('Retry notification status'), 'failed status remains unknown and retryable');
-  failStatus = false; button('Retry notification status').click(); await tick(); await tick();
+  failStatus = false; window.forceUnregisteredStatus=true;
+  button('Retry notification status').click(); await tick(); await tick();
   check(document.body.textContent.includes('Unknown') && !button('Enable notifications').disabled, 'status false stays non-destructive and permits explicit Enable');
   check(subscribed && !calls.includes('unsubscribe'), 'status:false never unsubscribes the browser device');
   const sharedLocks = navigator.locks;
@@ -299,5 +422,5 @@ const chooseTime = value => {
   document.body.dataset.testResult = 'passed';
 } catch (error) {
   document.body.dataset.testResult = 'failed';
-  document.body.dataset.testError = error.message;
+  document.body.dataset.testError = error.stack || error.message;
 } })();

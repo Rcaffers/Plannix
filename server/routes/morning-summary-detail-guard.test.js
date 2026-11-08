@@ -51,7 +51,8 @@ test('production session guard excludes event titles removed while a detail snap
       assert.equal(name, 'plannix_authorize_morning_summary_detail_v2');
       assert.equal(args.target_session, sessionId);
       authorizationReads += 1;
-      return { data: { ownerId: owner, eventTitleConsent }, error: null };
+      return { data: { ownerId: owner, lessonDetailConsent:true,
+        eventTitleConsent }, error: null };
     } }),
     delivery: { async resolveReference(userId, notificationRef) {
       assert.equal(userId, owner);

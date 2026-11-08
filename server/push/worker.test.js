@@ -431,7 +431,7 @@ function detailFixture({ fetchImpl, showImpl, locks, timerImpl = setTimeout } = 
         sessionName:selector.sessionName});
       return Response.json({date:'2026-11-03',week:'A',lessons:[{period:'P1',
         className:'Synthetic class',title:'Synthetic lesson',isPpa:false}],
-        events:[],eventTitlesIncluded:false});
+        events:[],lessonDetailsIncluded:true,eventTitlesIncluded:false});
     }),
     addEventListener:(name,handler) => listeners.set(name,handler),
     registration:{pushManager:{getSubscription:async () => ({endpoint:'https://push.example.test/device'})},
@@ -460,7 +460,7 @@ test('worker uses fresh session and authorization before one detailed display', 
       sessionName:'__Host-plannix-s-2'});
     return Response.json({date:'2026-11-03',week:'A',lessons:[{period:'P1',
       className:'Synthetic class',title:'Synthetic lesson',isPpa:false}],
-      events:[{title:'Private event'}],eventTitlesIncluded:true});
+      events:[{title:'Private event'}],lessonDetailsIncluded:true,eventTitlesIncluded:true});
   }});
   await h.deliver();
   assert.equal(h.shown.length,1);
@@ -469,6 +469,21 @@ test('worker uses fresh session and authorization before one detailed display', 
   assert.equal(paths.length,3);
   assert.equal(paths[2][1]['X-Plannix-Expected-Session'],'__Host-plannix-s-2');
   assert.equal(h.state().selector.sessionName,'__Host-plannix-s-2');
+});
+
+test('event-only detail displays titles without any lesson text', async () => {
+  const h = detailFixture({ fetchImpl:async input => {
+    const path = new URL(input).pathname;
+    if (path.endsWith('detail-display-config')) return Response.json({enabled:true});
+    if (path.endsWith('/status')) return Response.json({authenticated:true,
+      sessionName:'__Host-plannix-s-2'});
+    return Response.json({date:'2026-11-03',week:'A',lessons:[],events:[{title:'Synthetic event'}],
+      lessonDetailsIncluded:false,eventTitlesIncluded:true});
+  } });
+  await h.deliver();
+  assert.equal(h.shown.length,1);
+  assert.equal(h.shown[0][1].body,'Synthetic event');
+  assert.doesNotMatch(JSON.stringify(h.shown),/Synthetic lesson|Synthetic class/);
 });
 
 test('real summary, detail service and worker display ordinary lessons and PPA without unconsented events', async () => {
@@ -508,7 +523,8 @@ test('real summary, detail service and worker display ordinary lessons and PPA w
     createClientImpl:() => ({ rpc:async name => {
       assert.equal(name,'plannix_authorize_morning_summary_detail_v2');
       authorizations++;
-      return { data:{ ownerId:userId, eventTitleConsent:false }, error:null };
+      return { data:{ ownerId:userId, lessonDetailConsent:true,
+        eventTitleConsent:false }, error:null };
     } }),
   });
   const h = detailFixture({ fetchImpl:async (input, init) => {
@@ -530,6 +546,7 @@ test('real summary, detail service and worker display ordinary lessons and PPA w
   })));
   assert.deepEqual(detailResponse.events, []);
   assert.equal(detailResponse.eventTitlesIncluded,false);
+  assert.equal(detailResponse.lessonDetailsIncluded,true);
   assert.equal(h.shown.length,1);
   assert.equal(h.shown[0][0],'Your Plannix day');
   assert.equal(h.shown[0][1].body,
@@ -547,10 +564,11 @@ test('malformed detail shapes remain generic and never display their text', asyn
     { lessons:[{ period:'P1', className:'Synthetic class', title:'', isPpa:true }] },
     { lessons:[{ period:'P1', className:null, title:'Private lesson', isPpa:true }] },
     { lessons:[ordinary], events:[{ title:'Private event' }] },
+    { lessons:[ordinary], lessonDetailsIncluded:false },
   ];
   for (const change of invalid) {
     const response = { date:'2026-11-02', week:'A', lessons:[ordinary],
-      events:[], eventTitlesIncluded:false, ...change };
+      events:[], lessonDetailsIncluded:true, eventTitlesIncluded:false, ...change };
     const h = detailFixture({ fetchImpl:async input => {
       const path = new URL(input).pathname;
       if (path.endsWith('detail-display-config')) return Response.json({ enabled:true });
