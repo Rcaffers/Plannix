@@ -497,11 +497,14 @@ test('real summary, detail service and worker display ordinary lessons and PPA w
     dated: { weekStartDate:date, repeatingWeekId:weekId, sessions:[
       { day:0, periodId:'one', classId:'class-a', title:'Fractions' },
       { day:0, periodId:'three', classId:'class-a', title:'Geometry' },
+      { day:0, periodId:'four', classId:'class-a', title:'Algebra' },
     ] },
     periods: [
       { id:'one', type:'teaching', order:1, startTime:'09:00', endTime:'10:00' },
       { id:'two', type:'teaching', order:2, startTime:'10:15', endTime:'11:15' },
       { id:'three', type:'teaching', order:3, startTime:'11:30', endTime:'12:30' },
+      { id:'four', type:'teaching', order:4, startTime:'13:00', endTime:'14:00' },
+      { id:'five', type:'teaching', order:5, startTime:'14:15', endTime:'15:15' },
     ],
     classes:[{ id:'class-a', name:'Synthetic class' }], weeks:[{ id:weekId, code:'A' }],
     events:[{ id:'event-a', date, title:'Synthetic event', startTime:null, endTime:null }],
@@ -509,6 +512,7 @@ test('real summary, detail service and worker display ordinary lessons and PPA w
   const canonical = buildMorningSummary(snapshot);
   assert.deepEqual(canonical.lessons.map(lesson => [lesson.period, lesson.className, lesson.isPpa]), [
     ['P1','Synthetic class',false], ['P2',null,true], ['P3','Synthetic class',false],
+    ['P4','Synthetic class',false], ['P5',null,true],
   ]);
   const config = { supabaseUrl:'https://example.test', supabaseSecretKey:'synthetic',
     morningSummaryPilotUserId:userId };
@@ -550,8 +554,34 @@ test('real summary, detail service and worker display ordinary lessons and PPA w
   assert.equal(h.shown.length,1);
   assert.equal(h.shown[0][0],'Your Plannix day');
   assert.equal(h.shown[0][1].body,
-    'P1: Synthetic class — Fractions · P2: PPA · P3: Synthetic class — Geometry');
+    'P1: Synthetic class — Fractions · P2: PPA · P3: Synthetic class — Geometry · P4: Synthetic class — Algebra · P5: PPA');
   assert.doesNotMatch(JSON.stringify(h.shown),/Synthetic event/);
+});
+
+test('five long periods remain represented within a bounded body and malformed fifth period falls back to generic', async () => {
+  const lessons = Array.from({ length:5 }, (_, index) => ({ period:`P${index + 1}`,
+    className:'😀'.repeat(200), title:'🧪'.repeat(200), isPpa:false }));
+  const response = {date:'2026-11-02',week:'A',lessons,events:[],
+    lessonDetailsIncluded:true,eventTitlesIncluded:false};
+  const responseBytes = new TextEncoder().encode(JSON.stringify(response)).length;
+  assert.ok(responseBytes > 8192 && responseBytes < 16384,
+    'five valid long Unicode periods exceed the old response cap but fit the new bounded cap');
+  const fetchImpl = async input => {
+    const path = new URL(input).pathname;
+    if (path.endsWith('detail-display-config')) return Response.json({enabled:true});
+    if (path.endsWith('/status')) return Response.json({authenticated:true,sessionName:'__Host-plannix-s-2'});
+    return Response.json(response);
+  };
+  const h = detailFixture({fetchImpl});
+  await h.deliver();
+  assert.equal(h.shown.length,1);
+  for (let period=1;period<=5;period++) assert.match(h.shown[0][1].body,new RegExp(`P${period}:`));
+  assert.ok(Array.from(h.shown[0][1].body).length <= 480);
+  response.lessons = [...lessons.slice(0,4),{...lessons[4],className:null}];
+  const bad = detailFixture({fetchImpl});
+  await bad.deliver();
+  assert.equal(bad.shown.length,1);
+  assert.equal(bad.shown[0][1].body,'Open Plannix to view your morning summary.');
 });
 
 test('malformed detail shapes remain generic and never display their text', async () => {

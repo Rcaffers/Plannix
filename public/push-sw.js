@@ -5,6 +5,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const SESSION = /^__Host-plannix-s-[1-9]\d{0,15}$/;
 // Require the absolute end; a JavaScript $ anchor also matches before a final newline.
 const PERIOD_LABEL = /^P[1-9]\d*(?![\s\S])/;
+// Bound each label so later periods remain present instead of truncating the
+// joined body before P5. The OS may still visually clip its notification.
+const MAX_DISPLAY_PERIODS = 5;
+const MAX_CLASS_CHARS = 32;
+const MAX_LESSON_TITLE_CHARS = 32;
+const MAX_EVENT_TITLE_CHARS = 48;
 const DETAIL_DEADLINE_MS = 4000;
 const LOCK_PROBE_LIMIT_MS = 5000;
 let selectorQueue = Promise.resolve();
@@ -169,7 +175,7 @@ function deadline(work, milliseconds, controller) {
   })]).finally(() => clearTimeout(timer));
 }
 
-async function smallJson(response) {
+async function smallJson(response, maxBytes = 8192) {
   if (!response.ok) throw new Error('detail unavailable');
   const reader = response.body?.getReader?.();
   if (!reader) throw new Error('detail unavailable');
@@ -178,7 +184,7 @@ async function smallJson(response) {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > 8192) { void reader.cancel().catch(() => {}); throw new Error('detail unavailable'); }
+    if (total > maxBytes) { void reader.cancel().catch(() => {}); throw new Error('detail unavailable'); }
     chunks.push(value);
   }
   const bytes = new Uint8Array(total); let offset = 0;
@@ -191,9 +197,10 @@ function notificationText(detail) {
     || typeof detail.lessonDetailsIncluded !== 'boolean'
     || typeof detail.eventTitlesIncluded !== 'boolean'
     || (!detail.lessonDetailsIncluded && detail.lessons.length)) throw new Error('detail unavailable');
-  const parts = detail.lessons.slice(0, 3).map(item => {
+  const short = (value, limit) => Array.from(value.trim()).slice(0, limit).join('');
+  const parts = detail.lessons.slice(0, MAX_DISPLAY_PERIODS).map(item => {
     if (!item || typeof item.period !== 'string' || !PERIOD_LABEL.test(item.period)
-      || typeof item.title !== 'string' || typeof item.isPpa !== 'boolean')
+      || item.period.length > 4 || typeof item.title !== 'string' || typeof item.isPpa !== 'boolean')
       throw new Error('detail unavailable');
     if (item.isPpa) {
       if (item.className !== null || item.title !== '') throw new Error('detail unavailable');
@@ -201,16 +208,17 @@ function notificationText(detail) {
     }
     if (typeof item.className !== 'string' || !item.className.trim())
       throw new Error('detail unavailable');
-    return `${item.period}: ${item.className}${item.title ? ` — ${item.title}` : ''}`;
+    const title = short(item.title, MAX_LESSON_TITLE_CHARS);
+    return `${item.period}: ${short(item.className, MAX_CLASS_CHARS)}${title ? ` — ${title}` : ''}`;
   });
   if (detail.eventTitlesIncluded) {
     for (const event of detail.events.slice(0, 2)) {
-      if (typeof event.title !== 'string') throw new Error('detail unavailable');
-      parts.push(event.title);
+      if (typeof event?.title !== 'string' || !event.title.trim()) throw new Error('detail unavailable');
+      parts.push(short(event.title, MAX_EVENT_TITLE_CHARS));
     }
   } else if (detail.events.length) throw new Error('detail unavailable');
   if (!parts.length) throw new Error('detail unavailable');
-  return parts.join(' · ').slice(0, 180);
+  return parts.join(' · ');
 }
 
 async function showMorning(payload) {
@@ -252,7 +260,7 @@ async function showMorning(payload) {
           'X-Plannix-Installation-Hash': hash,
           'X-Plannix-Installation-Version': selector.installationVersion,
           'X-Plannix-Detail-Policy-Version': selector.policyVersion,
-        }));
+        }), 16384);
         const body = notificationText(detail);
         const latest = await selectorTransaction();
         if (controller.signal.aborted || latest.epoch !== stored.epoch)

@@ -16,7 +16,7 @@ const summary = { date: '2026-11-03', week: 'A', lessons: [
 ], events: [{ title: 'Synthetic event' }] };
 
 function fixture({ decisions = [{ ownerId: userId, lessonDetailConsent: true,
-  eventTitleConsent: false }], delayed } = {}) {
+  eventTitleConsent: false }], delayed, snapshot = summary } = {}) {
   const calls = [];
   const service = createMorningSummaryDetailService({ config,
     createClientImpl: () => ({ rpc: async (name, args) => {
@@ -26,7 +26,7 @@ function fixture({ decisions = [{ ownerId: userId, lessonDetailConsent: true,
     delivery: { resolveReference: async (owner, ref) => {
       calls.push(['snapshot', owner, ref]);
       if (delayed) await delayed;
-      return summary;
+      return snapshot;
     } },
   });
   return { service, calls };
@@ -58,6 +58,24 @@ test('detail authorization uses verified session and rechecks after snapshot; ev
     date:summary.date, week:'A', lessons:[], events:[{title:'Synthetic event'}],
     lessonDetailsIncluded:false, eventTitlesIncluded:true,
   });
+});
+
+test('detail response exposes at most five authorized periods and two independently consented event titles', async () => {
+  const snapshot = { date:summary.date, week:'A',
+    lessons:Array.from({length:6}, (_, index) => ({period:`P${index + 1}`,
+      className:'Synthetic class',title:'Synthetic lesson',isPpa:false})),
+    events:Array.from({length:3}, (_, index) => ({title:`Synthetic event ${index + 1}`})) };
+  const both = fixture({snapshot, decisions:Array(2).fill({ownerId:userId,
+    lessonDetailConsent:true,eventTitleConsent:true})});
+  const result = await both.service.resolve(input);
+  assert.deepEqual(result.lessons,snapshot.lessons.slice(0,5));
+  assert.deepEqual(result.events,snapshot.events.slice(0,2));
+  const lessonsOnly = fixture({snapshot,decisions:Array(2).fill({ownerId:userId,
+    lessonDetailConsent:true,eventTitleConsent:false})});
+  assert.deepEqual((await lessonsOnly.service.resolve(input)).events,[]);
+  const eventsOnly = fixture({snapshot,decisions:Array(2).fill({ownerId:userId,
+    lessonDetailConsent:false,eventTitleConsent:true})});
+  assert.deepEqual((await eventsOnly.service.resolve(input)).lessons,[]);
 });
 
 test('revocation, reassignment or consent change during delayed snapshot denies all detail', async () => {

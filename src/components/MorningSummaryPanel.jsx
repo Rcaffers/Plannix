@@ -254,14 +254,23 @@ export default function MorningSummaryPanel({ userId, organisationId, detailDevi
   }
 
   const detailPreferences = currentPreferences.value || DEFAULT_PREFERENCES;
-  const effectiveDetails = detailDevice?.enabled && !detailUnknown;
+  const accountDetails = detailPreferences.lessonDetailConsent && detailPreferences.eventTitleConsent
+    ? 'Lesson details and event titles enabled'
+    : detailPreferences.lessonDetailConsent ? 'Lesson details enabled'
+      : detailPreferences.eventTitleConsent ? 'Event titles enabled' : 'Details disabled';
   const detailStatus = currentPreferences.status !== 'ready' || detailDevice?.loading
-    ? 'Checking details…' : detailUnknown ? 'Detail status could not be verified'
-      : !effectiveDetails ? 'Details disabled'
-        : detailPreferences.lessonDetailConsent && detailPreferences.eventTitleConsent
-          ? 'Lesson details and event titles enabled'
-          : detailPreferences.lessonDetailConsent ? 'Lesson details enabled'
-            : detailPreferences.eventTitleConsent ? 'Event titles enabled' : 'Details disabled';
+    ? 'Checking details…' : saving || reloading ? 'Updating details…'
+      : detailUnknown ? 'Detail status could not be verified'
+        : accountDetails === 'Details disabled' ? accountDetails
+          : detailDevice?.enabled ? accountDetails
+            : !detailDevice?.available ? `${accountDetails} for this account; detailed display is unavailable on this server`
+              : detailDevice.registered === false ? `${accountDetails} for this account; notifications are off on this device`
+                : detailDevice.registered !== true ? `${accountDetails} for this account; this device's subscription status is unverified`
+                : !detailDevice.bound ? `${accountDetails} for this account; this device needs reconnecting`
+                  : detailDevice.policyEnabled === false ? `${accountDetails} for this account; this device's detail policy is off`
+                    : detailDevice.policyEnabled === true && detailDevice.selectorCurrent === false
+                      ? `${accountDetails} for this account; this device's detail setup needs reconnecting`
+                      : `${accountDetails} for this account; this device's detail status is unverified`;
 
   const selectedYear = year.selectedAcademicYearId && year.academicYear?.id === year.selectedAcademicYearId
     && !year.isLoading ? year.academicYear : null;
@@ -386,6 +395,9 @@ export default function MorningSummaryPanel({ userId, organisationId, detailDevi
       {detailDevice.registered === true && !detailDevice.bound ? <p className="settings-error" role="alert">
         This subscription needs reconnecting for the current session. Use “Disable on this device” above, then “Enable notifications”.
       </p> : null}
+      {currentPreferences.status === 'ready' && accountDetails !== 'Details disabled'
+        && detailDevice.bound && !detailDevice.enabled && !detailUnknown && !detailDevice.loading
+        && detailDevice.available ? <p className="settings-hint">Your account consent is saved, but this device is not ready to display details. To retry device enablement, turn an enabled choice off and back on. If setup remains unverified, reconnect notifications on this device.</p> : null}
       <div className="morning-detail-actions">
         {['lesson','event'].map(kind => {
           const field = kind === 'lesson' ? 'lessonDetailConsent' : 'eventTitleConsent';

@@ -36,7 +36,12 @@ try {
   const target = targetInfos.find(item => item.type === 'page' && item.url.startsWith('file:'));
   assert.ok(target);
   const { sessionId } = await send('Target.attachToTarget', { targetId: target.targetId, flatten: true });
-  const result = await send('Runtime.evaluate', { expression: `new Promise((resolve,reject)=>{let n=0;const timer=setInterval(()=>{if(document.body.dataset.testResult){clearInterval(timer);resolve([document.body.dataset.testResult,document.body.dataset.testError])}else if(++n>300){clearInterval(timer);reject(Error('Fixture timed out'))}},50)})`, awaitPromise: true, returnByValue: true }, sessionId);
+  const waitForResult = () => send('Runtime.evaluate', { expression: `new Promise((resolve,reject)=>{let n=0;const timer=setInterval(()=>{if(document.body.dataset.testResult){clearInterval(timer);resolve([document.body.dataset.testResult,document.body.dataset.testError])}else if(++n>300){clearInterval(timer);reject(Error('Fixture timed out'))}},50)})`, awaitPromise: true, returnByValue: true }, sessionId);
+  let result = await waitForResult();
+  if (result.result.value[0] === 'reload-pending') {
+    await send('Page.reload', { ignoreCache:true }, sessionId);
+    result = await waitForResult();
+  }
   assert.equal(result.result.value[0], 'passed', result.result.value[1]);
   const widths = [320,375,390,430,768,820,1024,1366];
   for (const width of widths) {

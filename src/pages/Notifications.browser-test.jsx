@@ -8,21 +8,24 @@ import '../styles/base.css';
 import '../styles/accessibility.css';
 
 const calls = [];
-let subscribed = false;
+const reloadDetail = window.name === 'plannix-notification-detail-reload';
+let subscribed = reloadDetail;
 let supported = true;
 let configEnabled = true;
 let failStatus = false;
-let policyEnabled = false;
+let policyEnabled = reloadDetail;
 let policyNumber = 1;
 let selectorEpoch = 0;
-let selector = null;
+let selector = reloadDetail ? { sessionName:'__Host-plannix-s-1',
+  installationVersion:'ca000000-0000-4000-8000-000000000099',
+  policyVersion:'ca000000-0000-4000-8000-000000000001' } : null;
 window.staleDetailBinding = false;
 window.failNextDetailPolicy = false;
 let lockDepth = 0;
 const subscription = { endpoint: 'https://fcm.googleapis.com/fcm/send/synthetic-device-token',
   toJSON: () => ({ endpoint: subscription.endpoint, keys: { p256dh: 'p'.repeat(87), auth: 'a'.repeat(22) }, expirationTime: null }),
   unsubscribe: async () => { calls.push('unsubscribe'); subscribed = false; return true; } };
-window.Notification = { permission: 'default', requestPermission: async () => {
+window.Notification = { permission: reloadDetail ? 'granted' : 'default', requestPermission: async () => {
   calls.push('permission');
   if (window.deferPushPermission) return new Promise(resolve => { window.releasePushPermission = () => {
     window.Notification.permission = 'granted'; resolve('granted');
@@ -32,7 +35,8 @@ window.Notification = { permission: 'default', requestPermission: async () => {
 const registration = { active:{ postMessage(message, ports) {
   const port=ports?.[0];
   if (message.type !== 'plannix-detail-selector' || !port) return;
-  if (message.kind === 'observe') port.postMessage({ok:true,epoch:selectorEpoch,selector});
+  if (message.kind === 'observe') port.postMessage(window.failSelectorObservation
+    ? {ok:false} : {ok:true,epoch:selectorEpoch,selector});
   else if (message.kind === 'invalidate') {
     selectorEpoch++; selector=null; port.postMessage({ok:true,epoch:selectorEpoch});
   } else if (message.kind === 'commit' && message.expectedEpoch === selectorEpoch) {
@@ -70,6 +74,11 @@ export const pushRequest = async (path, body) => {
   if (path === 'config') return { configured: configEnabled, publicKey: configEnabled ? 'synthetic-public-key' : null,
     detailDisplayAvailable:serverManagedAuth };
   if (path === 'status') { if (failStatus) throw Error('Synthetic status failure');
+    if (window.holdNextPushStatus) {
+      window.holdNextPushStatus=false; window.pushStatusHeld=true;
+      return new Promise(resolve => { window.releaseHeldPushStatus=() => resolve({registered:false,
+        version:null,boundToCurrentSession:false}); });
+    }
     const registered=subscribed && !window.forceUnregisteredStatus;
     return { registered, version:registered && !window.staleDetailBinding
       ? 'ca000000-0000-4000-8000-000000000099' : null,
@@ -138,6 +147,17 @@ const chooseTime = value => {
   input.dispatchEvent(new Event('change', { bubbles: true }));
 };
 (async () => { try {
+  if (reloadDetail) {
+    await waitFor(() => document.body.textContent.includes('Lesson details enabled')
+      && Boolean(button('Disable lesson details') && button('Enable event titles')),
+    'full browser reload restores saved lesson consent and current device readiness');
+    check(!document.body.textContent.includes('detail policy is off')
+      && !document.body.textContent.includes('detail status is unverified'),
+    'full reload reports the confirmed effective device state');
+    window.name='';
+    document.body.dataset.testResult='passed';
+    return;
+  }
   await tick(); await tick();
   check(calls.includes('config') && !calls.includes('permission'), 'permission is not requested on load');
   check(document.body.textContent.includes('Morning summaries are not active yet'), 'summary preference cannot imply scheduling');
@@ -290,8 +310,12 @@ const chooseTime = value => {
     await waitFor(() => document.body.textContent.includes('Lesson-detail consent enabled for this account, but this device is not displaying details'),
       'partial device-policy failure');
     check(window.summaryPreferenceSaves.at(-1).lessonDetailConsent===true
-      && document.body.textContent.includes('Details disabled'),
-    'partial failure reports saved account consent and generic device state');
+      && document.body.textContent.includes("Lesson details enabled for this account; this device's detail policy is off")
+      && Boolean(button('Disable lesson details')),
+    'partial failure distinguishes saved account consent from the disabled device policy');
+    await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+    await waitFor(() => document.body.textContent.includes("Lesson details enabled for this account; this device's detail policy is off")
+      && Boolean(button('Disable lesson details')), 'partial policy state after navigation');
     clickButton('Disable lesson details');
     await waitFor(() => document.body.textContent.includes('Details disabled')
       && window.summaryPreferenceSaves.at(-1).lessonDetailConsent===false,
@@ -323,11 +347,45 @@ const chooseTime = value => {
     'existing lesson-only setting and current device policy');
     check(!button('Disable lesson details').disabled && !button('Enable event titles').disabled,
       'saved lesson-only pilot setting needs no new consent or device action');
+    selector=null;
+    await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+    await waitFor(() => document.body.textContent.includes("Lesson details enabled for this account; this device's detail setup needs reconnecting")
+      && Boolean(button('Disable lesson details')), 'consent remains distinct from missing worker selector after reload');
+    window.failSelectorObservation=true;
+    await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+    await waitFor(() => document.body.textContent.includes("Lesson details enabled for this account; this device's detail status is unverified"),
+      'failed local selector observation is not called a disabled policy');
+    window.failSelectorObservation=false;
+    selector={ sessionName:'__Host-plannix-s-1',
+      installationVersion:'ca000000-0000-4000-8000-000000000099',
+      policyVersion:`ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}` };
+    await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+    await waitFor(() => document.body.textContent.includes('Lesson details enabled')
+      && !document.body.textContent.includes('detail status is unverified'),
+    'verified worker selector restores the effective lesson-only status');
+    window.holdNextPushStatus=true; window.pushStatusHeld=false;
+    await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+    await waitFor(() => window.pushStatusHeld, 'old-session status request held');
+    invalidateServerSessionContext();
+    setServerSessionContext('__Host-plannix-s-2','synthetic-csrf',
+      'ca000000-0000-4000-8000-000000000001');
+    window.releaseHeldPushStatus();
+    await navigator.locks.request('plannix-push-device',{mode:'exclusive'},async () => {});
+    await tick();
+    check(document.body.textContent.includes('Checking details…')
+      && document.body.textContent.includes('This device:')
+      && !document.body.textContent.includes('This device: Unknown'),
+    'held old-session status reaches its terminal lock release without changing the new session UI');
+    window.dispatchEvent(new Event('plannix-server-session-change'));
+    await waitFor(() => document.body.textContent.includes("Lesson details enabled for this account; this device's detail setup needs reconnecting"),
+      'same-account replacement reloads current device status after stale completion');
   }
   button('Send test notification').click(); await tick();
   check(calls.includes('test') && document.body.textContent.includes('not guaranteed'), 'server test path and truthful feedback');
   button('Disable on this device').click(); await tick();
   check(calls.includes('remove') && document.body.textContent.includes('Not subscribed'), 'disable removes current device');
+  if (serverManagedAuth) check(document.body.textContent.includes('notifications are off on this device'),
+    'saved consent and a confirmed missing device subscription remain distinct');
   window.Notification.permission = 'denied';
   await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications'); await tick(); await tick();
   check(button('Enable notifications').disabled && document.body.textContent.includes('Blocked'), 'denied permission is actionable and does not prompt again');
@@ -340,6 +398,8 @@ const chooseTime = value => {
   supported = true; subscribed = true; failStatus = true;
   await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications'); await tick(); await tick();
   check(document.body.textContent.includes('Unknown') && button('Retry notification status'), 'failed status remains unknown and retryable');
+  if (serverManagedAuth) check(document.body.textContent.includes("this device's subscription status is unverified"),
+    'unknown device status is not reported as a confirmed disabled subscription');
   failStatus = false; window.forceUnregisteredStatus=true;
   button('Retry notification status').click(); await tick(); await tick();
   check(document.body.textContent.includes('Unknown') && !button('Enable notifications').disabled, 'status false stays non-destructive and permits explicit Enable');
@@ -419,6 +479,11 @@ const chooseTime = value => {
   await tick(); await tick();
   check(document.body.textContent.includes('Could not load this notification’s day')
     && !document.body.textContent.includes('Linked lesson'), 'failed linked day never displays stale data');
+  if (serverManagedAuth) {
+    window.name='plannix-notification-detail-reload';
+    document.body.dataset.testResult='reload-pending';
+    return;
+  }
   document.body.dataset.testResult = 'passed';
 } catch (error) {
   document.body.dataset.testResult = 'failed';

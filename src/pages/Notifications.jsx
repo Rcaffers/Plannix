@@ -17,6 +17,8 @@ export default function Notifications({ userId, organisationId }) {
   const [registered, setRegistered] = useState(null);
   const [detailAvailable, setDetailAvailable] = useState(false);
   const [detailEnabled, setDetailEnabled] = useState(false);
+  const [detailPolicyEnabled, setDetailPolicyEnabled] = useState(null);
+  const [detailSelectorCurrent, setDetailSelectorCurrent] = useState(null);
   const [bindingCurrent, setBindingCurrent] = useState(false);
   const [loading, setLoading] = useState(true);
   const [configLoaded, setConfigLoaded] = useState(false);
@@ -38,9 +40,13 @@ export default function Notifications({ userId, organisationId }) {
   useEffect(() => {
     if (!serverManagedAuth) return undefined;
     const changed = () => {
+      generation.current++;
+      busyRef.current = null;
       bindingVersion.current = null;
       setBindingCurrent(false);
       setDetailEnabled(false);
+      setDetailPolicyEnabled(null);
+      setDetailSelectorCurrent(null);
       setReloadKey(value => value + 1);
     };
     window.addEventListener('plannix-server-session-change', changed);
@@ -53,52 +59,69 @@ export default function Notifications({ userId, organisationId }) {
 
   useEffect(() => {
     const ticket = ++generation.current;
+    let context = null;
+    const isCurrent = () => {
+      if (ticket !== generation.current) return false;
+      if (context) { try { assertServerOperationContext(context); } catch { return false; } }
+      return true;
+    };
     busyRef.current = null; setBusy(false);
     setLoading(true); setRegistered(null); setConfigured(false); setConfigLoaded(false); setError(''); setNotice('');
     setDetailAvailable(false); setDetailEnabled(false); bindingVersion.current = null;
+    setDetailPolicyEnabled(null); setDetailSelectorCurrent(null);
     setBindingCurrent(false);
     if (!supported || !coordinated || !userId) { setLoading(false); return () => { generation.current++; busyRef.current = null; }; }
     (async () => {
       try {
-        const context = serverManagedAuth ? captureServerOperationContext(userId) : null;
+        context = serverManagedAuth ? captureServerOperationContext(userId) : null;
         const config = await pushRequest('config', undefined,
           { expectedUserId: userId, operationContext:context });
-        if (ticket !== generation.current) return;
+        if (!isCurrent()) return;
         publicKey.current = config?.publicKey || null;
         setConfigLoaded(true);
         setConfigured(config?.configured === true && Boolean(publicKey.current));
         setDetailAvailable(serverManagedAuth && config?.detailDisplayAvailable === true);
         await withPushDeviceLock(async () => {
-          if (context) assertServerOperationContext(context);
-          if (ticket !== generation.current) return;
+          if (!isCurrent()) return;
           const subscription = await currentPushSubscription();
-          if (!subscription) { if (ticket === generation.current) setRegistered(false); return; }
+          if (!isCurrent()) return;
+          if (!subscription) { if (isCurrent()) { setRegistered(false);
+            setDetailPolicyEnabled(null); setDetailSelectorCurrent(null); } return; }
           if (config?.configured !== true) return;
           const status = await pushRequest('status', { endpoint: subscription.endpoint },
             { expectedUserId: userId, operationContext:context });
+          if (!isCurrent()) return;
           if (typeof status?.registered !== 'boolean') throw new Error('Invalid device status.');
-          if (ticket === generation.current) {
+          if (isCurrent()) {
             setRegistered(status.registered === true ? true : null);
-            bindingVersion.current = status.boundToCurrentSession === true ? status.version : null;
+            bindingVersion.current = status.boundToCurrentSession === true && UUID.test(status.version || '')
+              ? status.version : null;
             setBindingCurrent(Boolean(bindingVersion.current));
+            if (!bindingVersion.current) { setDetailPolicyEnabled(null); setDetailSelectorCurrent(null); }
             if (config?.detailDisplayAvailable === true && bindingVersion.current) {
               const policy = await pushRequest('detail-policy/status', {
                 endpoint:subscription.endpoint, installationVersion:bindingVersion.current,
               }, { expectedUserId:userId, operationContext:context });
-              if (ticket === generation.current && context) {
-                assertServerOperationContext(context);
+              if (!isCurrent()) return;
+              if (typeof policy?.enabled !== 'boolean' || !UUID.test(policy.policyVersion || ''))
+                throw new Error('Invalid device detail policy.');
+              if (isCurrent() && context) {
                 const stored = await observeDetailSelector().catch(() => null);
-                if (ticket === generation.current) setDetailEnabled(policy.enabled === true
-                  && stored?.selector?.sessionName === context.sessionName
-                  && stored.selector.installationVersion === bindingVersion.current
-                  && stored.selector.policyVersion === policy.policyVersion);
+                if (isCurrent()) {
+                  const selectorCurrent = stored ? stored?.selector?.sessionName === context.sessionName
+                    && stored.selector.installationVersion === bindingVersion.current
+                    && stored.selector.policyVersion === policy.policyVersion : null;
+                  setDetailPolicyEnabled(policy.enabled);
+                  setDetailSelectorCurrent(selectorCurrent);
+                  setDetailEnabled(policy.enabled && selectorCurrent === true);
+                }
               }
             }
           }
         });
       } catch {
-        if (ticket === generation.current) setError('Could not load notification settings. Please retry.');
-      } finally { if (ticket === generation.current) setLoading(false); }
+        if (isCurrent()) setError('Could not load notification settings. Please retry.');
+      } finally { if (isCurrent()) setLoading(false); }
     })();
     return () => { generation.current++; busyRef.current = null; };
   }, [userId, supported, coordinated, reloadKey]);
@@ -141,6 +164,7 @@ export default function Notifications({ userId, organisationId }) {
       assertDetailAction(context,ticket);
       if (!subscription) {
         bindingVersion.current = null; setBindingCurrent(false); setRegistered(false); setDetailEnabled(false);
+        setDetailPolicyEnabled(null); setDetailSelectorCurrent(null);
         return { subscribed:false, bound:false, enabled:false, serverEnabled:false };
       }
       const status = await pushRequest('status', { endpoint:subscription.endpoint },
@@ -149,20 +173,26 @@ export default function Notifications({ userId, organisationId }) {
       setRegistered(status.registered === true ? true : status.registered === false ? false : null);
       if (status.boundToCurrentSession !== true || !UUID.test(status.version || '')) {
         bindingVersion.current = null; setBindingCurrent(false); setDetailEnabled(false);
+        setDetailPolicyEnabled(null); setDetailSelectorCurrent(null);
         return { subscribed:status.registered === true, bound:false, enabled:false, serverEnabled:false };
       }
       bindingVersion.current = status.version;
       setBindingCurrent(true);
-      if (!detailAvailable) { setDetailEnabled(false);
+      if (!detailAvailable) { setDetailEnabled(false); setDetailPolicyEnabled(null); setDetailSelectorCurrent(null);
         return { subscribed:true, bound:true, enabled:false, serverEnabled:false }; }
       const policy = await pushRequest('detail-policy/status', {
         endpoint:subscription.endpoint, installationVersion:status.version,
       }, { expectedUserId:userId, operationContext:context });
+      if (typeof policy?.enabled !== 'boolean' || !UUID.test(policy.policyVersion || ''))
+        throw new Error('Invalid device detail policy.');
       const selector = await observeDetailSelector().catch(() => null);
       assertDetailAction(context,ticket);
-      const enabled = policy.enabled === true && selector?.selector?.sessionName === context.sessionName
+      const selectorCurrent = selector ? selector?.selector?.sessionName === context.sessionName
         && selector.selector.installationVersion === status.version
-        && selector.selector.policyVersion === policy.policyVersion;
+        && selector.selector.policyVersion === policy.policyVersion : null;
+      const enabled = policy.enabled && selectorCurrent === true;
+      setDetailPolicyEnabled(policy.enabled);
+      setDetailSelectorCurrent(selectorCurrent);
       setDetailEnabled(enabled);
       return { subscribed:true, bound:true, enabled, serverEnabled:policy.enabled === true };
     });
@@ -232,6 +262,7 @@ export default function Notifications({ userId, organisationId }) {
       if (context) assertServerOperationContext(context);
       if (serverManagedAuth && ticket === generation.current) {
         bindingVersion.current = committed.version; setBindingCurrent(true);
+        setDetailEnabled(false); setDetailPolicyEnabled(null); setDetailSelectorCurrent(null);
       }
     });
     if (ticket !== generation.current) { void reconcilePushAccount().catch(() => {}); return; }
@@ -246,7 +277,8 @@ export default function Notifications({ userId, organisationId }) {
       operationContext:context });
     if (ticket !== generation.current) return;
     setRegistered(false);
-    setDetailEnabled(false); bindingVersion.current = null; setBindingCurrent(false);
+    setDetailEnabled(false); setDetailPolicyEnabled(null); setDetailSelectorCurrent(null);
+    bindingVersion.current = null; setBindingCurrent(false);
     setNotice(result?.state === 'absent'
       ? 'This account has no registered notification subscription on this device.'
       : 'Notifications are disabled on this device.');
@@ -257,7 +289,9 @@ export default function Notifications({ userId, organisationId }) {
       if (ticket !== generation.current) return;
       const subscription = await currentPushSubscription();
       if (ticket !== generation.current) return;
-      if (!subscription) { setRegistered(false); throw new Error('This device is no longer subscribed. Enable notifications again.'); }
+      if (!subscription) { setRegistered(false); setDetailEnabled(false);
+        setDetailPolicyEnabled(null); setDetailSelectorCurrent(null);
+        throw new Error('This device is no longer subscribed. Enable notifications again.'); }
       try { await pushRequest('test', { endpoint: subscription.endpoint },
         { expectedUserId: userId, operationContext:context }); }
       catch (caught) {
@@ -299,7 +333,8 @@ export default function Notifications({ userId, organisationId }) {
         <MorningSummaryPanel userId={userId} organisationId={organisationId}
           detailDevice={serverManagedAuth ? {
             available:detailAvailable, registered, bound:bindingCurrent,
-            enabled:detailEnabled, loading, busy,
+            enabled:detailEnabled, policyEnabled:detailPolicyEnabled,
+            selectorCurrent:detailSelectorCurrent, loading, busy,
             perform:performDetailAction, read:readDetailPolicy, setPolicy:changeDetailPolicy,
           } : null} />
       </div>

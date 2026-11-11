@@ -4,6 +4,8 @@ import { createMorningSummaryDelivery } from './delivery.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const HASH = /^[0-9a-f]{64}$/;
+const MAX_DISPLAY_PERIODS = 5;
+const MAX_DISPLAY_EVENTS = 2;
 const unavailable = () => new Error('Notification detail is unavailable.');
 
 // The caller supplies only selectors. The session and owner come from the
@@ -47,10 +49,10 @@ export function createMorningSummaryDetailService({ config = env, createClientIm
         || !Array.isArray(summary.lessons) || !Array.isArray(summary.events)) throw unavailable();
       return {
         date: summary.date, week: summary.week,
-        lessons: current.lessonDetailConsent ? summary.lessons.map(lesson => ({ period: lesson.period,
+        lessons: current.lessonDetailConsent ? summary.lessons.slice(0, MAX_DISPLAY_PERIODS).map(lesson => ({ period: lesson.period,
           className: lesson.className, title: lesson.title, isPpa: lesson.isPpa })) : [],
         events: current.eventTitleConsent
-          ? summary.events.map(event => ({ title: event.title })) : [],
+          ? summary.events.slice(0, MAX_DISPLAY_EVENTS).map(event => ({ title: event.title })) : [],
         lessonDetailsIncluded: current.lessonDetailConsent,
         eventTitlesIncluded: current.eventTitleConsent,
       };

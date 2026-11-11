@@ -33,6 +33,11 @@ export const eventApi = { list: async (academicYearId, options) => {
   return { events: [] };
 } };
 const preferencesByUser = new Map();
+if (window.name === 'plannix-notification-detail-reload') preferencesByUser.set(
+  'ca000000-0000-4000-8000-000000000001',
+  { enabled:true, deliveryTime:'08:50', revision:100,
+    academicYearId:'cb000000-0000-4000-8000-000000000010',
+    lessonDetailConsent:true, eventTitleConsent:false });
 const currentPreference = userId => preferencesByUser.get(userId) || { enabled: false, deliveryTime: '07:00', revision: 0,
   academicYearId: null, lessonDetailConsent: false, eventTitleConsent: false };
 window.setSummaryPreference = (userId, value) => preferencesByUser.set(userId, value);
