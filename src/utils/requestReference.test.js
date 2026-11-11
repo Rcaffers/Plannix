@@ -111,7 +111,7 @@ test('stale recurring and dated results cannot replace a newer load or its suppo
     const callback = source.slice(callbackStart, callbackEnd + 4)
       .replaceAll('import.meta.env.MODE', JSON.stringify('test'));
     const pending = [];
-    const state = { recurring: null, dated: null, ready: false, revision: null,
+    const state = { recurring: null, dated: null, ready: false, loadedScope:null, revision: null,
       loading: false, error: '', reference: '', saved: false, conflict: false, unsaved: false };
     const setters = Object.fromEntries(Object.keys(state).map(key => [key,
       value => { state[key] = value; }]));
@@ -119,11 +119,13 @@ test('stale recurring and dated results cannot replace a newer load or its suppo
     const datedLoadGeneration = { current: 0 };
     const dependencies = {
       scope: { organisationId: 'organisation', academicYearId: 'year', timetableId: 'timetable' },
+      recurringScopeKey:'scope',
       user: { id: 'user' }, resetSaveQueue: () => {}, recurringLoadGeneration,
       datedLoadGeneration, observeTimetableOperation: () => {}, safeRequestReference,
       serverManagedAuth: false, loadOperationContext: () => null, contextIsCurrent: () => true,
       [fetchName]: () => { const request = deferred(); pending.push(request); return request.promise; },
       setRecurring: setters.recurring, setRecurringReady: setters.ready,
+      setLoadedRecurringScopeKey:setters.loadedScope,
       setDated: setters.dated, setRevision: setters.revision,
       setIsLoading: setters.loading, setError: setters.error,
       setRequestReference: setters.reference, setSaved: setters.saved,
@@ -180,7 +182,7 @@ test('recurring and dated loads ignore stale session outcomes without changing n
     for (const transition of ['same-account', 'other-account', 'logout']) {
       for (const outcome of ['success', 'failure']) {
         const pending = [];
-        const state = { recurring:[{ weekId:'new' }], dated:{ collectionId:'new' }, ready:true,
+        const state = { recurring:[{ weekId:'new' }], dated:{ collectionId:'new' }, ready:true, loadedScope:'scope',
           revision:42, loading:false, error:'', reference:'', saved:false,
           conflict:false, unsaved:false };
         const setters = Object.fromEntries(Object.keys(state).map(key => [key,
@@ -190,6 +192,7 @@ test('recurring and dated loads ignore stale session outcomes without changing n
         const requests = [];
         const dependencies = {
           scope:{ organisationId:'org', academicYearId:'year', timetableId:'table' },
+          recurringScopeKey:'scope',
           user:{ id:'user' }, resetSaveQueue:() => {},
           recurringLoadGeneration:{ current:0 }, datedLoadGeneration:{ current:0 },
           serverManagedAuth:true,
@@ -199,6 +202,7 @@ test('recurring and dated loads ignore stale session outcomes without changing n
           [fetchName]:(_scope, options) => { const request = deferred();
             requests.push(options.operationContext); pending.push(request); return request.promise; },
           setRecurring:setters.recurring, setRecurringReady:setters.ready,
+          setLoadedRecurringScopeKey:setters.loadedScope,
           setDated:setters.dated, setRevision:setters.revision,
           setIsLoading:setters.loading, setError:setters.error,
           setRequestReference:setters.reference, setSaved:setters.saved,
@@ -222,7 +226,7 @@ test('recurring and dated loads ignore stale session outcomes without changing n
         } else {
           assert.equal(await invoke(), false, `${name} does not start a load under another account or logout`);
           assert.equal(requests.length, 1);
-          Object.assign(state, { recurring:[{ weekId:'new' }], dated:{ collectionId:'new' },
+          Object.assign(state, { recurring:[{ weekId:'new' }], dated:{ collectionId:'new' }, loadedScope:'scope',
             ready:true, revision:42, loading:false, error:'', reference:'', saved:false,
             conflict:false, unsaved:false });
         }

@@ -353,6 +353,11 @@ try {
     'validated same-tab login does not start a redundant restoration');
   assert.equal(postLoginBootstrapCount,0,
     'the same-tab login sends no second bootstrap request');
+  await evaluate("document.querySelector('a[href=\"/setup\"]').click()");
+  await waitFor("document.querySelector('.setup-progress')?.textContent.includes('4 of 4')",
+    'real App checklist recognises the saved year, layout, class and lesson');
+  await evaluate("document.querySelector('a[href=\"/timetable\"]').click()");
+  await waitFor("location.pathname==='/timetable'",'return to timetable after setup review');
   heldMemberships.shift().release();
   holdPostLoginBootstrap=false;
   current=null;

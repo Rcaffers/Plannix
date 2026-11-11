@@ -434,6 +434,19 @@ try {
   })()`);
   assert.equal(blockedYearWrite,409,'production academic-year route rejects A context under B cookie');
   assert.equal(mutations.length,0,'the mismatched application request never reaches its RPC');
+  await visit('/setup');
+  await waitFor("Boolean(document.querySelector('.setup-progress'))");
+  assert.equal(await evaluate("document.querySelector('.setup-progress').textContent.includes('0 of 4')"),true,
+    'the real App checklist does not count page visits or unsaved defaults');
+  assert.equal(await evaluate("[...document.querySelectorAll('.main-nav a')].some(a=>a.getAttribute('href')==='/setup')"),true,
+    'the checklist remains reachable through primary navigation');
+  for(const width of [320,375,390]){
+    await cdp('Emulation.setDeviceMetricsOverride',{width,height:850,deviceScaleFactor:1,mobile:true},tab);
+    const size=await evaluate('({viewport:innerWidth,content:document.documentElement.scrollWidth})');
+    assert.ok(size.content<=size.viewport+1,`real App setup checklist overflows at ${width}px`);
+  }
+  assert.equal(await evaluate("document.querySelector('.setup-checklist-item a')?.tabIndex"),0,
+    'checklist links remain in keyboard tab order while cookie-consent focus priority is respected');
   console.log('Stage 4 Chrome proof passed: auth, cookie API, Profile reconciliation without focus, deletion disposal, Retry, timeout and account switching.');
 } catch(error) { testFailure=error; } finally {
   const cleanupErrors=[];

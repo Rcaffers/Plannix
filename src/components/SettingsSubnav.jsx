@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 
 export const SETTINGS_SUBNAV_ITEMS = [
+  { to: '/setup', end: true, label: 'Setup checklist' },
   { to: '/settings', end: true, label: 'Timetable settings' },
   { to: '/settings/academic-year', label: 'Academic year' },
   { to: '/settings/events', label: 'Events' },

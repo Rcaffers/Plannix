@@ -54,6 +54,7 @@ export default function Header({
   const navLinks = user
     ? [
         { label: 'Timetable', to: '/timetable' },
+        { label: 'Set up your planner', to: '/setup' },
         { label: 'Contact', to: '/contact' },
       ]
     : headerNavLinks;
@@ -377,6 +378,14 @@ export default function Header({
                         Organisation controls
                       </Link>
                     ) : null}
+                    <Link
+                      className="nav-user-dropdown-item"
+                      role="menuitem"
+                      to="/setup"
+                      onClick={() => setIsUserMenuOpen(false)}
+                    >
+                      Setup checklist
+                    </Link>
                     <Link
                       className="nav-user-dropdown-item"
                       role="menuitem"

@@ -13,6 +13,7 @@ export function TimetableLayoutProvider({ children, user }) {
   const [authoritativeLayout, setAuthoritativeLayout] = useState(null);
   const [draft, setDraftState] = useState(createDefaultLayoutDraft);
   const [isPersisted, setIsPersisted] = useState(false);
+  const [loadedAcademicYearId, setLoadedAcademicYearId] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
@@ -37,6 +38,7 @@ export function TimetableLayoutProvider({ children, user }) {
   const clearUserLayout = useCallback(() => {
     generation.current += 1; saving.current = false;
     setAuthoritativeLayout(null); setDraftState(createDefaultLayoutDraft()); setIsPersisted(false);
+    setLoadedAcademicYearId(null);
     setIsLoading(false); setIsSaving(false); setError(''); setRequestReference(''); setSuccess('');
   }, []);
 
@@ -53,6 +55,7 @@ export function TimetableLayoutProvider({ children, user }) {
       } else {
         setAuthoritativeLayout(result.layout); setDraftState(editableLayout(result.layout)); setIsPersisted(true);
       }
+      setLoadedAcademicYearId(selectedAcademicYearId);
       setRequestReference('');
       return true;
     } catch (loadError) {
@@ -86,6 +89,7 @@ export function TimetableLayoutProvider({ children, user }) {
         authoritativeLayout?.timetableId || null, authoritativeLayout?.revision || 0, draft);
       if (expectedGeneration !== generation.current) return null;
       setAuthoritativeLayout(result.layout); setDraftState(editableLayout(result.layout)); setIsPersisted(true);
+      setLoadedAcademicYearId(selectedAcademicYearId);
       setRequestReference(''); setSuccess('Timetable layout saved.');
       return result.layout;
     } catch (saveError) {
@@ -99,12 +103,12 @@ export function TimetableLayoutProvider({ children, user }) {
   const layout = normalizeLayout(authoritativeLayout || createDefaultLayoutDraft());
   const value = useMemo(() => ({
     layout, authoritativeLayout, draft, setDraft, setLayout: setDraft, resetLayout, clearUserLayout,
-    save, reload: () => load({ confirmDirty: true }), dirty, isPersisted, isLoading, isSaving,
+    save, reload: () => load({ confirmDirty: true }), dirty, isPersisted, loadedAcademicYearId, isLoading, isSaving,
     error, success, requestReference, timetableId: authoritativeLayout?.timetableId || null,
     revision: authoritativeLayout?.revision ?? 0, weeks: authoritativeLayout?.weeks || [],
     periods: authoritativeLayout?.periods || [], dayLabels: buildDayColumnLabels(layout), rowSegments: buildRowSegments(layout),
   }), [layout, authoritativeLayout, draft, setDraft, resetLayout, clearUserLayout, save, load,
-    dirty, isPersisted, isLoading, isSaving, error, success, requestReference]);
+    dirty, isPersisted, loadedAcademicYearId, isLoading, isSaving, error, success, requestReference]);
   return <TimetableLayoutContext.Provider value={value}>{children}</TimetableLayoutContext.Provider>;
 }
 

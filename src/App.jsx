@@ -23,6 +23,8 @@ import { beginPushSignOut, disableCurrentDevice, reconcilePushAccount } from './
 import Reports from './pages/Reports';
 import Classes from './pages/Classes';
 import Timetable from './pages/Timetable';
+import SetupChecklist from './pages/SetupChecklist';
+import SetupGuide from './components/SetupGuide';
 import TermsGate from './pages/TermsGate';
 import PrivacyGate from './pages/PrivacyGate';
 import TermsModal from './modals/TermsModal';
@@ -409,15 +411,16 @@ export default function App() {
             <Route path="/privacy" element={<PrivacyGate />} />
             <Route
               path="/settings"
-              element={privateRoute(<Settings />)}
+              element={privateRoute(<SetupGuide userId={user?.id} stepId="layout"><Settings /></SetupGuide>)}
             />
+            <Route path="/setup" element={privateRoute(<SetupChecklist userId={user?.id} />)} />
             <Route
               path="/profile"
-              element={privateRoute(serverManagedAuth ? <ProfileSessionGate
+              element={privateRoute(<SetupGuide userId={user?.id} stepId="ai">{serverManagedAuth ? <ProfileSessionGate
                 key={profileKey} verify={(options) => authController.verifyProfileEntry(options)}
                 onVerified={handleProfileVerification}>
                 {profilePage}
-              </ProfileSessionGate> : profilePage)}
+              </ProfileSessionGate> : profilePage}</SetupGuide>)}
             />
             <Route
               path="/organisation-controls"
@@ -429,12 +432,12 @@ export default function App() {
                 />,
               )}
             />
-            <Route path="/settings/academic-year" element={privateRoute(<AcademicYear userId={user?.id} />)} />
+            <Route path="/settings/academic-year" element={privateRoute(<SetupGuide userId={user?.id} stepId="year"><AcademicYear userId={user?.id} /></SetupGuide>)} />
             <Route path="/settings/events" element={privateRoute(<Events userId={user?.id} />)} />
-            <Route path="/settings/notifications" element={privateRoute(<Notifications userId={user?.id} organisationId={user?.organisationId} />)} />
+            <Route path="/settings/notifications" element={privateRoute(<SetupGuide userId={user?.id} stepId="notifications"><Notifications userId={user?.id} organisationId={user?.organisationId} /></SetupGuide>)} />
             <Route path="/reports" element={privateRoute(<Reports user={user} />)} />
-            <Route path="/classes" element={privateRoute(<Classes />)} />
-            <Route path="/classes/input" element={privateRoute(<Classes />)} />
+            <Route path="/classes" element={privateRoute(<SetupGuide userId={user?.id} stepId="classes"><Classes /></SetupGuide>)} />
+            <Route path="/classes/input" element={privateRoute(<SetupGuide userId={user?.id} stepId="placements"><Classes /></SetupGuide>)} />
             <Route
               path="/timetable"
               element={privateRoute(<Timetable userId={user?.id} />)}

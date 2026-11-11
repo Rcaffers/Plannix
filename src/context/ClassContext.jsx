@@ -17,6 +17,7 @@ export function ClassProvider({ children, user }) {
   const organisationId = user?.organisationId || null;
   const { selectedAcademicYearId, registerAcademicYearChangeGuard } = useAcademicYear();
   const [authoritativeEntries, setAuthoritativeEntries] = useState(null);
+  const [loadedAcademicYearId, setLoadedAcademicYearId] = useState(null);
   const [entries, setEntriesState] = useState([]);
   const [revision, setRevision] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -44,6 +45,7 @@ export function ClassProvider({ children, user }) {
     generation.current += 1;
     saving.current = false;
     setAuthoritativeEntries(null);
+    setLoadedAcademicYearId(null);
     setEntriesState([]);
     setRevision(null);
     setIsLoading(false);
@@ -68,6 +70,7 @@ export function ClassProvider({ children, user }) {
       if (expectedGeneration !== generation.current) return false;
       const loaded = toDraftClasses(result.entries);
       setAuthoritativeEntries(loaded);
+      setLoadedAcademicYearId(selectedAcademicYearId);
       setEntriesState(loaded);
       setRevision(result.revision);
       setRequestReference('');
@@ -125,6 +128,7 @@ export function ClassProvider({ children, user }) {
       if (expectedGeneration !== generation.current) return false;
       const authoritative = toDraftClasses(result.entries);
       setAuthoritativeEntries(authoritative);
+      setLoadedAcademicYearId(selectedAcademicYearId);
       setEntriesState(authoritative);
       setRevision(result.revision);
       setRequestReference('');
@@ -146,6 +150,7 @@ export function ClassProvider({ children, user }) {
 
   const value = useMemo(() => ({
     authoritativeEntries,
+    loadedAcademicYearId,
     entries,
     revision,
     isLoaded: authoritativeEntries !== null,
@@ -161,7 +166,7 @@ export function ClassProvider({ children, user }) {
     save,
     reload: () => load({ confirmDiscard: true }),
     clearClasses: clear,
-  }), [authoritativeEntries, entries, revision, isLoading, isSaving, dirty, error,
+  }), [authoritativeEntries, loadedAcademicYearId, entries, revision, isLoading, isSaving, dirty, error,
     requestReference, saved, updateEntries, addClass, removeClass, save, load, clear]);
 
   return <ClassContext.Provider value={value}>{children}</ClassContext.Provider>;
