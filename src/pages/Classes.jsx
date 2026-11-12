@@ -222,7 +222,7 @@ export default function Classes() {
               </div>
 
               <div className="classes-actions">
-                <button type="submit" className="classes-save" disabled={!isLoaded || isLoading || isSaving || !dirty}>
+                <button type="submit" className="classes-save" disabled={!isLoaded || isLoading || isSaving}>
                   Save classes
                 </button>
               </div>

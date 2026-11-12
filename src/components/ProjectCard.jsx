@@ -32,6 +32,7 @@ import { useWeekendEventsPreference } from '../hooks/useWeekendEventsPreference.
 import { serverManagedAuth, captureServerOperationContext,
   assertServerOperationContext } from '../utils/serverAuthTransport.js';
 import { prepareTimetableSnapshots } from '../utils/timetableOperationContext.js';
+import { beginSetupGuidanceSave, finishSetupGuidanceSave } from '../utils/setupGuidance.js';
 import { observeTimetableOperation } from '../utils/timetableTestObserver.js';
 import './ProjectCard.css';
 
@@ -366,6 +367,20 @@ export default function ProjectCard({
   const [isEditingClasses, setIsEditingClasses] = useState(() =>
     enableEditing ? loadTimetableEditModeFromStorage() : false,
   );
+  const finishPlacementRef = useRef(null);
+
+  useEffect(() => {
+    const ticket = finishPlacementRef.current;
+    if (!ticket) return;
+    if (ticket.userId !== sessionState.userId || sessionState.error || sessionState.conflict) {
+      finishPlacementRef.current = null;
+      return;
+    }
+    if (sessionState.isSaving || sessionState.unsaved || sessionState.isLoading) return;
+    finishPlacementRef.current = null;
+    if (sessionState.recurringReady && sessionState.saved && finishSetupGuidanceSave(ticket)) setIsEditingClasses(false);
+  }, [sessionState.userId, sessionState.isSaving, sessionState.unsaved, sessionState.isLoading,
+    sessionState.error, sessionState.conflict, sessionState.recurringReady, sessionState.saved]);
 
   const modalSession =
     modalSlot == null ? null : findSessionAt(sessions, modalSlot.day, modalSlot.time) ?? null;
@@ -457,7 +472,18 @@ export default function ProjectCard({
 
   function toggleEditMode() {
     if (!enableEditing) return;
-    setIsEditingClasses((current) => !current);
+    if (!isEditingClasses) { setIsEditingClasses(true); return; }
+    if (!enableClassPlacement || weekMode !== 'fixed' || !sessionState.userId) {
+      setIsEditingClasses(false); return;
+    }
+    if (sessionState.error || sessionState.conflict || !sessionState.recurringReady) return;
+    const ticket = beginSetupGuidanceSave(sessionState.userId, 'placements');
+    if (sessionState.isSaving || sessionState.unsaved || sessionState.isLoading) {
+      finishPlacementRef.current = ticket;
+      return;
+    }
+    finishSetupGuidanceSave(ticket);
+    setIsEditingClasses(false);
   }
 
   function handleClearTimetable() {

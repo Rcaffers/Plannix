@@ -375,9 +375,7 @@ export default function MorningSummaryPanel({ userId, organisationId, detailDevi
           </select></div>
         <p className="settings-hint">Saved notification year: <strong>{year.academicYears.find(item => item.id === currentPreferences.value?.academicYearId)?.label || 'Not confirmed'}</strong></p>
         <button type="button" className="settings-save" disabled={currentPreferences.status !== 'ready' || saving || reloading || conflict
-          || !draft.academicYearId || (draft.enabled === currentPreferences.value.enabled
-            && draft.deliveryTime === currentPreferences.value.deliveryTime
-            && draft.academicYearId === currentPreferences.value.academicYearId)}
+          || !draft.academicYearId}
           onClick={savePreferences}>Save preferences</button>
       </div>
       {saveError ? <div className="settings-error" role="alert"><p>{saveError}</p>

@@ -6,6 +6,7 @@ import { flushSync } from 'react-dom';
 import ProjectCard from './ProjectCard.jsx';
 import Timetable from '../pages/Timetable.jsx';
 import { writeWeekendEventsPreference } from '../utils/weekendEventPreference.js';
+import { restoreSetupGuidance, setupGuidancePreference } from '../utils/setupGuidance.js';
 import '../App.css';
 
 const entries = [{ id: '7a', name: '7A', frequency: 3 },
@@ -25,7 +26,7 @@ let state;
 export const useTimetableSessions = () => state;
 const initial = { id: 'lesson', day: 0, periodId: 'p1', classId: '7a', title: 'Fractions', notes: 'Rulers' };
 let calls = [];
-let allowEditing = true, testPageSpacing = false, fixtureUserId = null;
+let allowEditing = true, testPageSpacing = false, fixtureUserId = null, fixtureSetupUserId = null;
 let feedbackUpdate, observeSave = false, retryCalls = 0, reloadCalls = 0;
 const scope = {}; const loadedDates = []; let mode = 'date';
 function Harness() {
@@ -33,7 +34,7 @@ function Harness() {
   const [sessions, setSessions] = useState([initial]);
   const [weekB, setWeekB] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState('A');
-  state = { ...feedback, retry() { retryCalls++; }, reload() { reloadCalls++; }, scope, revision: 1, periods, recurringReady: true, dated: { sessions, overrideExists: feedback.overrideExists }, loadDate(date) { loadedDates.push(date); }, recurring: [{ code: 'A', weekId: 'A', sessions }, { code: 'B', weekId: 'B', sessions: weekB }],
+  state = { ...feedback, userId: fixtureSetupUserId, retry() { retryCalls++; }, reload() { reloadCalls++; }, scope, revision: 1, periods, recurringReady: true, dated: { sessions, overrideExists: feedback.overrideExists }, loadDate(date) { loadedDates.push(date); }, recurring: [{ code: 'A', weekId: 'A', sessions }, { code: 'B', weekId: 'B', sessions: weekB }],
     edit(target, next) { if (observeSave) setFeedback({ isSaving: true }); calls.push({ target, sessions: next }); if (target.weekId === 'B') setWeekB(next); else setSessions(next); return true; } };
   if (testPageSpacing) return <>
     <header id="site-header-fixture" style={{ height: 64 }}>Site navigation</header>
@@ -641,6 +642,57 @@ async function run() {
       'Long-content row grows matching weekday tiles together and keeps all day columns equal');
     }
   }
+
+  fixtureSetupUserId = 'setup-placement-user'; mode = 'fixed'; allowEditing = true;
+  restoreSetupGuidance(fixtureSetupUserId); mount(); await tick();
+  let finish = [...document.querySelectorAll('.schedule-titlebar-actions button')]
+    .find(button => button.textContent === 'Finish editing');
+  if (!finish) click([...document.querySelectorAll('.schedule-titlebar-actions button')]
+    .find(button => button.textContent === 'Edit classes'));
+  flushSync(() => feedbackUpdate({ isSaving:true, unsaved:true }));
+  finish = [...document.querySelectorAll('.schedule-titlebar-actions button')]
+    .find(button => button.textContent === 'Finish editing');
+  click(finish);
+  check(setupGuidancePreference(fixtureSetupUserId, 'placements') === 'shown'
+    && document.querySelector('.schedule-card--editing, .project-card--editing'),
+  'Finish editing keeps guidance and the draft while its save is pending');
+  flushSync(() => feedbackUpdate({ isSaving:false, unsaved:true, error:'Save failed' })); await tick();
+  check(setupGuidancePreference(fixtureSetupUserId, 'placements') === 'shown'
+    && document.querySelector('.project-card--editing') && document.querySelector('.lesson-card--placed'),
+  'failed placement save keeps guidance and editing available');
+  flushSync(() => feedbackUpdate({ isSaving:false, unsaved:false, error:'' })); await tick();
+  click([...document.querySelectorAll('.schedule-titlebar-actions button')]
+    .find(button => button.textContent === 'Finish editing'));
+  check(setupGuidancePreference(fixtureSetupUserId, 'placements') === 'completed',
+    'Finish editing clears restored placement guidance after saves settle');
+  restoreSetupGuidance(fixtureSetupUserId);
+  click([...document.querySelectorAll('.schedule-titlebar-actions button')]
+    .find(button => button.textContent === 'Edit classes'));
+  flushSync(() => feedbackUpdate({ isSaving:true, unsaved:true }));
+  click([...document.querySelectorAll('.schedule-titlebar-actions button')]
+    .find(button => button.textContent === 'Finish editing'));
+  flushSync(() => feedbackUpdate({ isSaving:false, unsaved:false, saved:true })); await tick();
+  check(setupGuidancePreference(fixtureSetupUserId, 'placements') === 'completed'
+    && !document.querySelector('.project-card--editing'),
+  'a held Finish completes only after the pending placement save succeeds');
+  restoreSetupGuidance(fixtureSetupUserId);
+  click([...document.querySelectorAll('.schedule-titlebar-actions button')]
+    .find(button => button.textContent === 'Edit classes'));
+  flushSync(() => feedbackUpdate({ isSaving:true, unsaved:true }));
+  click([...document.querySelectorAll('.schedule-titlebar-actions button')]
+    .find(button => button.textContent === 'Finish editing'));
+  restoreSetupGuidance(fixtureSetupUserId);
+  flushSync(() => feedbackUpdate({ isSaving:false, unsaved:false, saved:true })); await tick();
+  check(setupGuidancePreference(fixtureSetupUserId, 'placements') === 'shown'
+    && document.querySelector('.project-card--editing'),
+  'a pre-restoration Finish cannot consume newly restored placement guidance');
+  flushSync(() => feedbackUpdate({ isSaving:true, unsaved:true, saved:false }));
+  click([...document.querySelectorAll('.schedule-titlebar-actions button')]
+    .find(button => button.textContent === 'Finish editing'));
+  flushSync(() => feedbackUpdate({ isSaving:false, unsaved:false, saved:false })); await tick();
+  check(setupGuidancePreference(fixtureSetupUserId, 'placements') === 'shown'
+    && document.querySelector('.project-card--editing'),
+  'a reset that clears pending flags without a successful save keeps guidance and edits');
 
 }
 run().then(() => { parent.document.body.dataset.testResult='passed'; }, error => { parent.document.body.dataset.testResult='failed'; results.push(error.stack); }).finally(() => {

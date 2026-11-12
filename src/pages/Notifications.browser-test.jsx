@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import Notifications from './Notifications.jsx';
+import { restoreSetupGuidance, setupGuidancePreference } from '../utils/setupGuidance.js';
 import { serverManagedAuth, invalidateServerSessionContext,
   setServerSessionContext } from '../utils/serverAuthTransport.js';
 import '../styles/base.css';
@@ -185,9 +186,24 @@ const chooseTime = value => {
     'saving explicitly confirms the notification academic year');
   check(window.summaryPreferenceSaves.at(-1).revision === 0, 'first save uses absent-row revision');
   check(document.body.textContent.includes('Morning summaries are not active yet'), 'saved opt-in still does not imply activation');
+  const notificationUser = 'ca000000-0000-4000-8000-000000000001';
+  restoreSetupGuidance(notificationUser);
+  window.summaryPreferenceFailSave = true;
+  button('Save preferences').click();
+  await waitFor(() => document.body.textContent.includes('Could not save morning summary preferences'),
+    'failed unchanged-value preference save');
+  check(setupGuidancePreference(notificationUser, 'notifications') === 'shown'
+    && !button('Save preferences').disabled,
+  'failed unchanged-value save retains restored guidance and allows retry');
+  const unchangedSaves = window.summaryPreferenceSaves.length;
+  check(!button('Save preferences').disabled, 'loaded unchanged preferences can be confirmed again');
+  button('Save preferences').click(); await tick();
+  check(window.summaryPreferenceSaves.length === unchangedSaves + 1
+    && setupGuidancePreference(notificationUser, 'notifications') === 'completed',
+  'successful unchanged-value save clears restored notification guidance');
   chooseTime('08:20'); await tick();
   window.setSummaryPreference('ca000000-0000-4000-8000-000000000001',
-    { enabled: true, deliveryTime: '06:30', revision: 2,
+    { enabled: true, deliveryTime: '06:30', revision: 3,
       academicYearId: 'cb000000-0000-4000-8000-000000000010' });
   button('Save preferences').click(); await tick();
   check(document.body.textContent.includes('Preferences changed elsewhere')
@@ -219,7 +235,7 @@ const chooseTime = value => {
     && !document.body.textContent.includes('Preferences changed elsewhere'),
   'successful confirmed reload adopts the canonical revision');
   chooseTime('08:45'); await tick(); button('Save preferences').click(); await tick();
-  check(window.summaryPreferenceSaves.at(-1).revision === 2, 'post-reload save uses current revision');
+  check(window.summaryPreferenceSaves.at(-1).revision === 3, 'post-reload save uses current revision');
   chooseDate('2026-11-02'); await tick(); await tick();
   check(document.querySelector('.morning-preview-content')?.textContent.includes('P1 — 7A — Fractions'), 'weekday preview uses saved dated lesson');
   window.summaryFailWeek = '2026-11-23';
