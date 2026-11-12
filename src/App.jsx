@@ -14,7 +14,7 @@ import Contact from './pages/Contact';
 import ResetPassword from './pages/ResetPassword';
 import Settings from './pages/Settings';
 import Profile from './pages/Profile';
-import ProfileSessionGate from './components/ProfileSessionGate';
+import ProfileSessionGate, { ProfileVerificationView } from './components/ProfileSessionGate';
 import OrganisationControls from './pages/OrganisationControls';
 import AcademicYear from './pages/AcademicYear';
 import Events from './pages/Events';
@@ -296,6 +296,12 @@ export default function App() {
 
   const privateRoute = (element) => {
     if (serverManagedAuth && sessionVerificationError) {
+      if (matchPath({ path: '/profile', end: true }, location.pathname))
+        return <ProfileVerificationView error onRetry={() => {
+          setSessionVerificationError(false);
+          setIsAuthLoading(true);
+          window.dispatchEvent(new Event('plannix-server-session-change'));
+        }} />;
       return <main role="alert">
         <p>Your current session could not be confirmed. Retry the session check.</p>
         <button type="button" onClick={() => {
@@ -307,6 +313,8 @@ export default function App() {
     }
     const state = privateRouteState({ isAuthLoading, user });
     if (state === 'loading') {
+      if (serverManagedAuth && matchPath({ path: '/profile', end: true }, location.pathname))
+        return <ProfileVerificationView />;
       return <main aria-busy="true"><p role="status" className="visually-hidden">Checking your session…</p></main>;
     }
     if (state === 'public') {
@@ -330,9 +338,11 @@ export default function App() {
     return result;
   };
 
-  const profileKey = serverManagedAuth && location.pathname === '/profile' && user
+  const profileRoute = serverManagedAuth && !!matchPath({ path: '/profile', end: true }, location.pathname);
+  const profileKey = profileRoute && user
     ? `${profileVisit.current.index}:${user.id}:${authController.currentSessionName() || 'unverified'}` : null;
   const profilePending = !!profileKey && verifiedProfileKey !== profileKey;
+  const profileVerificationPending = profileRoute && (isAuthLoading || profilePending || sessionVerificationError);
   const handleProfileVerification = (result) => {
     if (result.state === 'authenticated') {
       if (!authController.isCurrentUser(result.user)) return false;
@@ -379,6 +389,7 @@ export default function App() {
             user={profilePending ? null : user}
             memberships={memberships}
             isAuthLoading={isAuthLoading || profilePending}
+            profileVerificationPending={profileVerificationPending}
             onLogin={handleLogin}
             onLogout={handleLogout}
             onLogoutAnyway={handleLogoutAnyway}
@@ -416,11 +427,11 @@ export default function App() {
             <Route path="/setup" element={privateRoute(<SetupChecklist userId={user?.id} />)} />
             <Route
               path="/profile"
-              element={privateRoute(<SetupGuide userId={user?.id} stepId="ai">{serverManagedAuth ? <ProfileSessionGate
+              element={privateRoute(serverManagedAuth ? <ProfileSessionGate
                 key={profileKey} verify={(options) => authController.verifyProfileEntry(options)}
                 onVerified={handleProfileVerification}>
-                {profilePage}
-              </ProfileSessionGate> : profilePage}</SetupGuide>)}
+                <SetupGuide userId={user?.id} stepId="ai">{profilePage}</SetupGuide>
+              </ProfileSessionGate> : <SetupGuide userId={user?.id} stepId="ai">{profilePage}</SetupGuide>)}
             />
             <Route
               path="/organisation-controls"
@@ -443,7 +454,7 @@ export default function App() {
               element={privateRoute(<Timetable userId={user?.id} />)}
             />
           </Routes>
-          <Footer user={profilePending ? null : user} />
+          <Footer user={profilePending ? null : user} profileVerificationPending={profileVerificationPending} />
           <TermsModal />
           <PrivacyModal />
           <CookieConsent />

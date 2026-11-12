@@ -7,6 +7,13 @@
   backdrop-filter: blur(8px);
 }
 
+.profile-header-pending {
+  color: #244b47;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: right;
+}
+
 .header-logout-error {
   display: flex;
   align-items: center;

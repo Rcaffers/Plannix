@@ -137,6 +137,9 @@ try {
     return Promise.resolve({data:organisation,error:null});}});
   registerServerAuthMembershipRoutes({app,requireAuth,createRequestClient});
   registerAcademicYearRoutes({app,requireAuth,createRequestClient});
+  app.get('/api/ai/connection',requireAuth,(_req,res)=>res.json({connection:{
+    provider:'openai',lastFour:'TEST',active:true,
+  }}));
   app.use(express.static(path.join(work,'dist')));
   app.get(/.*/,(req,res)=>res.sendFile(path.join(work,'dist','index.html')));
   server=createServer(app);
@@ -269,16 +272,57 @@ try {
     && item.userId===otherOwner && item.token===`synthetic-access-${otherOwner}`));
   const visit=path=>evaluate(`(() => {history.pushState(null,'',${JSON.stringify(path)});
     dispatchEvent(new PopStateEvent('popstate'));return true;})()`);
+  await visit('/setup');
+  await waitFor("Boolean([...document.querySelectorAll('button')].find(b=>b.textContent==='Show setup guidance again'))");
+  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Show setup guidance again').click()");
+  await waitFor("document.body.textContent.includes('Guidance is ready on each setup page')");
   holdStatusPurpose='profile-entry';holdProfileStatuses=1;
   await visit('/profile');
   await waitFor("document.body.textContent.includes('Checking your current session')");
-  await waitForHeldProfileStatus(1,'profile-entry');
+  const initialProfileHold=await waitForHeldProfileStatus(1,'profile-entry');
+  assert.equal(await evaluate(`(() => {
+    const main=document.querySelector('main.settings-page');
+    return Boolean(main?.querySelector('.settings-inner--wide .profile-card [role="status"]'))
+      && !document.querySelector('.setup-guide-wrap')
+      && !document.querySelector('.nav-login, .nav-signup, .nav-user-name, .nav-mobile-burger')
+      && ![...document.querySelectorAll('.footer-nav button')].some(b=>/Login|Sign up/.test(b.textContent));
+  })()`),true,'desktop Profile pending state is styled and reveals no account or guest navigation');
+  await cdp('Emulation.setDeviceMetricsOverride',{width:320,height:740,deviceScaleFactor:1,mobile:true},tab);
+  assert.equal(await evaluate(`(() => Boolean(document.querySelector('.profile-header-pending'))
+    && !document.querySelector('.nav-login, .mobile-nav-login, .nav-user-name, .nav-mobile-burger')
+    && document.documentElement.scrollWidth<=innerWidth+1)()`),true,
+    'mobile Profile pending state is neutral and fits the viewport');
+  await cdp('Emulation.clearDeviceMetricsOverride',{},tab);
   assert.equal(await evaluate("Boolean(document.querySelector('#personal-details-title'))"),false,
     'profile details stay hidden during initial verification');
   assert.equal(await evaluate("document.body.textContent.includes('Other Teacher')"),false,
     'the old account is not presented as confirmed during verification');
   heldProfileStatuses.shift().release();
-  await waitFor("Boolean(document.querySelector('#personal-details-title'))");
+  await awaitFinalDecision(initialProfileHold,'profile-gate-terminal');
+  await waitFor("Boolean(document.querySelector('#personal-details-title')) && Boolean(document.querySelector('.setup-guide-done'))");
+  assert.equal(await evaluate("document.querySelector('.setup-guide-done')?.textContent.trim()==='Saved.' && Boolean(document.querySelector('.nav-user-name'))"),true,
+    'restored AI guidance confirms the saved connection only after Profile verification');
+
+  // A new session for the same account invalidates the held visit without showing guest navigation.
+  await visit('/settings');
+  holdStatusPurpose='profile-entry';holdProfileStatuses=1;
+  await visit('/profile');
+  const replacedProfileHold=await waitForHeldProfileStatus(1,'profile-entry');
+  const replacementStatus=await evaluate(`(async()=>{
+    const status=await fetch('/__stage3/auth/status').then(r=>r.json());
+    return (await fetch('/__stage3/auth/login',{method:'POST',
+      headers:{'Content-Type':'application/json','X-Plannix-CSRF':status.csrfToken},
+      body:JSON.stringify({email:'other@example.test',password:'synthetic-password'})})).status;
+  })()`,secondTab);
+  assert.equal(replacementStatus,200);
+  await cdp('Target.activateTarget',{targetId:target.targetId});
+  await evaluate("dispatchEvent(new Event('focus'))");
+  await waitFor("Boolean(document.querySelector('.profile-header-pending'))");
+  assert.equal(await evaluate("!document.querySelector('.nav-login, .nav-user-name, .setup-guide-wrap')"),true,
+    'same-account replacement shows no guest navigation, stale identity, or guidance while pending');
+  heldProfileStatuses.shift().release();
+  await awaitFinalDecision(replacedProfileHold,'profile-gate-terminal');
+  await waitFor("Boolean(document.querySelector('#personal-details-title')) && Boolean(document.querySelector('.setup-guide-done'))");
 
   await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Delete account').click()");
   await waitFor("Boolean(document.querySelector('#delete-account-password'))");
@@ -320,6 +364,8 @@ try {
   await waitFor("document.body.textContent.includes('Retry session check')");
   assert.equal(profileFailures,1,'only the tagged Profile verification receives the outage');
   assert.equal(await evaluate("Boolean(document.querySelector('#personal-details-title'))"),false);
+  assert.equal(await evaluate("Boolean(document.querySelector('main.settings-page .profile-card [role=alert]')) && !document.querySelector('.nav-login, .nav-user-name, .setup-guide-wrap')"),true,
+    'failed Profile verification keeps neutral navigation and hides unverified guidance');
   await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Retry session check').click()");
   await waitFor("Boolean(document.querySelector('#personal-details-title'))");
   assert.equal(deletions,1,'entry Retry is status-only');
@@ -380,6 +426,9 @@ try {
   assert.equal(newerStatus.userId,owner,'the newer account is authoritative in shared cookies');
   await cdp('Target.activateTarget',{targetId:target.targetId});
   await evaluate("dispatchEvent(new Event('focus'))");
+  await waitFor("Boolean(document.querySelector('.profile-header-pending'))");
+  assert.equal(await evaluate("!document.querySelector('.nav-login, .nav-user-name, .setup-guide-wrap')"),true,
+    'cross-account replacement keeps navigation neutral and hides old guidance');
   const previousAccountHold=heldProfileStatuses.shift();previousAccountHold.release();
   await awaitFinalDecision(previousAccountHold,'profile-gate-terminal');
   await waitFor("Boolean(document.querySelector('#personal-details-title')) && !document.body.textContent.includes('Other Teacher')");

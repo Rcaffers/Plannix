@@ -4,6 +4,18 @@ import { authTestOperationId, observeAuthTestOperation } from '../utils/serverAu
 const CHECK_DEADLINE_MS = 5000;
 const UNKNOWN_MESSAGE = 'Your current session could not be confirmed. Retry the session check.';
 
+export function ProfileVerificationView({ error = false, onRetry }) {
+  return <main className="settings-page" aria-busy={!error}>
+    <div className="container settings-inner settings-inner--wide">
+      <section className="profile-card" aria-label="Personal profile session check">
+        {error ? <div role="alert"><p>{UNKNOWN_MESSAGE}</p>
+          <button type="button" onClick={onRetry}>Retry session check</button></div>
+          : <p role="status">Checking your current session…</p>}
+      </section>
+    </div>
+  </main>;
+}
+
 // The Profile route withholds account details until this visit's status is confirmed.
 export default function ProfileSessionGate({ verify, onVerified, children,
   deadlineMs = CHECK_DEADLINE_MS }) {
@@ -61,10 +73,5 @@ export default function ProfileSessionGate({ verify, onVerified, children,
   }, []);
 
   if (state === 'ready') return children;
-  return <main>
-    {state === 'checking'
-      ? <p role="status">Checking your current session…</p>
-      : <div role="alert"><p>{UNKNOWN_MESSAGE}</p>
-        <button type="button" onClick={check}>Retry session check</button></div>}
-  </main>;
+  return <ProfileVerificationView error={state === 'error'} onRetry={check} />;
 }

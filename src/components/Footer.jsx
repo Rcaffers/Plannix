@@ -29,7 +29,7 @@ function openPrivacyModal(event) {
   dispatchOpenPrivacyModal();
 }
 
-export default function Footer({ user }) {
+export default function Footer({ user, profileVerificationPending = false }) {
   return (
     <footer className="site-footer" id="footer">
       <div className="container footer-shell">
@@ -59,7 +59,7 @@ export default function Footer({ user }) {
             <div className="footer-nav-col">
               <h3 className="footer-nav-heading">Account</h3>
               <ul className="footer-nav-list">
-                {user ? (
+                {profileVerificationPending ? <li>Checking session…</li> : user ? (
                   <>
                     <li>
                       <Link to="/timetable">Timetable</Link>

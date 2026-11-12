@@ -20,6 +20,7 @@ export default function Header({
   user,
   memberships = [],
   isAuthLoading,
+  profileVerificationPending = false,
   onLogin,
   onLogout,
   onLogoutAnyway,
@@ -295,6 +296,15 @@ export default function Header({
       setIsSignupSubmitting(false);
     }
   };
+
+  if (profileVerificationPending) return <header className="site-header">
+    <div className="container nav-shell">
+      <Link className="brand" to="/" aria-label="Plannix Home">
+        <span className="brand-mark"><img className="brand-logo" src="/Plannix_logo.png" alt="Plannix" /></span>
+      </Link>
+      <span className="profile-header-pending">Checking session…</span>
+    </div>
+  </header>;
 
   return (
     <>
