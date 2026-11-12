@@ -46,6 +46,22 @@ test('navigation shows organisation controls conditionally while preserving plan
   assert.match(app, /path="\/reports" element=\{privateRoute\(<Reports user=\{user\} \/>\)\}/);
 });
 
+test('setup is absent from desktop and mobile primary links but remains in both account menus and a private route', async () => {
+  const [header, app] = await Promise.all([
+    fs.readFile(new URL('../components/Header.jsx', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../App.jsx', import.meta.url), 'utf8'),
+  ]);
+  const primary = header.slice(header.indexOf('const navLinks = user'), header.indexOf('const closeMobileNav'));
+  assert.doesNotMatch(primary, /\/setup|Set up your planner/);
+  assert.match(header, /main-nav--wide" aria-label="Primary navigation">\s*\{navLinks\.map/);
+  assert.match(header, /className="mobile-nav" aria-label="Site menu">\s*\{navLinks\.map/);
+  const desktopAccount = header.slice(header.indexOf('id="nav-user-menu-dropdown"'), header.indexOf('className="nav-user-dropdown-item" role="menuitem" to="/reports"'));
+  const mobileAccount = header.slice(header.indexOf('className="mobile-nav-account"'), header.indexOf('className="mobile-nav-settings-block"'));
+  assert.match(desktopAccount, /to="\/setup"[\s\S]*?Setup checklist/);
+  assert.match(mobileAccount, /to="\/setup"[\s\S]*?Setup checklist/);
+  assert.match(app, /path="\/setup" element=\{privateRoute\(<SetupChecklist userId=\{user\?\.id\} \/>\)\}/);
+});
+
 test('name and email default to independent read-only displays with explicit edit actions', async () => {
   const profile = await fs.readFile(new URL('../pages/Profile.jsx', import.meta.url), 'utf8');
   for (const field of ['Name', 'Email']) {

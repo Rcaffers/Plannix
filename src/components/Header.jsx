@@ -54,7 +54,6 @@ export default function Header({
   const navLinks = user
     ? [
         { label: 'Timetable', to: '/timetable' },
-        { label: 'Set up your planner', to: '/setup' },
         { label: 'Contact', to: '/contact' },
       ]
     : headerNavLinks;
@@ -494,6 +493,9 @@ export default function Header({
                     Organisation controls
                   </NavLink>
                 ) : null}
+                <NavLink to="/setup"
+                  className={({ isActive }) => `mobile-nav-link${isActive ? ' mobile-nav-link--active' : ''}`}
+                  onClick={closeMobileNav}>Setup checklist</NavLink>
                 <div className="mobile-nav-settings-block">
                   <button
                     type="button"

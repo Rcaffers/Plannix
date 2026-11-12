@@ -21,7 +21,7 @@ try {
       return null;
     }}],
     build:{outDir:directory,emptyOutDir:false,lib:{entry:'src/pages/SetupChecklist.browser-test.jsx',formats:['iife'],name:'SetupTest',fileName:()=>'test.js',cssFileName:'test'}} });
-  await writeFile(path.join(directory,'index.html'),'<html><head><link rel="stylesheet" href="test.css"></head><body><div id="root"></div><script>window.__testErrors=[];addEventListener("error",e=>window.__testErrors.push(e.message));</script><script src="test.js"></script></body></html>');
+  await writeFile(path.join(directory,'index.html'),'<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="test.css"></head><body><div id="root"></div><script>window.__testErrors=[];addEventListener("error",e=>window.__testErrors.push(e.message));</script><script src="test.js"></script></body></html>');
   chrome=spawn(process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     ['--headless','--allow-file-access-from-files','--disable-background-networking','--no-first-run',
       '--disable-gpu','--remote-debugging-port=0',`--user-data-dir=${directory}/profile`,`file://${directory}/index.html`],
@@ -70,6 +70,8 @@ try {
   await evaluate('window.__setupOptionalActive=false');
   await evaluate("document.querySelector('.setup-checklist-item:nth-child(3) a').click()");
   await waitFor("document.querySelector('.setup-guide-title')?.textContent==='Add your classes'");
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.setup-guide-footer a')].map(a=>({text:a.textContent,href:a.getAttribute('href')}))"),
+    [{text:'Setup checklist',href:'/setup'}], 'unfinished steps show only the checklist action');
   await evaluate("(() => {const field=document.querySelector('#fixture-class');const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;setter.call(field,'9A Maths');field.dispatchEvent(new Event('input',{bubbles:true}));})()");
   await waitFor("document.querySelector('#fixture-class')?.value==='9A Maths'");
   await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Fail save').click()");
@@ -97,6 +99,17 @@ try {
   await waitFor("document.body.textContent.includes('Guidance is ready on each setup page')");
   await evaluate("[...document.querySelectorAll('.setup-checklist-item')][0].querySelector('a').click()");
   await waitFor("Boolean(document.querySelector('.setup-guide'))");
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.setup-guide-footer a')].map(a=>({text:a.textContent,href:a.getAttribute('href')}))"),
+    [{text:'Next steps',href:'/settings'},{text:'Setup checklist',href:'/setup'}],
+    'saved steps keep their next destination and checklist destination');
+  assert.equal(await evaluate("(() => {const links=[...document.querySelectorAll('.setup-guide-footer a')];links[0].focus();return document.activeElement===links[0]&&getComputedStyle(links[0]).outlineStyle!=='none';})()"),true,
+    'the primary action is keyboard focusable with visible focus styling');
+  await send('Emulation.setDeviceMetricsOverride',{width:768,height:850,deviceScaleFactor:1,mobile:true},sessionId);
+  assert.equal(await evaluate("(() => {const [a,b]=document.querySelectorAll('.setup-guide-footer a');return Math.abs(a.getBoundingClientRect().top-b.getBoundingClientRect().top)<2;})()"),true,
+    'guide actions appear side by side where space permits');
+  await send('Emulation.setDeviceMetricsOverride',{width:320,height:850,deviceScaleFactor:1,mobile:true},sessionId);
+  assert.equal(await evaluate("(() => {const [a,b]=document.querySelectorAll('.setup-guide-footer a');const ar=a.getBoundingClientRect(),br=b.getBoundingClientRect();return br.top>=ar.bottom&&Math.abs(ar.width-br.width)<2&&document.documentElement.scrollWidth<=innerWidth+1;})()"),true,
+    'guide actions stack without overflow on narrow screens');
   await evaluate("window.__completeSetupStep('year')");
   await waitFor("!document.querySelector('.setup-guide-wrap')");
   await evaluate("[...document.querySelectorAll('main a')].find(a=>a.textContent==='Checklist').click()");

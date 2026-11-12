@@ -438,13 +438,26 @@ try {
   await waitFor("Boolean(document.querySelector('.setup-progress'))");
   assert.equal(await evaluate("document.querySelector('.setup-progress').textContent.includes('0 of 4')"),true,
     'the real App checklist does not count page visits or unsaved defaults');
-  assert.equal(await evaluate("[...document.querySelectorAll('.main-nav a')].some(a=>a.getAttribute('href')==='/setup')"),true,
-    'the checklist remains reachable through primary navigation');
+  assert.equal(await evaluate("[...document.querySelectorAll('.main-nav a')].some(a=>a.getAttribute('href')==='/setup')"),false,
+    'the checklist is absent from desktop primary navigation');
+  await evaluate("document.querySelector('#nav-user-menu-button').click()");
+  await waitFor("Boolean(document.querySelector('#nav-user-menu-dropdown a[href=\"/setup\"]'))");
+  assert.equal(await evaluate("document.querySelector('#nav-user-menu-dropdown a[href=\"/setup\"]')?.textContent.trim()"),
+    'Setup checklist','the desktop account dropdown retains the checklist');
+  await evaluate("document.querySelector('#nav-user-menu-button').click()");
   for(const width of [320,375,390]){
     await cdp('Emulation.setDeviceMetricsOverride',{width,height:850,deviceScaleFactor:1,mobile:true},tab);
     const size=await evaluate('({viewport:innerWidth,content:document.documentElement.scrollWidth})');
     assert.ok(size.content<=size.viewport+1,`real App setup checklist overflows at ${width}px`);
   }
+  await evaluate("document.querySelector('#mobile-nav-burger').click()");
+  await waitFor("document.querySelector('#mobile-nav-burger')?.getAttribute('aria-expanded')==='true'");
+  assert.equal(await evaluate("[...document.querySelectorAll('.mobile-nav a')].some(a=>a.getAttribute('href')==='/setup')"),false,
+    'the checklist is absent from mobile primary navigation');
+  assert.equal(await evaluate("document.querySelector('.mobile-nav-account a[href=\"/setup\"]')?.textContent.trim()"),
+    'Setup checklist','the mobile account menu retains the checklist');
+  await evaluate("document.querySelector('.mobile-nav-account a[href=\"/setup\"]').click()");
+  await waitFor("document.querySelector('#mobile-nav-burger')?.getAttribute('aria-expanded')==='false'");
   assert.equal(await evaluate("document.querySelector('.setup-checklist-item a')?.tabIndex"),0,
     'checklist links remain in keyboard tab order while cookie-consent focus priority is respected');
   console.log('Stage 4 Chrome proof passed: auth, cookie API, Profile reconciliation without focus, deletion disposal, Retry, timeout and account switching.');

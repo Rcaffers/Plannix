@@ -13,6 +13,13 @@
 .setup-guide-title, .setup-checklist h2 { margin: 0; color: #244b47; font-size: 1.05rem; font-weight: 700; }
 .setup-guide p { margin: 8px 0; }
 .setup-guide a, .setup-checklist a, .setup-checklist-next a { color: #245d57; font-weight: 700; }
+.setup-guide-footer { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.setup-guide .setup-guide-action {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; text-align: center; text-decoration: none;
+}
+.setup-guide .setup-guide-action--primary { color: var(--white); }
+.setup-guide .setup-guide-action--secondary { color: var(--text); }
 .setup-guide-heading button, .setup-guide-reopen {
   min-height: 40px; padding: 7px 10px; border: 1px solid #3f7f78; border-radius: 8px;
   background: transparent; color: #245d57; font: inherit; cursor: pointer;
@@ -34,4 +41,6 @@
 @media (max-width: 600px) {
   .setup-guide-heading, .setup-checklist-item { align-items: flex-start; flex-direction: column; }
   .setup-guide, .setup-checklist-item { padding: 16px; }
+  .setup-guide-footer { flex-direction: column; }
+  .setup-guide-action { width: 100%; }
 }

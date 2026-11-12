@@ -93,11 +93,14 @@ export default function SetupGuide({ userId, stepId, children }) {
         {step.example ? <p>{step.example}</p> : null}
         <p>{step.save}</p>
         {completed ? <p className="setup-guide-done">Saved. {stepId === 'year' && !yearSelected
-          ? 'Select a saved year on this page before continuing to your school day.'
-          : <Link to={step.next}>Go to the next step</Link>}</p>
+          ? 'Select a saved year on this page before continuing to your school day.' : null}</p>
           : loading || unavailable ? <p>We’ll confirm this step after its saved settings load.</p> : null}
-        {step.optional ? <p>After saving, <Link to={step.next}>return to your checklist</Link>.</p> : null}
-        <Link to="/setup">View your setup checklist</Link>
+        {step.optional ? <p>After saving, return to your checklist.</p> : null}
+        <footer className="setup-guide-footer" aria-label="Setup navigation">
+          {completed && (stepId !== 'year' || yearSelected)
+            ? <Link className="settings-save setup-guide-action setup-guide-action--primary" to={step.next}>Next steps</Link> : null}
+          <Link className="settings-reset setup-guide-action setup-guide-action--secondary" to="/setup">Setup checklist</Link>
+        </footer>
       </aside> : <button type="button" className="setup-guide-reopen" onClick={() => changeVisibility(true)}>
         Show setup guidance
       </button>}
