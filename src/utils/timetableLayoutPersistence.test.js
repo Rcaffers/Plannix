@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createTimetableLayoutApi } from './api.js';
 import { buildRowSegments } from './timetableLayout.js';
-import { createDefaultLayoutDraft, layoutDraftEqual, publicLayout, safeLayoutError } from './timetableLayoutPersistence.js';
+import { createDefaultLayoutDraft, editableLayout, layoutDraftEqual, publicLayout, safeLayoutError } from './timetableLayoutPersistence.js';
 
 const organisationId = '10000000-0000-4000-8000-000000000001';
 const academicYearId = '20000000-0000-4000-8000-000000000001';
@@ -72,6 +72,16 @@ test('dirty comparison and conflict messages preserve deliberate recovery choice
   assert.match(safeLayoutError({ status: 409, message: 'Week B contains timetable sessions' }), /Week B/);
   assert.match(safeLayoutError({ status: 409, message: 'A period containing timetable sessions' }), /teaching period/);
   assert.match(safeLayoutError({ status: 409, message: 'changed since it was loaded' }), /Reload/);
+});
+
+test('an explicitly cleared timetable name stays editable while new and legacy unnamed drafts retain the default', () => {
+  const initial = createDefaultLayoutDraft();
+  assert.equal(initial.name, 'My timetable');
+  assert.equal(editableLayout({ ...initial, name: '' }).name, '');
+  assert.equal(editableLayout({ ...initial, name: '   ' }).name, '   ');
+  assert.equal(editableLayout({ ...initial, name: 'Replacement' }).name, 'Replacement');
+  assert.equal(editableLayout({ ...initial, name: null }).name, 'My timetable');
+  assert.equal(layoutDraftEqual({ ...initial, name: '' }, initial), false);
 });
 
 test('context scopes requests, separates draft from authority, blocks duplicates and protects transitions', () => {

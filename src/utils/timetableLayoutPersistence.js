@@ -9,7 +9,7 @@ export function createDefaultLayoutDraft() {
 export function editableLayout(value) {
   const normalized = normalizeLayout(value || DEFAULT_TIMETABLE_LAYOUT);
   return {
-    name: String(value?.name || 'My timetable'),
+    name: value?.name == null ? 'My timetable' : String(value.name),
     ...normalized,
     registration: { ...normalized.registration, ...(value?.registration?.id ? { id: value.registration.id } : {}) },
     breaks: normalized.breaks.map((entry, index) => ({

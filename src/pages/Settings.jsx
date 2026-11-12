@@ -103,7 +103,11 @@ export default function Settings() {
               maxLength={200}
               value={draft.name}
               onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+              aria-invalid={layoutError === 'Enter a timetable name before saving.'}
+              aria-describedby={layoutError === 'Enter a timetable name before saving.' ? 'timetable-name-error' : undefined}
             />
+            {layoutError === 'Enter a timetable name before saving.'
+              ? <p id="timetable-name-error" className="settings-error" role="alert">{layoutError}</p> : null}
           </div>
 
           <div className="settings-field">
@@ -337,7 +341,7 @@ export default function Settings() {
             </button>
           </div>
           {layoutSuccess ? <p className="settings-saved visually-hidden" role="status">{layoutSuccess}</p> : null}
-          {layoutError ? <p className="settings-error" role="alert">{layoutError}</p> : null}
+          {layoutError && layoutError !== 'Enter a timetable name before saving.' ? <p className="settings-error" role="alert">{layoutError}</p> : null}
           {layoutError && layoutRequestReference ? <p className="settings-hint">Support reference: <code>{layoutRequestReference}</code></p> : null}
         </form>
 

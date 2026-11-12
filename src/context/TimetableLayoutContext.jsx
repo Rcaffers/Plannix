@@ -83,6 +83,10 @@ export function TimetableLayoutProvider({ children, user }) {
 
   const save = useCallback(async () => {
     if (saving.current || isLoading || !user?.id || !organisationId || !selectedAcademicYearId) return null;
+    if (!draft.name.trim()) {
+      setError('Enter a timetable name before saving.'); setRequestReference(''); setSuccess('');
+      return null;
+    }
     saving.current = true; setIsSaving(true); setError(''); setRequestReference(''); setSuccess('');
     const expectedGeneration = generation.current;
     const guidanceSave = beginSetupGuidanceSave(user.id, 'layout');
