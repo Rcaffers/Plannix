@@ -460,12 +460,12 @@ test('worker uses fresh session and authorization before one detailed display', 
       sessionName:'__Host-plannix-s-2'});
     return Response.json({date:'2026-11-03',week:'A',lessons:[{period:'P1',
       className:'Synthetic class',title:'Synthetic lesson',isPpa:false}],
-      events:[{title:'Private event'}],lessonDetailsIncluded:true,eventTitlesIncluded:true});
+      events:[{title:'Private event'},{title:'Second event'}],lessonDetailsIncluded:true,eventTitlesIncluded:true});
   }});
   await h.deliver();
   assert.equal(h.shown.length,1);
-  assert.match(h.shown[0][1].body,/Synthetic lesson/);
-  assert.match(h.shown[0][1].body,/Private event/);
+  assert.equal(h.shown[0][1].body,
+    'P1: Synthetic class — Synthetic lesson\nPrivate event\nSecond event');
   assert.equal(paths.length,3);
   assert.equal(paths[2][1]['X-Plannix-Expected-Session'],'__Host-plannix-s-2');
   assert.equal(h.state().selector.sessionName,'__Host-plannix-s-2');
@@ -484,6 +484,24 @@ test('event-only detail displays titles without any lesson text', async () => {
   assert.equal(h.shown.length,1);
   assert.equal(h.shown[0][1].body,'Synthetic event');
   assert.doesNotMatch(JSON.stringify(h.shown),/Synthetic lesson|Synthetic class/);
+});
+
+test('embedded field whitespace cannot create extra period or event lines', async () => {
+  const h = detailFixture({ fetchImpl:async input => {
+    const path = new URL(input).pathname;
+    if (path.endsWith('detail-display-config')) return Response.json({enabled:true});
+    if (path.endsWith('/status')) return Response.json({authenticated:true,
+      sessionName:'__Host-plannix-s-2'});
+    return Response.json({date:'2026-11-03',week:'A',lessons:[
+      {period:'P1',className:'Synthetic\n class',title:'Lesson\tname',isPpa:false},
+      {period:'P2',className:null,title:'',isPpa:true}],
+    events:[{title:'First\nevent'},{title:'Second\r\nevent'}],
+    lessonDetailsIncluded:true,eventTitlesIncluded:true});
+  } });
+  await h.deliver();
+  assert.equal(h.shown.length,1);
+  assert.equal(h.shown[0][1].body,
+    'P1: Synthetic class — Lesson name\nP2: PPA\nFirst event\nSecond event');
 });
 
 test('real summary, detail service and worker display ordinary lessons and PPA without unconsented events', async () => {
@@ -554,7 +572,7 @@ test('real summary, detail service and worker display ordinary lessons and PPA w
   assert.equal(h.shown.length,1);
   assert.equal(h.shown[0][0],'Your Plannix day');
   assert.equal(h.shown[0][1].body,
-    'P1: Synthetic class — Fractions · P2: PPA · P3: Synthetic class — Geometry · P4: Synthetic class — Algebra · P5: PPA');
+    'P1: Synthetic class — Fractions\nP2: PPA\nP3: Synthetic class — Geometry\nP4: Synthetic class — Algebra\nP5: PPA');
   assert.doesNotMatch(JSON.stringify(h.shown),/Synthetic event/);
 });
 
@@ -575,6 +593,7 @@ test('five long periods remain represented within a bounded body and malformed f
   const h = detailFixture({fetchImpl});
   await h.deliver();
   assert.equal(h.shown.length,1);
+  assert.equal(h.shown[0][1].body.split('\n').length,5);
   for (let period=1;period<=5;period++) assert.match(h.shown[0][1].body,new RegExp(`P${period}:`));
   assert.ok(Array.from(h.shown[0][1].body).length <= 480);
   response.lessons = [...lessons.slice(0,4),{...lessons[4],className:null}];

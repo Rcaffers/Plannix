@@ -197,7 +197,7 @@ function notificationText(detail) {
     || typeof detail.lessonDetailsIncluded !== 'boolean'
     || typeof detail.eventTitlesIncluded !== 'boolean'
     || (!detail.lessonDetailsIncluded && detail.lessons.length)) throw new Error('detail unavailable');
-  const short = (value, limit) => Array.from(value.trim()).slice(0, limit).join('');
+  const short = (value, limit) => Array.from(value.trim().replace(/\s+/g, ' ')).slice(0, limit).join('');
   const parts = detail.lessons.slice(0, MAX_DISPLAY_PERIODS).map(item => {
     if (!item || typeof item.period !== 'string' || !PERIOD_LABEL.test(item.period)
       || item.period.length > 4 || typeof item.title !== 'string' || typeof item.isPpa !== 'boolean')
@@ -218,7 +218,7 @@ function notificationText(detail) {
     }
   } else if (detail.events.length) throw new Error('detail unavailable');
   if (!parts.length) throw new Error('detail unavailable');
-  return parts.join(' · ');
+  return parts.join('\n');
 }
 
 async function showMorning(payload) {
