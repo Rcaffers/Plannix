@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { beginSetupGuidanceSave, finishSetupGuidanceSave, restoreSetupGuidance,
   setSetupGuidanceVisible, setupGuidancePreference } from './setupGuidance.js';
+import { SETUP_STEPS } from './setupProgress.js';
 
 function browser(run) {
   const previousWindow = globalThis.window;
@@ -13,11 +14,11 @@ function browser(run) {
   try { run(); } finally { globalThis.window = previousWindow; globalThis.localStorage = previousStorage; }
 }
 
-test('a successful save hides only its account and step; a failed save does not finish', () => browser(() => {
+test('a successful save completes only its account and step; a failed save does not finish', () => browser(() => {
   const ticket = beginSetupGuidanceSave('a','classes');
   assert.equal(setupGuidancePreference('a','classes'),null);
   assert.equal(finishSetupGuidanceSave(ticket),true);
-  assert.equal(setupGuidancePreference('a','classes'),'hidden');
+  assert.equal(setupGuidancePreference('a','classes'),'completed');
   assert.equal(setupGuidancePreference('b','classes'),null);
   assert.equal(setupGuidancePreference('a','year'),null);
 }));
@@ -31,14 +32,14 @@ test('restoring instructions survives a late pre-restore save and is consumed by
   assert.equal(setupGuidancePreference('a','classes'),'shown');
   const newSave = beginSetupGuidanceSave('a','classes');
   assert.equal(finishSetupGuidanceSave(newSave),true);
-  assert.equal(setupGuidancePreference('a','classes'),'hidden');
+  assert.equal(setupGuidancePreference('a','classes'),'completed');
   assert.equal(setupGuidancePreference('a','year'),'shown');
 }));
 
 test('manual dismissal remains account scoped after restoration', () => browser(() => {
   restoreSetupGuidance('a');
   setSetupGuidanceVisible('a','ai',false);
-  assert.equal(setupGuidancePreference('a','ai'),'hidden');
+  assert.equal(setupGuidancePreference('a','ai'),'dismissed');
   assert.equal(setupGuidancePreference('b','ai'),null);
 }));
 
@@ -47,5 +48,25 @@ test('manual visibility still changes when browser storage rejects writes', () =
   assert.equal(restoreSetupGuidance('storage-blocked'),false);
   assert.equal(setupGuidancePreference('storage-blocked','year'),'shown');
   assert.equal(setSetupGuidanceVisible('storage-blocked','year',false),false);
-  assert.equal(setupGuidancePreference('storage-blocked','year'),'hidden');
+  assert.equal(setupGuidancePreference('storage-blocked','year'),'dismissed');
+}));
+
+test('a completed page stays complete until global restoration, then only a later save completes it again', () => browser(() => {
+  finishSetupGuidanceSave(beginSetupGuidanceSave('completion-cycle','year'));
+  assert.equal(setupGuidancePreference('completion-cycle','year'),'completed');
+  restoreSetupGuidance('completion-cycle');
+  assert.equal(setupGuidancePreference('completion-cycle','year'),'shown');
+  setSetupGuidanceVisible('completion-cycle','year',false);
+  assert.equal(setupGuidancePreference('completion-cycle','year'),'dismissed');
+  finishSetupGuidanceSave(beginSetupGuidanceSave('completion-cycle','year'));
+  assert.equal(setupGuidancePreference('completion-cycle','year'),'completed');
+}));
+
+test('every guided step has the same completion and global restoration semantics', () => browser(() => {
+  for (const step of SETUP_STEPS) {
+    assert.equal(finishSetupGuidanceSave(beginSetupGuidanceSave('all-steps',step.id)),true);
+    assert.equal(setupGuidancePreference('all-steps',step.id),'completed');
+  }
+  assert.equal(restoreSetupGuidance('all-steps'),true);
+  for (const step of SETUP_STEPS) assert.equal(setupGuidancePreference('all-steps',step.id),'shown');
 }));

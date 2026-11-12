@@ -22,10 +22,11 @@ function Harness() {
   window.__setupAccount = account;
   window.__setSetupFixture = setFixture;
   window.__switchSetupAccount = setAccount;
+  window.__completeSetupStep = stepId => finishSetupGuidanceSave(beginSetupGuidanceSave(account, stepId));
   return <MemoryRouter initialEntries={['/setup']}>
     <Routes>
       <Route path="/setup" element={<SetupChecklist userId={account} />} />
-      <Route path="/settings/academic-year" element={<SetupGuide userId={account} stepId="year"><main><h1>Academic year</h1></main></SetupGuide>} />
+      <Route path="/settings/academic-year" element={<SetupGuide userId={account} stepId="year"><main><h1>Academic year</h1><Link to="/setup">Checklist</Link></main></SetupGuide>} />
       <Route path="/profile" element={<SetupGuide userId={account} stepId="ai"><main><h1>Profile</h1><Link to="/setup">Checklist</Link></main></SetupGuide>} />
       <Route path="/settings/notifications" element={<SetupGuide userId={account} stepId="notifications"><main><h1>Notifications</h1><Link to="/setup">Checklist</Link></main></SetupGuide>} />
       <Route path="/classes" element={<SetupGuide userId={account} stepId="classes">

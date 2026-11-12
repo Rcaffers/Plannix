@@ -40,7 +40,7 @@ export default function SetupGuide({ userId, stepId, children }) {
   const key = setupGuideKey(userId, stepId);
   const [, refreshPreference] = useState(0);
   const [sessionTick, setSessionTick] = useState(0);
-  const [optional, setOptional] = useState({ key: null, saved: null });
+  const [optional, setOptional] = useState({ key: null, saved: 'loading' });
   const { completion, loading, unavailable, yearSelected } = useSetupCompletion();
   useEffect(() => {
     const changed = event => { if (!event.detail || event.detail.userId === userId) refreshPreference(value => value + 1); };
@@ -63,23 +63,25 @@ export default function SetupGuide({ userId, stepId, children }) {
     let current = true;
     let context;
     try { context = serverManagedAuth ? captureServerOperationContext(userId) : null; }
-    catch { setOptional({ key, saved: null }); return () => { current = false; }; }
+    catch { setOptional({ key, saved: 'error' }); return () => { current = false; }; }
     const valid = () => {
       if (!current) return false;
       try { if (context) assertServerOperationContext(context); return true; } catch { return false; }
     };
-    setOptional({ key, saved: null });
+    setOptional({ key, saved: 'loading' });
     const request = stepId === 'ai' ? aiConnectionApi.load() : morningSummaryApi.load(userId);
     request.then(value => { if (valid()) setOptional({ key, saved: stepId === 'ai'
       ? value?.active === true : value?.enabled === true }); })
-      .catch(() => { if (valid()) setOptional({ key, saved: null }); });
+      .catch(() => { if (valid()) setOptional({ key, saved: 'error' }); });
     return () => { current = false; };
   }, [userId, stepId, key, step?.optional, sessionTick]);
   const preference = setupGuidancePreference(userId, stepId);
   const completed = step?.optional ? optional.key === key && optional.saved === true : completion[stepId];
-  const visible = preference === 'shown' || (preference !== 'hidden' && !completed);
+  const checkingOptional = Boolean(step?.optional && (optional.key !== key || optional.saved === 'loading'));
+  const visible = preference === 'shown' || (!checkingOptional && !completed && preference === null);
+  const reopen = preference === 'dismissed' || (!checkingOptional && !completed && preference === 'hidden');
   const changeVisibility = next => setSetupGuidanceVisible(userId, stepId, next);
-  if (!step) return children;
+  if (!step || (!visible && !reopen)) return children;
   return <>
     <div className="container settings-inner settings-inner--wide setup-guide-wrap">
       {visible ? <aside className="setup-guide" aria-label="Setup guidance">

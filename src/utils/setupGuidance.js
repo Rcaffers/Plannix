@@ -26,7 +26,14 @@ export function setupGuidancePreference(userId, stepId) {
 
 export function setSetupGuidanceVisible(userId, stepId, visible) {
   if (!userId || !SETUP_STEPS.some(step => step.id === stepId)) return false;
-  const written = write(setupGuideKey(userId, stepId), visible ? 'shown' : 'hidden');
+  const written = write(setupGuideKey(userId, stepId), visible ? 'shown' : 'dismissed');
+  announce(userId);
+  return written;
+}
+
+function completeSetupGuidance(userId, stepId) {
+  if (!userId || !SETUP_STEPS.some(step => step.id === stepId)) return false;
+  const written = write(setupGuideKey(userId, stepId), 'completed');
   announce(userId);
   return written;
 }
@@ -55,6 +62,6 @@ export function finishSetupGuidanceSave(ticket) {
   try {
     if (ticket.context) assertServerOperationContext(ticket.context);
     if (read(revisionKey(ticket.userId)) !== ticket.revision) return false;
-    return setSetupGuidanceVisible(ticket.userId, ticket.stepId, false);
+    return completeSetupGuidance(ticket.userId, ticket.stepId);
   } catch { return false; }
 }
