@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { AI_PROVIDERS, MAX_AI_KEY_LENGTH } from '../../shared/aiProviders.js';
 import { aiConnectionApi } from '../utils/aiConnectionApi.js';
 import { safeRequestReference } from '../utils/requestReference.js';
+import { beginSetupGuidanceSave, finishSetupGuidanceSave } from '../utils/setupGuidance.js';
 
-export default function AiProviderCard({ api = aiConnectionApi }) {
+export default function AiProviderCard({ api = aiConnectionApi, userId = null }) {
   const [connection, setConnection] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -49,10 +50,12 @@ export default function AiProviderCard({ api = aiConnectionApi }) {
       if (disconnect && !window.confirm('Disconnect your AI provider?')) return;
       if (mode === 'switch' && !window.confirm('Switch AI provider? Your existing connection will be replaced only if this succeeds.')) return;
       setBusy(true);
+      const guidanceSave = disconnect ? null : beginSetupGuidanceSave(userId, 'ai');
       const result = disconnect ? await api.disconnect()
         : await (connection ? api.replace : api.connect)({ provider, apiKey });
       if (expected !== generation.current) return;
       setConnection(result); setMode(result ? 'connected' : 'connect');
+      if (result) finishSetupGuidanceSave(guidanceSave);
       setMessage(disconnect ? 'AI provider disconnected.' : 'AI provider connection saved.');
     } catch (failure) {
       if (expected !== generation.current) return;

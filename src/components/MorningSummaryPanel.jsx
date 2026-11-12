@@ -9,6 +9,7 @@ import { morningSummaryApi } from '../utils/morningSummaryApi.js';
 import { serverManagedAuth, captureServerOperationContext, assertServerOperationContext } from '../utils/serverAuthTransport.js';
 import { buildMorningSummary, londonToday, summaryDateInfo } from '../utils/morningSummary.js';
 import { safeRequestReference } from '../utils/requestReference.js';
+import { beginSetupGuidanceSave, finishSetupGuidanceSave } from '../utils/setupGuidance.js';
 import './MorningSummaryPanel.css';
 
 const DEFAULT_PREFERENCES = { enabled: false, deliveryTime: '07:00', revision: 0,
@@ -80,6 +81,7 @@ export default function MorningSummaryPanel({ userId, organisationId, detailDevi
     if (savingRef.current || reloadingRef.current || conflict || currentPreferences.status !== 'ready' || !userId) return;
     savingRef.current = true; setSaving(true); setSaveError(''); setSaveReference(''); setSavedNotice('');
     const ticket = preferenceGeneration.current;
+    const guidanceSave = beginSetupGuidanceSave(userId, 'notifications');
     // The general Save button only edits scheduling. Detail consent is granted
     // or withdrawn exclusively by its own clearly labelled action button.
     const value = { ...draft, revision: currentPreferences.value.revision,
@@ -96,6 +98,7 @@ export default function MorningSummaryPanel({ userId, organisationId, detailDevi
       setPreferences({ userId, status: 'ready', value: saved, error: '', reference: '' });
       if (version === draftVersion.current) setDraft(saved);
       setSavedNotice('Morning summary preferences saved. Summaries are not active yet.');
+      finishSetupGuidanceSave(guidanceSave);
     } catch (error) {
       if (ticket === preferenceGeneration.current) {
         if (error?.status === 409) {

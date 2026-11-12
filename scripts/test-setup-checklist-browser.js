@@ -15,6 +15,9 @@ try {
       if (importer?.endsWith('/SetupChecklist.jsx') && (source === '../utils/aiConnectionApi'
         || source === '../utils/morningSummaryApi'))
         return path.resolve('src/pages/SetupChecklist.browser-mocks.js');
+      if (importer?.endsWith('/SetupGuide.jsx') && (source === '../utils/aiConnectionApi'
+        || source === '../utils/morningSummaryApi'))
+        return path.resolve('src/pages/SetupChecklist.browser-mocks.js');
       return null;
     }}],
     build:{outDir:directory,emptyOutDir:false,lib:{entry:'src/pages/SetupChecklist.browser-test.jsx',formats:['iife'],name:'SetupTest',fileName:()=>'test.js',cssFileName:'test'}} });
@@ -53,6 +56,16 @@ try {
   assert.equal(await evaluate("(() => {const link=document.querySelector('.setup-checklist-item a');link.focus();return document.activeElement===link;})()"),true,
     'a setup step can receive keyboard focus without a modal overlay');
   assert.equal(await evaluate("document.querySelector('.setup-checklist-item:nth-child(3) .setup-step-status')?.textContent"),'To do');
+  await evaluate('window.__setupOptionalActive=true');
+  await evaluate("[...document.querySelectorAll('.setup-checklist-item')][4].querySelector('a').click()");
+  await waitFor("Boolean(document.querySelector('.setup-guide-reopen'))");
+  await evaluate("[...document.querySelectorAll('main a')].find(a=>a.textContent==='Checklist').click()");
+  await waitFor("Boolean(document.querySelector('.setup-checklist'))");
+  await evaluate("[...document.querySelectorAll('.setup-checklist-item')][5].querySelector('a').click()");
+  await waitFor("Boolean(document.querySelector('.setup-guide-reopen'))");
+  await evaluate("[...document.querySelectorAll('main a')].find(a=>a.textContent==='Checklist').click()");
+  await waitFor("Boolean(document.querySelector('.setup-checklist'))");
+  await evaluate('window.__setupOptionalActive=false');
   await evaluate("document.querySelector('.setup-checklist-item:nth-child(3) a').click()");
   await waitFor("document.querySelector('.setup-guide-title')?.textContent==='Add your classes'");
   await evaluate("(() => {const field=document.querySelector('#fixture-class');const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;setter.call(field,'9A Maths');field.dispatchEvent(new Event('input',{bubbles:true}));})()");
@@ -65,7 +78,53 @@ try {
   await evaluate("document.querySelector('.setup-guide-reopen').click()");
   await waitFor("Boolean(document.querySelector('.setup-guide'))");
   await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Save classes').click()");
-  await waitFor("Boolean(document.querySelector('.setup-guide-done'))");
+  assert.equal(await evaluate("Boolean(document.querySelector('.setup-guide'))"),true,
+    'pending save keeps guidance visible');
+  await evaluate('window.__finishClassSave(true)');
+  await waitFor("Boolean(document.querySelector('.setup-guide-reopen'))");
+  await evaluate("[...document.querySelectorAll('main a')].find(a=>a.textContent==='Checklist').click()");
+  await waitFor("document.querySelector('.setup-progress')?.textContent.includes('3 of 4')");
+  await evaluate("[...document.querySelectorAll('.setup-checklist-item')][0].querySelector('a').click()");
+  await waitFor("Boolean(document.querySelector('.setup-guide-reopen'))");
+  await evaluate("document.querySelector('.setup-guide-reopen').click()");
+  await waitFor("Boolean(document.querySelector('.setup-guide'))");
+  await evaluate("[...document.querySelectorAll('.setup-guide a')].at(-1).click()");
+  await waitFor("Boolean(document.querySelector('.setup-progress'))");
+  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Show setup guidance again').click()");
+  await waitFor("document.body.textContent.includes('Guidance is ready on each setup page')");
+  await evaluate("[...document.querySelectorAll('.setup-checklist-item')][0].querySelector('a').click()");
+  await waitFor("Boolean(document.querySelector('.setup-guide'))");
+  await evaluate("[...document.querySelectorAll('.setup-guide a')].at(-1).click()");
+  await waitFor("Boolean(document.querySelector('.setup-progress'))");
+  await evaluate('window.__setupOptionalActive=true');
+  await evaluate("[...document.querySelectorAll('.setup-checklist-item')][4].querySelector('a').click()");
+  await waitFor("Boolean(document.querySelector('.setup-guide'))");
+  await evaluate("[...document.querySelectorAll('.setup-guide a')].at(-1).click()");
+  await waitFor("Boolean(document.querySelector('.setup-checklist'))");
+  await evaluate("[...document.querySelectorAll('.setup-checklist-item')][5].querySelector('a').click()");
+  await waitFor("Boolean(document.querySelector('.setup-guide'))");
+  await evaluate("[...document.querySelectorAll('.setup-guide a')].at(-1).click()");
+  await waitFor("Boolean(document.querySelector('.setup-checklist'))");
+  await evaluate('window.__setupOptionalActive=false');
+  await evaluate("[...document.querySelectorAll('.setup-checklist-item')][2].querySelector('a').click()");
+  await waitFor("Boolean(document.querySelector('.setup-guide'))");
+  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Save classes').click()");
+  await evaluate('window.__finishClassSave(false)');
+  await waitFor("document.querySelector('[role=alert]')?.textContent.includes('Save failed')");
+  assert.equal(await evaluate("Boolean(document.querySelector('.setup-guide'))"),true,
+    'failed save keeps restored guidance visible');
+  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Save classes').click()");
+  await evaluate("window.__setSetupFixture(value=>({...value,classes:{...value.classes,authoritativeEntries:[]}}))");
+  await evaluate("window.__switchSetupAccount('other-account')");
+  await waitFor("window.__setupAccount==='other-account'");
+  await evaluate('window.__finishClassSave(true)');
+  assert.equal(await evaluate("Boolean(document.querySelector('.setup-guide'))"),true,
+    'late result for the old account cannot hide the new account guide');
+  await evaluate("window.__switchSetupAccount('fixture-account')");
+  await waitFor("window.__setupAccount==='fixture-account'");
+  assert.equal(await evaluate("Boolean(document.querySelector('.setup-guide'))"),true,
+    'stale result did not consume the restored guidance for the originating account');
+  await evaluate("window.__setSetupFixture(value=>({...value,classes:{...value.classes,authoritativeEntries:[{id:'class-a',name:'9A Maths'}]}}))");
   await evaluate('window.__setupOptionalFail=true');
   await evaluate("[...document.querySelectorAll('.setup-guide a')].at(-1).click()");
   await waitFor("document.querySelector('.setup-progress')?.textContent.includes('3 of 4')");
@@ -83,7 +142,13 @@ try {
     const x=await evaluate("({viewport:innerWidth,document:document.documentElement.scrollWidth})");
     assert.ok(x.document<=x.viewport+1,`setup overflows at ${width}px`);
   }
-  console.log('Rendered partial setup, failed save, pause/reopen, year/session scoping and mobile widths passed.');
+  await send('Page.reload',{},sessionId);
+  await waitFor("Boolean(document.querySelector('.setup-checklist'))");
+  await evaluate("[...document.querySelectorAll('.setup-checklist-item')][0].querySelector('a').click()");
+  await waitFor("document.querySelector('.setup-guide-title')?.textContent==='Add your academic year'");
+  assert.equal(await evaluate("Boolean(document.querySelector('.setup-guide'))"),true,
+    'restored guidance persists across reload for an already saved section');
+  console.log('Rendered setup restore, pending/failed/successful saves, account replacement, reload, progress and mobile widths passed.');
 } catch(error){originalFailure=error;throw error;}
 finally {const cleanup=[];try{socket?.close();}catch(error){cleanup.push(error);}
   if(chrome && chrome.exitCode===null && chrome.signalCode===null){try{

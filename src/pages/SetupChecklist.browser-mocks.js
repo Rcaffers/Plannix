@@ -4,9 +4,9 @@ export function useClasses() { return window.__setupFixture.classes; }
 export function useTimetableSessions() { return window.__setupFixture.timetable; }
 export const aiConnectionApi = { load: async () => {
   if (window.__setupOptionalFail) throw Error('Synthetic optional read failure');
-  return { active:false };
+  return { active:window.__setupOptionalActive === true };
 } };
 export const morningSummaryApi = { load: async () => {
   if (window.__setupOptionalFail) throw Error('Synthetic optional read failure');
-  return { enabled:false };
+  return { enabled:window.__setupOptionalActive === true };
 } };

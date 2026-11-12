@@ -4,6 +4,7 @@ import { buildDayColumnLabels, buildRowSegments, normalizeLayout } from '../util
 import { createDefaultLayoutDraft, editableLayout, layoutDraftEqual, safeLayoutError } from '../utils/timetableLayoutPersistence';
 import { fetchTimetableLayout, saveTimetableLayout } from '../utils/api';
 import { useAcademicYear } from './AcademicYearContext';
+import { beginSetupGuidanceSave, finishSetupGuidanceSave } from '../utils/setupGuidance';
 
 const TimetableLayoutContext = createContext(null);
 
@@ -84,6 +85,7 @@ export function TimetableLayoutProvider({ children, user }) {
     if (saving.current || isLoading || !user?.id || !organisationId || !selectedAcademicYearId) return null;
     saving.current = true; setIsSaving(true); setError(''); setRequestReference(''); setSuccess('');
     const expectedGeneration = generation.current;
+    const guidanceSave = beginSetupGuidanceSave(user.id, 'layout');
     try {
       const result = await saveTimetableLayout(organisationId, selectedAcademicYearId,
         authoritativeLayout?.timetableId || null, authoritativeLayout?.revision || 0, draft);
@@ -91,6 +93,7 @@ export function TimetableLayoutProvider({ children, user }) {
       setAuthoritativeLayout(result.layout); setDraftState(editableLayout(result.layout)); setIsPersisted(true);
       setLoadedAcademicYearId(selectedAcademicYearId);
       setRequestReference(''); setSuccess('Timetable layout saved.');
+      finishSetupGuidanceSave(guidanceSave);
       return result.layout;
     } catch (saveError) {
       if (expectedGeneration === generation.current) {

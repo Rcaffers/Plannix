@@ -224,7 +224,7 @@ export default function Profile({
           </form>
         </section>
 
-        <AiProviderCard key={user.id} />
+        <AiProviderCard key={user.id} userId={user.id} />
 
         <section className="profile-card profile-card--memberships" aria-labelledby="membership-title">
           <div>

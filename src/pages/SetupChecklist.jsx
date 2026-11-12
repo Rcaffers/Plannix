@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSetupCompletion } from '../components/SetupGuide';
 import { SETUP_STEPS } from '../utils/setupProgress';
+import { restoreSetupGuidance } from '../utils/setupGuidance';
 import { aiConnectionApi } from '../utils/aiConnectionApi';
 import { morningSummaryApi } from '../utils/morningSummaryApi';
 import { serverManagedAuth, serverSessionGeneration, captureServerOperationContext,
@@ -12,6 +13,7 @@ import '../components/SetupGuide.css';
 export default function SetupChecklist({ userId }) {
   const { completion, loading, unavailable, yearSelected } = useSetupCompletion();
   const [sessionTick, setSessionTick] = useState(0);
+  const [guidanceRestored, setGuidanceRestored] = useState({ userId:null, restored:false });
   useEffect(() => {
     if (!serverManagedAuth) return undefined;
     const changed = () => setSessionTick(value => value + 1);
@@ -81,6 +83,18 @@ export default function SetupChecklist({ userId }) {
         ? 'Select a saved academic year' : `Continue with ${firstRemaining.title.toLowerCase()}`}</Link></p>
         : <p className="setup-checklist-next">Your main planner setup is saved. Optional steps are there whenever you need them.</p>}
       <p><Link to="/timetable">Pause setup and view your timetable</Link></p>
+      <section className="setup-progress" aria-label="Setup guidance">
+        <h2>Need the instructions again?</h2>
+        <p>Show the setup guidance on every setup page again. Your saved settings and checklist progress stay as they are. Each page’s guidance will hide after you save that page again.</p>
+        <button type="button" className="settings-reset" onClick={() => setGuidanceRestored({ userId,
+          restored:restoreSetupGuidance(userId) })}>
+          Show setup guidance again
+        </button>
+        {guidanceRestored.userId === userId && guidanceRestored.restored
+          ? <p role="status">Guidance is ready on each setup page.</p> : null}
+        {guidanceRestored.userId === userId && !guidanceRestored.restored
+          ? <p role="alert">This browser could not save your guidance preference. Instructions are visible now, but may not stay restored after a reload.</p> : null}
+      </section>
       <p className="settings-hint">You can pause by leaving this page. Your saved work is here when you return; save any open form before navigating away. Notification delivery also needs an enabled device.</p>
     </div>
   </main>;

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { safeRequestReference } from '../utils/requestReference';
 import { DEFAULT_ACADEMIC_YEAR, normalizeAcademicYear, selectCurrentAcademicYear } from '../utils/academicYear';
 import { fetchAcademicYears, fetchAcademicYearPlan, saveAcademicYearPlan } from '../utils/api';
+import { beginSetupGuidanceSave, finishSetupGuidanceSave } from '../utils/setupGuidance';
 
 const AcademicYearContext = createContext(null);
 const emptyPlan = () => normalizeAcademicYear(DEFAULT_ACADEMIC_YEAR);
@@ -111,6 +112,7 @@ export function AcademicYearProvider({ children, user }) {
     if (saving.current || !organisationId) return null;
     saving.current = true;
     const expectedGeneration = generation.current;
+    const guidanceSave = beginSetupGuidanceSave(user?.id, 'year');
     setIsSaving(true);
     setError('');
     setRequestReference('');
@@ -126,6 +128,7 @@ export function AcademicYearProvider({ children, user }) {
           .sort((a, b) => b.startDate.localeCompare(a.startDate) || a.id.localeCompare(b.id));
       });
       setRequestReference('');
+      finishSetupGuidanceSave(guidanceSave);
       await loadYear(result.academicYearId, expectedGeneration);
       return savedPlan;
     } catch (saveError) {
@@ -138,7 +141,7 @@ export function AcademicYearProvider({ children, user }) {
       saving.current = false;
       if (expectedGeneration === generation.current) setIsSaving(false);
     }
-  }, [organisationId, loadYear]);
+  }, [organisationId, loadYear, user?.id]);
 
   const value = useMemo(() => ({
     academicYears, selectedAcademicYearId, academicYear, isLoading, isSaving, error, requestReference,

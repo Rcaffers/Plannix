@@ -187,7 +187,7 @@ test('canonical duplicate-slot assertion rejects duplicates before optimistic en
   assert.doesNotThrow(() => assertUniqueSessionSlots([first, { ...first, day: 1 }]));
   const context = fs.readFileSync(new URL('../context/TimetableSessionContext.jsx', import.meta.url), 'utf8');
   const edit = context.slice(context.indexOf('const edit ='), context.indexOf('const retry ='));
-  assert.ok(edit.indexOf('assertUniqueSessionSlots(sessions)') < edit.indexOf('ensureQueue(target, operationContext).enqueue({ sessions, operationContext, observedId })'));
+  assert.ok(edit.indexOf('assertUniqueSessionSlots(sessions)') < edit.indexOf('ensureQueue(target, operationContext).enqueue({ sessions, operationContext, observedId, guidanceSave })'));
 });
 
 test('dated-week preparation and queued edits retain their originating session context', () => {
@@ -199,7 +199,7 @@ test('dated-week preparation and queued edits retain their originating session c
   assert.match(shift, /loadDateSnapshots\(dates, operationContext\)/);
   assert.match(shift, /saveBatch\(mutations, operationContext\)/);
   const context = fs.readFileSync(new URL('../context/TimetableSessionContext.jsx', import.meta.url), 'utf8');
-  assert.match(context, /enqueue\(\{ sessions, operationContext, observedId \}\)/);
+  assert.match(context, /enqueue\(\{ sessions, operationContext, observedId, guidanceSave \}\)/);
   assert.match(context, /assertServerOperationContext\(operationContext\)/);
   assert.match(context, /onAuthoritative: \(result, queued, entry\)/);
 });

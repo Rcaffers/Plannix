@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { safeRequestReference } from '../utils/requestReference';
 import { useAcademicYear } from './AcademicYearContext';
 import { fetchClassCollection, saveClassCollection } from '../utils/api';
+import { beginSetupGuidanceSave, finishSetupGuidanceSave } from '../utils/setupGuidance';
 import {
   addDraftClass,
   classEntriesEqual,
@@ -115,6 +116,7 @@ export function ClassProvider({ children, user }) {
     if (validationError) { setError(validationError); return false; }
     saving.current = true;
     const expectedGeneration = generation.current;
+    const guidanceSave = beginSetupGuidanceSave(user?.id, 'classes');
     setIsSaving(true);
     setError('');
     setSaved(false);
@@ -133,6 +135,7 @@ export function ClassProvider({ children, user }) {
       setRevision(result.revision);
       setRequestReference('');
       setSaved(true);
+      finishSetupGuidanceSave(guidanceSave);
       return true;
     } catch (saveError) {
       if (expectedGeneration === generation.current) {
@@ -146,7 +149,7 @@ export function ClassProvider({ children, user }) {
         setIsSaving(false);
       }
     }
-  }, [entries, isLoading, organisationId, revision, selectedAcademicYearId]);
+  }, [entries, isLoading, organisationId, revision, selectedAcademicYearId, user?.id]);
 
   const value = useMemo(() => ({
     authoritativeEntries,

@@ -8,6 +8,7 @@ import {
   saveDatedTimetableSessions, saveRecurringTimetableSessions, saveTimetableSessionBatch,
 } from '../utils/timetableSessionApi';
 import { assertUniqueSessionSlots, createSerializedSaveQueue } from '../utils/timetableSessionState';
+import { beginSetupGuidanceSave, finishSetupGuidanceSave } from '../utils/setupGuidance';
 import { observeTimetableOperation } from '../utils/timetableTestObserver';
 import { serverManagedAuth, captureServerOperationContext,
   assertServerOperationContext, serverSessionGeneration } from '../utils/serverAuthTransport.js';
@@ -185,6 +186,7 @@ export function TimetableSessionProvider({ children, user }) {
             generation:entry?.operationContext?.generation,
             commitChannel:queued ? 'revision' : 'saving' });
           applyAuthoritative(target, result, queued, entry?.observedId);
+          if (target.type === 'recurring' && !queued) finishSetupGuidanceSave(entry?.guidanceSave);
           observeTimetableOperation({ kind:'save-update-scheduled', id:entry?.observedId });
           return true; },
         onError: (saveError, entry) => { if (!contextIsCurrent(entry?.operationContext)) return false;
@@ -220,7 +222,8 @@ export function TimetableSessionProvider({ children, user }) {
     catch (validationError) { setError(validationError.message); return false; }
     const observedId = import.meta.env.MODE === 'stage4-timetable-browser-test'
       ? globalThis.crypto?.randomUUID?.() : null;
-    const accepted = Boolean(scope && ensureQueue(target, operationContext).enqueue({ sessions, operationContext, observedId }));
+    const guidanceSave = target.type === 'recurring' ? beginSetupGuidanceSave(user?.id, 'placements') : null;
+    const accepted = Boolean(scope && ensureQueue(target, operationContext).enqueue({ sessions, operationContext, observedId, guidanceSave }));
     if (accepted) observeTimetableOperation({ kind:'save-start', id:observedId,
       title:sessions?.[0]?.title, sessionName:operationContext?.sessionName });
     return accepted;
@@ -232,12 +235,13 @@ export function TimetableSessionProvider({ children, user }) {
     }
     const observedId = import.meta.env.MODE === 'stage4-timetable-browser-test'
       ? globalThis.crypto?.randomUUID?.() : null;
+    const guidanceSave = entry.target.type === 'recurring' ? beginSetupGuidanceSave(user?.id, 'placements') : null;
     const accepted = ensureQueue(entry.target, entry.operationContext).retry({ sessions:entry.sessions,
-      operationContext:entry.operationContext, observedId });
+      operationContext:entry.operationContext, observedId, guidanceSave });
     if (accepted) observeTimetableOperation({ kind:'save-start', id:observedId,
       title:entry.sessions?.[0]?.title, sessionName:entry.operationContext?.sessionName });
     return accepted;
-  }, [ensureQueue]);
+  }, [ensureQueue, user?.id]);
   const reload = useCallback(() => dated?.weekStartDate ? loadDate(dated.weekStartDate) : loadRecurring(), [dated?.weekStartDate, loadDate, loadRecurring]);
 
   const removeOverride = useCallback(async () => {
