@@ -153,6 +153,17 @@ export default function Events({ userId }) {
     setEditor({ id: event?.id || null, revision: event?.revision || null, baseline: draft, draft });
     requestAnimationFrame(() => titleRef.current?.focus());
   }
+  function reviewImportEvent(value) {
+    if (!ready || !listReady || pendingRef.current || destructiveReloadRef.current || conflict || recovery
+      || !canAddEvent(events) || (editor && dirtyRef.current && !window.confirm('Discard unsaved event changes?'))) return;
+    if (!validateEventDraft(value, academicYear).event) return;
+    const draft = { title: value.title, date: value.date, allDay: value.allDay,
+      startTime: value.startTime, endTime: value.endTime, location: value.location, notes: value.notes };
+    draftVersion.current += 1;
+    setEditor({ id: null, revision: null, baseline: blankEventDraft(), draft, fromImport: true });
+    setError(null); setNotice('');
+    requestAnimationFrame(() => titleRef.current?.focus());
+  }
   function cancel() {
     if (pendingRef.current || destructiveReloadRef.current || (recovery && !recovery.resolution)) return;
     draftVersion.current += 1;
@@ -188,6 +199,7 @@ export default function Events({ userId }) {
         : await eventApi.create(selectedAcademicYearId, result.event, { signal: controller.signal });
       if (scopeRef.current !== key || controller.signal.aborted) return;
       setEvents(current => sortPersonalEvents([...current.filter(item => item.id !== response.event.id), response.event]));
+      if (editor.fromImport) setListExpanded(true);
       setEditor(null); setConflict(false); setAnnouncement('Event saved.');
       requestAnimationFrame(() => document.getElementById(`event-edit-${response.event.id}`)?.focus());
     } catch (cause) {
@@ -374,7 +386,8 @@ export default function Events({ userId }) {
     {ready ? <section className="events-card-section events-import-section" aria-labelledby="events-import-heading">
       <h2 id="events-import-heading" className="settings-section-title">Import from a calendar</h2>
       <ImportPreviewPanel userId={userId} destination="events" existing={events} recordsReady={listReady}
-        disabled={pending || destructiveReloading} onDirtyChange={onPreviewDirtyChange} />
+        disabled={pending || destructiveReloading} canReviewEvent={!conflict && !recovery && canAddEvent(events)}
+        onDirtyChange={onPreviewDirtyChange} onReviewEvent={reviewImportEvent} />
     </section> : null}
     </div>
   </div></main>;

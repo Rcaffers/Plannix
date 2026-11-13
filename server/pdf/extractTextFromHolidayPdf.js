@@ -8,10 +8,11 @@ const WORKER_URL = new URL('./pdfWorker.js', import.meta.url);
 // Injection is for orchestration tests only; callers cannot provide a path or limits.
 export function createPdfExtractor({ WorkerClass = Worker } = {}) {
   return async function extractTextFromHolidayPdf(input) {
-    let data, signal;
+    let data, signal, calendarLayout = false;
     try {
-      if (!input || Object.keys(input).some(key => !['data', 'signal'].includes(key))) throw 0;
-      ({ data, signal } = input);
+      if (!input || Object.keys(input).some(key => !['data', 'signal', 'calendarLayout'].includes(key))) throw 0;
+      ({ data, signal, calendarLayout = false } = input);
+      if (typeof calendarLayout !== 'boolean') throw 0;
       if (signal !== undefined && !(signal instanceof AbortSignal)) throw 0;
       if (!(data instanceof Uint8Array) || !(data.buffer instanceof ArrayBuffer) || !data.byteLength) throw 0;
     } catch { throw pdfError('PDF_INVALID'); }
@@ -25,7 +26,8 @@ export function createPdfExtractor({ WorkerClass = Worker } = {}) {
     let worker;
     try {
       worker = new WorkerClass(WORKER_URL, {
-        workerData: { data: copy }, transferList: [copy.buffer], env: {}, execArgv: [],
+        workerData: { data: copy, ...(calendarLayout ? { calendarLayout:true } : {}) },
+        transferList: [copy.buffer], env: {}, execArgv: [],
         stdout: true, stderr: true,
         resourceLimits: { maxOldGenerationSizeMb: PDF_LIMITS.heapMb, maxYoungGenerationSizeMb: 16, stackSizeMb: 4 },
       });

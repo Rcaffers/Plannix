@@ -25,7 +25,7 @@ function PreviewRouteGuard({ dirtyRef, approveLeave }) {
   return null;
 }
 export default function ImportPreviewPanel({ userId, destination, existing = [], recordsReady = true,
-  onDirtyChange, manageNavigation = false, manageYearGuard = false, disabled = false }) {
+  onDirtyChange, onReviewEvent, canReviewEvent = true, manageNavigation = false, manageYearGuard = false, disabled = false }) {
   const { selectedAcademicYearId, academicYear, isLoading: yearLoading, registerAcademicYearChangeGuard } = useAcademicYear();
   const [mode, setMode] = useState('text');
   const [text, setText] = useState('');
@@ -160,7 +160,8 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
       <button type="button" className="settings-reset" onClick={extract} disabled={busy || !currentProvider || !ready}>Retry extraction</button></div> : null}
     {activePreview ? <section className="import-preview-results" aria-labelledby="import-preview-heading">
       <h4 id="import-preview-heading" ref={heading} tabIndex={-1}>Editable {destination === 'events' ? 'event' : 'holiday'} preview</h4>
-      <p className="import-preview-warning"><strong>Preview only — these entries have not been saved.</strong> Corrections here are temporary. A later import step will handle confirmed saving.</p>
+      <p className="import-preview-warning"><strong>Preview only — these entries have not been saved.</strong> {destination === 'events' && onReviewEvent
+        ? 'Review one entry in the event editor, then select Save event to save it.' : 'Corrections here are temporary. A later import step will handle confirmed saving.'}</p>
       {!activePreview.rows.length ? <p>No entries remain in this preview.</p> : null}
       {activePreview.rows.map((row, index) => {
         const dateConfirmed = destination === 'events' ? row.editedDates.includes('date')
@@ -185,6 +186,9 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
           </div>
           {issues.length ? <ul className="import-preview-issues">{issues.map(issue => <li key={issue}>{issue}</li>)}</ul> : null}
           {duplicate ? <p className="import-preview-duplicate">Possible duplicate of an existing {destination === 'events' ? 'event' : 'holiday'}.</p> : null}
+          {destination === 'events' && onReviewEvent ? <button type="button" className="settings-reset"
+            disabled={disabled || !recordsReady || !canReviewEvent || issues.length > 0 || duplicate}
+            onClick={() => onReviewEvent(row.value)}>Review entry {index + 1} in event editor</button> : null}
         </article>;
       })}
       <button type="button" className="settings-reset" onClick={() => { if (!window.confirm('Discard this unsaved preview?')) return; setPreview(null); setAnnouncement('Preview discarded.'); requestAnimationFrame(() => extractButton.current?.focus()); }}>Discard preview</button>

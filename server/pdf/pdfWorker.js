@@ -11,6 +11,7 @@ import childProcess from 'node:child_process';
 import { PDF_LIMITS } from './pdfConfig.js';
 import { PDF_ERROR_CODES, pdfError } from './pdfErrors.js';
 import { normalizePdfText } from './pdfText.js';
+import { calendarPageLayout } from './calendarLayoutText.js';
 
 // Defence in depth for this fixed text-only worker, not an OS security sandbox.
 let forbiddenActivity = false;
@@ -89,6 +90,7 @@ async function parse() {
       const page = await document.getPage(number);
       const reader = page.streamTextContent({ disableNormalization: true }).getReader();
       let text = '';
+      const layoutItems = workerData.calendarLayout === true ? [] : null;
       try {
         while (true) {
           const chunk = await reader.read();
@@ -98,10 +100,11 @@ async function parse() {
             rawBytes += Buffer.byteLength(item.str);
             if (++count > PDF_LIMITS.textItems || rawBytes > PDF_LIMITS.rawTextBytes) throw pdfError('PDF_TEXT_TOO_LARGE');
             text += item.str + (item.hasEOL ? '\n' : ' ');
+            if (layoutItems) layoutItems.push({ str:item.str, transform:item.transform });
           }
         }
       } finally { await boundedCleanup(() => reader.cancel()); reader.releaseLock(); page.cleanup(); }
-      pages.push(normalizePdfText(text));
+      pages.push(normalizePdfText(layoutItems ? calendarPageLayout(layoutItems, number) || text : text));
       // Enforce cumulative, normalized UTF-8 bytes without silently truncating.
       normalizePdfText(pages.join('\n\n'));
     }

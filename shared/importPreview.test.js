@@ -31,4 +31,8 @@ test('exact normalized event and holiday identities detect possible duplicates',
   assert.equal(previewDuplicate('events', event, [{ ...event, title: 'ASSEMBLY', startTime: null, endTime: null }]), true);
   assert.equal(previewDuplicate('events', event, [{ ...event, title: 'Other', startTime: null, endTime: null }]), false);
   assert.equal(previewDuplicate('holidays', holiday, [{ ...holiday, label: 'inset day', holidayType: 'public' }]), true);
+  const saved=[{...event,title:'ASSEMBLY',startTime:null,endTime:null}];
+  assert.equal(previewDuplicate('events',event,saved),true,'re-extracting a saved event remains flagged');
+  assert.equal(previewDuplicate('events',{...event,date:'2027-03-29'},saved),false,
+    'a separate day in a reviewed multi-day event is not falsely marked as the same event');
 });

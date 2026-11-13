@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { once } from 'node:events';
+import { readFile } from 'node:fs/promises';
 import { zipSync } from 'fflate';
 import { createRequireSupabaseAuth } from '../middleware/requireSupabaseAuth.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -49,9 +50,13 @@ test('confirmed authentication and server-owned destination schema are required'
   assert.doesNotMatch(h.calls[0].systemPrompt, /Assembly on 03\/04/);
 });
 test('PDF and image use bounded raw bodies, with no filename or save operation', async t => {
-  const h = await setup(t);
+  const layouts=[];
+  const h = await setup(t,{extractPdf:async input=>{ layouts.push(input.calendarLayout); return {text:'Synthetic calendar text',pageCount:2}; }});
   const pdf = await h.request(`/extract-pdf?${query('holidays')}`, Buffer.from('%PDF-synthetic'), 'application/pdf');
   assert.equal(pdf.status, 200); assert.deepEqual(await pdf.json(), { destination: 'holidays', entries: [holiday], pageCount: 2 });
+  const eventPdf = await h.request(`/extract-pdf?${query('events')}`, Buffer.from('%PDF-synthetic'), 'application/pdf');
+  assert.equal(eventPdf.status,200); assert.deepEqual(await eventPdf.json(),{destination:'events',entries:[{...event,sourceDate:''}],pageCount:2});
+  assert.deepEqual(layouts,[false,true],'only event PDF extraction uses date-column layout');
   const png = Buffer.alloc(45); Buffer.from('89504e470d0a1a0a', 'hex').copy(png); png.writeUInt32BE(13, 8);
   png.write('IHDR', 12); png.writeUInt32BE(16, 16); png.writeUInt32BE(16, 20); png[24] = 8; png[25] = 2; png.write('IEND', 37);
   const image = await h.request(`/extract-image?${query('events')}`, png, 'image/png');
@@ -120,4 +125,22 @@ test('cancellation keeps the per-user lock until non-cooperative work actually s
   assert.equal((await h.request('/extract', body)).status, 409);
   release({ entries: [event] }); await first;
   assert.equal((await h.request('/extract', body)).status, 200);
+});
+if (process.env.PLANNIX_CALENDAR_REGRESSION_PDF) test('supplied PDF reaches event preview with corroborated dates, never a save', async t => {
+  const {extractTextFromHolidayPdf}=await import('../pdf/extractTextFromHolidayPdf.js');
+  const source=await readFile(process.env.PLANNIX_CALENDAR_REGRESSION_PDF);
+  const proposed={...event,title:'Open Evening',date:'2026-10-08',sourceDate:'untrusted',
+    allDay:true,startTime:'09:00',endTime:'17:00'};
+  const h=await setup(t,{extractPdf:extractTextFromHolidayPdf,generate:async args=>{
+    assert.match(args.userContent,/October 8: Open Evening/);
+    assert.match(args.userContent,/September 11–13: Kielder Forest Residential/);
+    return {entries:[proposed,{...proposed,date:'2026-10-09'}]};
+  }});
+  const response=await h.request(`/extract-pdf?${query('events')}`,source,'application/pdf');
+  assert.equal(response.status,200);
+  const body=await response.json();
+  assert.equal(body.pageCount,3);
+  assert.deepEqual(body.entries[0],{...proposed,sourceDate:'October 8',allDay:false,startTime:'',endTime:''});
+  assert.equal(body.entries[1].date,'','a model-suggested different day is left for review');
+  assert.equal(body.entries[1].sourceDate,'October 8');
 });

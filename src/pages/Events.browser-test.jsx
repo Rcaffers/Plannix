@@ -7,7 +7,12 @@ import '../styles/base.css';
 import '../styles/accessibility.css';
 export { importSourceError } from '../utils/importPreviewApi.js';
 export const aiConnectionApi = { load: async () => ({ active: true, providerLabel: 'OpenAI' }) };
-export const extractImportPreview = async () => ({ destination: 'events', entries: [] });
+export const extractImportPreview = async () => ({ destination: 'events', entries: [
+  { title: 'Imported event', date: '2027-10-08', sourceDate: 'October 8', allDay: true,
+    startTime: '', endTime: '', location: '', notes: '' },
+  { title: 'Ambiguous event', date: '', sourceDate: '03/04/2028', allDay: false,
+    startTime: '', endTime: '', location: '', notes: '' },
+] });
 
 const YEAR_A = '10000000-0000-4000-8000-000000000001';
 const YEAR_B = '10000000-0000-4000-8000-000000000002';
@@ -442,6 +447,28 @@ async function run() {
   check(gap(aiYear, aiProvider) >= 14 && gap(aiProvider, aiLegend) >= 20
     && gap(aiLegend, aiChoices) >= 12,
   'Events AI year, provider, Import source and input controls have the holiday-section vertical rhythm');
+  input('#import-0-title', 'Edited imported event');
+  click('Review entry 1 in event editor'); await settle();
+  check(host.querySelector('#event-title')?.value === 'Edited imported event'
+    && host.querySelector('#event-date')?.value === '2027-10-08'
+    && !host.querySelector('.events-list')?.textContent.includes('Edited imported event'),
+  'selecting a reviewed suggestion opens the ordinary editor without saving');
+  nextFailure = Object.assign(Error('Could not save event.'), { status: 422 }); submit(); await settle();
+  check(host.querySelector('#event-title')?.value === 'Edited imported event'
+    && !host.querySelector('.events-list')?.textContent.includes('Edited imported event')
+    && host.querySelector('.import-preview-results'), 'failed save preserves the editor and preview');
+  submit(); await settle();
+  check(host.querySelector('.events-list')?.textContent.includes('Edited imported event')
+    && !host.querySelector('#events-list-panel')?.hidden
+    && host.querySelector('.import-preview-duplicate')
+    && button('Review entry 1 in event editor')?.disabled,
+  'explicit successful save appears in Events and repeated suggestion is flagged as duplicate');
+  check(button('Review entry 2 in event editor')?.disabled, 'ambiguous undated suggestion cannot enter the save flow');
+  input('#import-1-date', '2028-04-03');
+  flushSync(() => host.querySelector('.import-preview-entry:nth-of-type(2) .import-preview-all-day input').click());
+  check(!button('Review entry 2 in event editor')?.disabled,
+    'editing the ambiguous date and choosing all-day makes the suggestion reviewable');
+  click('Hide events');
   let previewPrompts = 0; window.confirm = () => { previewPrompts++; return false; };
   await router.navigate('/settings'); await settle();
   check(router.state.location.pathname === '/settings/events' && previewPrompts === 1,

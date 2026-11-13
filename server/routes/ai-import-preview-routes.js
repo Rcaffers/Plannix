@@ -1,6 +1,7 @@
 import express from 'express';
 import { verifyHolidayJson } from '../ai/strictHolidayJson.js';
-import { validateImportInput, importGenerationInput, validateImportResult } from '../ai/importPreview.js';
+import { validateImportInput, importGenerationInput, validateImportResult,
+  verifyCalendarEventSuggestions } from '../ai/importPreview.js';
 import { validateImportImage } from '../ai/importImage.js';
 import { extractCsvText, extractXlsxText, IMPORT_TABULAR_BYTES } from '../ai/importTabular.js';
 import { generateStructuredJsonForUser } from '../ai/generateStructuredJson.js';
@@ -50,7 +51,7 @@ async function settle({ input, mode, data, userId, signal, generate, extractPdf 
     if (signal.aborted) throw Object.assign(Error(), { code: 'AI_CANCELLED' });
     let pageCount;
     if (mode === 'pdf') {
-      const parsed = await extractPdf({ data, signal });
+      const parsed = await extractPdf({ data, signal, calendarLayout:input.destination === 'events' });
       if (Buffer.isBuffer(data)) data.fill(0);
       data = null;
       pageCount = parsed.pageCount;
@@ -66,7 +67,10 @@ async function settle({ input, mode, data, userId, signal, generate, extractPdf 
     if (signal.aborted) throw Object.assign(Error(), { code: 'AI_CANCELLED' });
     const result = await generate(importGenerationInput(userId, input, image), { signal });
     if (signal.aborted) throw Object.assign(Error(), { code: 'AI_CANCELLED' });
-    return { ...validateImportResult(result, input.destination), ...(pageCount ? { pageCount } : {}) };
+    const preview = validateImportResult(result, input.destination);
+    if (mode === 'pdf' && input.destination === 'events') preview.entries = verifyCalendarEventSuggestions(
+      preview.entries, input.text, input.academicYearStartDate, input.academicYearEndDate);
+    return { ...preview, ...(pageCount ? { pageCount } : {}) };
   } finally {
     if (Buffer.isBuffer(data)) data.fill(0);
     else if (data && typeof data === 'object' && typeof data.text === 'string') data.text = '';
