@@ -4,8 +4,10 @@ import SettingsSubnav from '../components/SettingsSubnav';
 import ImportPreviewPanel from '../components/ImportPreviewPanel.jsx';
 import { useAcademicYear } from '../context/AcademicYearContext';
 import { eventApi } from '../utils/eventApi.js';
+import { serverManagedAuth, captureServerOperationContext, assertServerOperationContext } from '../utils/serverAuthTransport.js';
 import { safeRequestReference } from '../utils/requestReference.js';
 import { MAX_PERSONAL_EVENTS } from '../../shared/personalEvent.js';
+import { previewDuplicate } from '../../shared/importPreview.js';
 import { blankEventDraft, canAddEvent, confirmedDraftUnchanged, draftFromEvent, matchingCreatedEvents, sortPersonalEvents, validateEventDraft } from '../utils/eventPage.js';
 import { useWeekendEventsPreference } from '../hooks/useWeekendEventsPreference.js';
 import './Settings.css';
@@ -31,7 +33,7 @@ export default function Events({ userId }) {
   const [recovery, setRecovery] = useState(null);
   const [notice, setNotice] = useState('');
   const [announcement, setAnnouncement] = useState('');
-  const scopeKey = scopeOf(selectedAcademicYearId, academicYear);
+  const scopeKey = `${userId || ''}:${scopeOf(selectedAcademicYearId, academicYear)}`;
   const scopeRef = useRef(scopeKey);
   scopeRef.current = scopeKey;
   const listGeneration = useRef(0);
@@ -163,6 +165,67 @@ export default function Events({ userId }) {
     setEditor({ id: null, revision: null, baseline: blankEventDraft(), draft, fromImport: true });
     setError(null); setNotice('');
     requestAnimationFrame(() => titleRef.current?.focus());
+  }
+  async function addAllReviewedEvents(rows) {
+    if (!rows.length || editor || !ready || !listReady || pendingRef.current || destructiveReloadRef.current
+      || conflict || recovery) return null;
+    const key=scopeKey, yearId=selectedAcademicYearId;
+    let context;
+    try { context=serverManagedAuth ? captureServerOperationContext(userId) : null; }
+    catch { return { added:[], skipped:[], failed:rows.map(row=>row.id), uncertain:[], message:'Session verification changed. No events were submitted.' }; }
+    const controller=new AbortController();
+    const current=()=>{
+      if (scopeRef.current!==key || controller.signal.aborted) return false;
+      try { if (context) assertServerOperationContext(context); } catch { return false; }
+      return true;
+    };
+    pendingRef.current=true; mutationController.current=controller; setPending(true);
+    const report={added:[],skipped:[],failed:[],uncertain:[],message:''};
+    try {
+      let latest;
+      try { latest=(await eventApi.list(yearId,{signal:controller.signal,operationContext:context})).events; }
+      catch { if (!current()) return null;
+        report.failed=rows.map(row=>row.id); report.message='Could not refresh Events before saving. Nothing was submitted.'; return report; }
+      if (!current()) return null;
+      setEvents(sortPersonalEvents(latest));
+      for (const row of rows) {
+        if (!current()) return null;
+        const checked=validateEventDraft(row.value,academicYear);
+        if (!checked.event) { report.failed.push(row.id); continue; }
+        if (previewDuplicate('events',row.value,latest)) { report.skipped.push(row.id); continue; }
+        if (latest.length>=MAX_PERSONAL_EVENTS) { report.failed.push(row.id); continue; }
+        try {
+          const response=await eventApi.create(yearId,checked.event,{signal:controller.signal,operationContext:context});
+          if (!current()) return null;
+          latest.push(response.event); report.added.push(row.id);
+          setEvents(sortPersonalEvents(latest)); setListExpanded(true);
+        } catch (cause) {
+          if (!current()) return null;
+          if (uncertainResult(cause)) { report.uncertain.push(row.id); break; }
+          report.failed.push(row.id);
+          if ([401,403].includes(cause?.status)) break;
+        }
+      }
+      if (current()) {
+        try {
+          const refreshed=(await eventApi.list(yearId,{signal:controller.signal,operationContext:context})).events;
+          if (!current()) return null;
+          const duplicateFailures=report.failed.filter(id=>{
+            const row=rows.find(item=>item.id===id);
+            return row && previewDuplicate('events',row.value,refreshed);
+          });
+          report.failed=report.failed.filter(id=>!duplicateFailures.includes(id));
+          report.skipped.push(...duplicateFailures);
+          setEvents(sortPersonalEvents(refreshed)); setListStatus('ready');
+        } catch { report.message='The Events list could not be refreshed. Confirmed saves remain visible; reload before another attempt.'; }
+      }
+      return report;
+    } finally {
+      if (mutationController.current===controller) {
+        mutationController.current=null; pendingRef.current=false;
+        if (scopeRef.current===key) setPending(false);
+      }
+    }
   }
   function cancel() {
     if (pendingRef.current || destructiveReloadRef.current || (recovery && !recovery.resolution)) return;
@@ -387,7 +450,8 @@ export default function Events({ userId }) {
       <h2 id="events-import-heading" className="settings-section-title">Import from a calendar</h2>
       <ImportPreviewPanel userId={userId} destination="events" existing={events} recordsReady={listReady}
         disabled={pending || destructiveReloading} canReviewEvent={!conflict && !recovery && canAddEvent(events)}
-        onDirtyChange={onPreviewDirtyChange} onReviewEvent={reviewImportEvent} />
+        onDirtyChange={onPreviewDirtyChange} onReviewEvent={reviewImportEvent}
+        onAddAllEvents={addAllReviewedEvents} canAddAllEvents={!editor && !conflict && !recovery && canAddEvent(events)} />
     </section> : null}
     </div>
   </div></main>;

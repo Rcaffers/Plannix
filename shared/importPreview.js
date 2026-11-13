@@ -3,6 +3,7 @@ import { normalizeHolidayLabel } from './holidayLabel.js';
 import { holidayDuplicateKey } from './holidayKey.js';
 
 export const IMPORT_PREVIEW_LIMIT = 100;
+export const CALENDAR_PDF_EVENT_PREVIEW_LIMIT = 500;
 export const IMPORT_TEXT_BYTES = 50_000;
 export const IMPORT_IMAGE_BYTES = 4 * 1024 * 1024;
 export const IMPORT_DESTINATIONS = ['holidays', 'events'];
@@ -18,8 +19,8 @@ const rawDate = value => text(value, 40);
 
 // The provider may report an unresolved date, but never arbitrary fields or
 // unsafe text. The same whole-collection check runs server-side and in browser.
-export function normalizeImportPreview(destination, entries) {
-  if (!IMPORT_DESTINATIONS.includes(destination) || !Array.isArray(entries) || entries.length > IMPORT_PREVIEW_LIMIT) throw Error('Invalid import preview.');
+export function normalizeImportPreview(destination, entries, limit = IMPORT_PREVIEW_LIMIT) {
+  if (!IMPORT_DESTINATIONS.includes(destination) || !Array.isArray(entries) || entries.length > limit) throw Error('Invalid import preview.');
   return entries.map(entry => {
     try {
       if (destination === 'events') {

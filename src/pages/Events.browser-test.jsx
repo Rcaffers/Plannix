@@ -7,12 +7,13 @@ import '../styles/base.css';
 import '../styles/accessibility.css';
 export { importSourceError } from '../utils/importPreviewApi.js';
 export const aiConnectionApi = { load: async () => ({ active: true, providerLabel: 'OpenAI' }) };
-export const extractImportPreview = async () => ({ destination: 'events', entries: [
+let previewEntries = [
   { title: 'Imported event', date: '2027-10-08', sourceDate: 'October 8', allDay: true,
     startTime: '', endTime: '', location: '', notes: '' },
   { title: 'Ambiguous event', date: '', sourceDate: '03/04/2028', allDay: false,
     startTime: '', endTime: '', location: '', notes: '' },
-] });
+];
+export const extractImportPreview = async () => ({ destination: 'events', entries: structuredClone(previewEntries) });
 
 const YEAR_A = '10000000-0000-4000-8000-000000000001';
 const YEAR_B = '10000000-0000-4000-8000-000000000002';
@@ -25,6 +26,7 @@ const yearSetter = value => { selectedYear = value; for (const listener of yearL
 const records = new Map([[YEAR_A, []], [YEAR_B, []]]);
 const calls = [];
 let nextFailure = null;
+let nextCreateFailure = null;
 let listGate = null;
 let releasePendingUnmountList = null;
 let mutationGate = null;
@@ -43,7 +45,7 @@ function fail() { const failure = nextFailure; nextFailure = null; if (failure) 
 export const eventApi = {
   async list(id, options) { calls.push({ action: 'list', id, signal: options.signal }); if (listGate) await listGate; fail(); return { events: structuredClone(records.get(id) || []) }; },
   async create(id, event) { calls.push({ action: 'create', id, event }); if (mutationGate) await mutationGate;
-    const failure = nextFailure; nextFailure = null; if (failure && !failure.accepted) throw failure;
+    const failure = nextCreateFailure || nextFailure; nextCreateFailure = null; nextFailure = null; if (failure && !failure.accepted) throw failure;
     const saved = { ...event, id: `20000000-0000-4000-8000-${String(nextEventNumber++).padStart(12, '0')}`, academicYearId: id, revision: 1 };
     records.set(id, [...records.get(id), saved]); if (failure) throw failure; return { event: saved }; },
   async update(id, revision, event) { calls.push({ action: 'update', id, revision, event });
@@ -476,6 +478,71 @@ async function run() {
   window.confirm = () => true; click('Discard preview'); await settle();
   check(!host.querySelector('.import-preview-results') && Boolean(button('Add event')),
     'discarding import preview leaves manual event creation intact');
+  const candidate = title => ({ title, date:'2027-10-12', sourceDate:'October 12', allDay:false,
+    startTime:'', endTime:'', location:'', notes:'' });
+  previewEntries=['Batch A','Batch B','Batch C'].map(candidate);
+  input('#import-preview-text-events','Bulk calendar'); click('Extract preview'); await settle();
+  check(button('Add all valid events (0)')?.disabled,'missing time and all-day choice prevents bulk saving');
+  click('Mark dated entries without times as all day'); await settle();
+  check(!button('Add all valid events (3)')?.disabled,'explicit all-day choice enables three reviewed suggestions');
+  nextCreateFailure=Object.assign(Error('Known validation failure'),{status:422});
+  click('Add all valid events (3)'); await settle();
+  check(host.querySelector('.import-preview-warning[role="status"]')?.textContent.includes('2 added, 0 skipped, 1 failed')
+    && host.querySelectorAll('.import-preview-entry').length===1
+    && host.querySelector('.events-list')?.textContent.includes('Batch B')
+    && host.querySelector('.events-list')?.textContent.includes('Batch C'),
+  'partial bulk failure keeps only the failed entry and shows confirmed saves');
+  click('Add all valid events (1)'); await settle();
+  check(host.querySelector('.events-list')?.textContent.includes('Batch A')
+    && !host.querySelector('.import-preview-entry')
+    && calls.filter(call=>call.action==='create'&&['Batch A','Batch B','Batch C'].includes(call.event.title)).length===4,
+  'retry submits only the failed entry, never confirmed saves');
+  click('Discard preview'); await settle();
+  previewEntries=['Batch A','Batch B','Batch C'].map(title=>({...candidate(title),allDay:true}));
+  click('Extract preview'); await settle();
+  check(button('Add all valid events (0)')?.disabled && host.querySelectorAll('.import-preview-duplicate').length===3,
+    'reimported saved events are duplicate warnings, not another bulk write');
+  click('Discard preview'); await settle();
+  previewEntries=['Uncertain D','Later E'].map(title=>({...candidate(title),allDay:true}));
+  click('Extract preview'); await settle();
+  nextCreateFailure=Object.assign(Error('Response lost'),{status:503,accepted:true});
+  click('Add all valid events (2)'); await settle();
+  check(host.querySelector('.import-preview-warning[role="status"]')?.textContent.includes('1 unconfirmed')
+    && host.querySelector('.events-list')?.textContent.includes('Uncertain D')
+    && button('Add all valid events (1)')
+    && calls.filter(call=>call.action==='create'&&call.event.title==='Later E').length===0,
+  'uncertain response stops batch after admitted work and excludes it from automatic retry');
+  click('Add all valid events (1)'); await settle();
+  check(host.querySelector('.events-list')?.textContent.includes('Later E')
+    && calls.filter(call=>call.action==='create'&&call.event.title==='Uncertain D').length===1,
+  'later retry saves only unattempted work and does not replay uncertain mutation');
+  click('Discard preview'); await settle();
+  previewEntries=[{...candidate('Held F'),allDay:true}];
+  click('Extract preview'); await settle();
+  let releaseBulk; mutationGate=new Promise(resolve=>{releaseBulk=resolve;});
+  click('Add all valid events (1)'); await settle();
+  const heldCalls=calls.filter(call=>call.action==='create'&&call.event.title==='Held F').length;
+  click('Add all valid events (1)'); await settle();
+  check(heldCalls===1 && calls.filter(call=>call.action==='create'&&call.event.title==='Held F').length===1
+    && button('Add all valid events (1)')?.disabled && button('Upload PDF')?.matches(':disabled'),
+  'pending bulk write disables repeated clicks and source switching while submitting once');
+  mutationGate=null; releaseBulk(); await settle();
+  check(host.querySelector('.events-list')?.textContent.includes('Held F'),
+    'held bulk save settles before its result is applied');
+  click('Discard preview'); await settle();
+  previewEntries=[{...candidate('Preflight G'),allDay:true}];
+  click('Extract preview'); await settle();
+  nextFailure=Object.assign(Error('List unavailable'),{status:503});
+  click('Add all valid events (1)'); await settle();
+  check(!calls.some(call=>call.action==='create'&&call.event.title==='Preflight G')
+    && host.querySelector('.import-preview-warning[role="status"]')?.textContent.includes('Nothing was submitted')
+    && host.querySelectorAll('.import-preview-entry').length===1,
+  'failed preflight list submits no event and retains the suggestion');
+  click('Add all valid events (1)'); await settle();
+  check(calls.filter(call=>call.action==='create'&&call.event.title==='Preflight G').length===1,
+    'retry after a definite preflight failure writes only once');
+  click('Discard preview'); await settle();
+  click('Hide events');
   document.body.dataset.testResult = 'passed';
   document.body.append(Object.assign(document.createElement('pre'), { textContent: `${results.length} Events browser assertions passed` }));
 }

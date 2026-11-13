@@ -46,3 +46,11 @@ test('file and text limits reject before session lookup', async () => {
   assert.match(importSourceError({ mode: 'image', file: new Blob(['x'], { type: 'image/svg+xml' }) }), /PNG or JPEG/);
   assert.match(importSourceError({ mode: 'xlsx', file: new File(['x'], 'calendar.xls', { type: 'application/octet-stream' }) }), /Excel/);
 });
+test('complete calendar PDF can return more than the AI preview limit without expanding other sources', async () => {
+  const entries=Array.from({length:101},(_,i)=>({...event,title:`Meeting ${i}`}));
+  const extract=createImportPreviewApi({getSession:async()=>({access_token:'synthetic-session'}),
+    fetchImpl:async url=>new Response(JSON.stringify({destination:'events',entries,
+      ...(url.includes('extract-pdf')?{pageCount:3}:{})}))});
+  assert.equal((await extract({destination:'events',mode:'pdf',file,...year})).entries.length,101);
+  await assert.rejects(extract({destination:'events',mode:'text',text:'Meetings',...year}),/safely read/);
+});

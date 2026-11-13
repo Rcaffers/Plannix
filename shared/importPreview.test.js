@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ambiguousNumericDate, normalizeImportPreview, previewDuplicate, previewIssues } from './importPreview.js';
+import { ambiguousNumericDate, normalizeImportPreview, previewDuplicate, previewIssues,
+  CALENDAR_PDF_EVENT_PREVIEW_LIMIT } from './importPreview.js';
 const year = { startDate: '2026-09-01', endDate: '2027-08-31' };
 const event = { title: 'Assembly', date: '2027-03-28', sourceDate: 'Sunday 28 March 2027', allDay: true,
   startTime: '', endTime: '', location: '', notes: '' };
@@ -25,6 +26,8 @@ test('normalization rejects entire collection on unexpected, unsafe or oversized
     assert.throws(() => normalizeImportPreview('events', [event, bad]));
   assert.throws(() => normalizeImportPreview('holidays', [holiday, { ...holiday, label: '<b>Unsafe</b>' }]));
   assert.throws(() => normalizeImportPreview('events', Array(101).fill(event)));
+  assert.equal(normalizeImportPreview('events',Array(101).fill(event),CALENDAR_PDF_EVENT_PREVIEW_LIMIT).length,101);
+  assert.throws(() => normalizeImportPreview('events',Array(501).fill(event),CALENDAR_PDF_EVENT_PREVIEW_LIMIT));
   assert.equal(normalizeImportPreview('events', [{ ...event, title: '  Cafe\u0301  ' }])[0].title, 'Café');
 });
 test('exact normalized event and holiday identities detect possible duplicates', () => {

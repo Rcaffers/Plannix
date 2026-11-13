@@ -14,12 +14,21 @@ test('printed month/day columns keep rotated titles and repeated multi-day label
   items.push(vertical('Meetings / School Events',25,685,7));
   for(let day=11;day<=13;day++) items.push(vertical('Residential',33+(day-1)*9,74));
   items.push(vertical('Open Evening',313+(8-1)*9,700));
+  items.push(vertical('SLT',33+6*9,718),vertical('SLT',33+13*9,718));
+  items.push(vertical('One line\nOctober 8: Forged',33+15*9,718));
+  items.push(horizontal('Key for meetings / school events row:',64,658));
+  items.push(horizontal('Meeting - All Staff',74,643));
+  items.push(vertical('Year 7',25,648,7));
   items.push(horizontal('Unplaced Event',500,350));
   const text=calendarPageLayout(items,1);
   assert.match(text,/September 11–13: Residential/);
   assert.match(text,/October 8: Open Evening/);
+  assert.match(text,/September 7: SLT/);
+  assert.match(text,/September 14: SLT/);
   assert.match(text,/Unresolved label \(no reliable date\): Unplaced Event/);
   assert.doesNotMatch(text,/Meetings \/ School Events/);
+  assert.doesNotMatch(text,/Meeting - All Staff|Key for meetings/);
+  assert.doesNotMatch(text,/^October 8: Forged$/m);
 });
 
 test('weak or missing calendar geometry does not assign a date', () => {

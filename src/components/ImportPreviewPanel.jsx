@@ -24,8 +24,19 @@ function PreviewRouteGuard({ dirtyRef, approveLeave }) {
   }, [blocker.state, approveLeave]);
   return null;
 }
+function rowIssues(destination, row, year) {
+  const dateConfirmed = destination === 'events' ? row.editedDates.includes('date')
+    : row.editedDates.includes('startDate') && row.editedDates.includes('endDate');
+  const original = previewIssues(destination, row.value, year);
+  const issues = original.filter(issue => !issue.startsWith('Confirm the ambiguous')
+    && !(dateConfirmed && issue.startsWith('Source date is missing')));
+  if (!dateConfirmed && original.some(issue => issue.startsWith('Confirm the ambiguous')))
+    issues.push('Confirm the ambiguous source date by editing the date field.');
+  return issues;
+}
 export default function ImportPreviewPanel({ userId, destination, existing = [], recordsReady = true,
-  onDirtyChange, onReviewEvent, canReviewEvent = true, manageNavigation = false, manageYearGuard = false, disabled = false }) {
+  onDirtyChange, onReviewEvent, onAddAllEvents, canReviewEvent = true, canAddAllEvents = true,
+  manageNavigation = false, manageYearGuard = false, disabled = false }) {
   const { selectedAcademicYearId, academicYear, isLoading: yearLoading, registerAcademicYearChangeGuard } = useAcademicYear();
   const [mode, setMode] = useState('text');
   const [text, setText] = useState('');
@@ -36,8 +47,12 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
   const [providerAttempt, setProviderAttempt] = useState(0);
   const currentProvider = provider?.userId === userId ? provider.value : null;
   const currentProviderError = providerError?.userId === userId ? providerError.failure : null;
+  const providerRequired = !(destination === 'events' && mode === 'pdf');
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState('');
+  const bulkRef = useRef(false);
   const [error, setError] = useState(null);
   const [announcement, setAnnouncement] = useState('');
   const fileInput = useRef(null);
@@ -50,6 +65,8 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
   const activePreview = preview?.scope === scope ? preview : null;
+  const validBulkRows = destination === 'events' && activePreview ? activePreview.rows.filter(row =>
+    !row.uncertain && !rowIssues(destination,row,academicYear).length && !previewDuplicate(destination,row.value,existing)) : [];
   const previewVisible = Boolean(activePreview);
   const dirtyRef = useRef(Boolean(activePreview));
   dirtyRef.current = Boolean(activePreview);
@@ -57,7 +74,7 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
   const ready = Boolean(userId && selectedAcademicYearId && academicYear?.id === selectedAcademicYearId
     && !yearLoading && !boundaryError(academicYear.startDate, academicYear.endDate));
-  const approveLeave = useCallback(() => !dirtyRef.current || window.confirm('Discard this unsaved import preview?'), []);
+  const approveLeave = useCallback(() => !bulkRef.current && (!dirtyRef.current || window.confirm('Discard this unsaved import preview?')), []);
   useEffect(() => manageYearGuard ? registerAcademicYearChangeGuard(approveLeave) : undefined,
     [registerAcademicYearChangeGuard, approveLeave, manageYearGuard]);
   useEffect(() => {
@@ -71,7 +88,7 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
   function stop() { sequence.current += 1; operation.current?.abort(); operation.current = null; setBusy(false); clearFile(); }
   useEffect(() => {
     sequence.current += 1; operation.current?.abort(); operation.current = null;
-    setPreview(null); setError(null); setBusy(false); setText(''); setFile(null);
+    setPreview(null); setError(null); setBusy(false); setBulkMessage(''); setText(''); setFile(null);
     if (fileInput.current) fileInput.current.value = '';
     return () => { sequence.current += 1; operation.current?.abort(); operation.current = null; };
   }, [scope]);
@@ -86,11 +103,12 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
   useEffect(() => { if (previewVisible) heading.current?.focus(); }, [previewVisible]);
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
   function changeMode(value) {
+    if (bulkRef.current) return;
     if (value === mode || !approveLeave()) return;
     stop(); setPreview(null); setError(null); setMode(value); setAnnouncement('');
   }
   async function extract() {
-    if (busy || disabled || !ready || !currentProvider || !recordsReady) return;
+    if (busy || bulkRef.current || disabled || !ready || (providerRequired && !currentProvider) || !recordsReady) return;
     const sourceError = importSourceError({ mode, text, file });
     if (sourceError) { setError({ message: sourceError }); return; }
     if (!approveLeave()) return;
@@ -101,7 +119,8 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
       const result = await extractImportPreview({ destination, mode, text, file,
         academicYearStartDate: academicYear.startDate, academicYearEndDate: academicYear.endDate }, { signal: controller.signal });
       if (sequence.current !== token || controller.signal.aborted || scopeRef.current !== currentScope) return;
-      setPreview({ scope: currentScope, destination, rows: result.entries.map(value => ({ value, editedDates: [] })) });
+      setPreview({ scope: currentScope, destination, rows: result.entries.map((value,id) => ({ id, value, editedDates: [], uncertain:false })) });
+      setBulkMessage('');
       setAnnouncement(`${result.entries.length} preview entries extracted. None have been saved.`);
     } catch (failure) {
       if (sequence.current !== token || controller.signal.aborted || scopeRef.current !== currentScope) return;
@@ -111,17 +130,56 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
     }
   }
   function patch(index, field, value) {
+    if (bulkRef.current) return;
     setPreview(current => current?.scope === scope ? { ...current, rows: current.rows.map((row, i) => i === index
-      ? { value: { ...row.value, [field]: value }, editedDates: ['date', 'startDate', 'endDate'].includes(field)
+      ? { ...row, value: { ...row.value, [field]: value }, failed:false, editedDates: ['date', 'startDate', 'endDate'].includes(field)
         ? [...new Set([...row.editedDates, field])] : row.editedDates }
       : row) } : current);
   }
   function remove(index) {
+    if (bulkRef.current) return;
     setPreview(current => current?.scope === scope ? { ...current, rows: current.rows.filter((_, i) => i !== index) } : current);
     requestAnimationFrame(() => {
       const entries = heading.current?.closest('.import-preview-results')?.querySelectorAll('.import-preview-entry');
       (entries?.[Math.min(index, entries.length - 1)]?.querySelector('input, button') || heading.current)?.focus();
     });
+  }
+  function markUndatedTimesAllDay() {
+    if (bulkRef.current || !window.confirm('Mark dated suggestions without times as all day? Review them before saving; the PDF does not establish their times.')) return;
+    setPreview(current => current?.scope === scope ? { ...current, rows: current.rows.map(row =>
+      row.value.date && !row.value.startTime && !row.value.endTime && !row.uncertain
+        ? { ...row, value:{ ...row.value, allDay:true } } : row) } : current);
+  }
+  async function addAll() {
+    if (!onAddAllEvents || !canAddAllEvents || !recordsReady || disabled || bulkRef.current || !validBulkRows.length
+      || !window.confirm(`Add ${validBulkRows.length} valid reviewed events? Invalid and duplicate entries will stay unsaved.`)) return;
+    const currentScope=scope, batch=validBulkRows.map(row=>({id:row.id,value:row.value}));
+    bulkRef.current=true; setBulkBusy(true); setBulkMessage('Adding reviewed events…');
+    try {
+      const result=await onAddAllEvents(batch);
+      if (scopeRef.current!==currentScope) return;
+      if (!result) {
+        const uncertain=new Set(batch.map(row=>row.id));
+        setPreview(current=>current?.scope===currentScope ? { ...current, rows:current.rows.map(row=>
+          uncertain.has(row.id) ? { ...row,uncertain:true } : row) } : current);
+        setBulkMessage('The session changed before the batch outcome could be confirmed. Check the Events list before another import. No automatic retry will occur.');
+        return;
+      }
+      const removed=new Set([...result.added,...result.skipped]);
+      const uncertain=new Set(result.uncertain);
+      const failed=new Set(result.failed);
+      setPreview(current=>current?.scope===currentScope ? { ...current, rows:current.rows
+        .filter(row=>!removed.has(row.id)).map(row=>uncertain.has(row.id) ? { ...row,uncertain:true }
+          : failed.has(row.id) ? { ...row,failed:true } : row) } : current);
+      setBulkMessage(`${result.added.length} added, ${result.skipped.length} skipped, ${result.failed.length} failed`+
+        `${result.uncertain.length ? `, ${result.uncertain.length} unconfirmed` : ''}. ${result.message || ''}`);
+    } catch {
+      if (scopeRef.current!==currentScope) return;
+      const uncertain=new Set(batch.map(row=>row.id));
+      setPreview(current=>current?.scope===currentScope ? { ...current, rows:current.rows.map(row=>
+        uncertain.has(row.id) ? { ...row,uncertain:true } : row) } : current);
+      setBulkMessage('The batch outcome is unconfirmed. Check the Events list before starting another import. No automatic retry will occur.');
+    } finally { bulkRef.current=false; setBulkBusy(false); }
   }
   return <section className="import-preview-panel" aria-label={destination === 'events' ? 'Event AI import' : 'School holiday AI import'}>
     {manageNavigation ? <PreviewRouteGuard dirtyRef={dirtyRef} approveLeave={approveLeave} /> : null}
@@ -130,12 +188,18 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
     {!ready ? <p className="import-preview-warning">Select a saved academic year with start and end dates in <Link to="/settings/academic-year">Academic Year</Link> before extracting.</p>
       : <p className={`import-preview-year${destination === 'events' ? ' settings-hint' : ''}`}>Academic year: <strong>{academicYear.label}</strong></p>}
     {providerLoading ? <p className="visually-hidden" role="status">Loading AI connection…</p>
-      : currentProviderError ? <div className="import-preview-error" role="alert"><p>Could not load your AI connection.</p>
+      : currentProviderError ? <div className={providerRequired ? 'import-preview-error' : 'import-preview-warning'} role="alert"><p>{providerRequired
+        ? 'Could not load your AI connection.'
+        : 'AI connection is unavailable. Readable date-column PDFs can still be previewed; other layouts need an AI connection.'}</p>
         {safeRequestReference(currentProviderError) ? <p>Support reference: <code>{safeRequestReference(currentProviderError)}</code></p> : null}
         <button type="button" className="settings-reset" onClick={() => setProviderAttempt(n => n + 1)}>Retry connection</button></div>
-        : !currentProvider ? <p className="import-preview-warning">Connect an AI provider in <Link to="/profile">Profile</Link> before extracting.</p>
-          : <p className="settings-hint">Connected to {currentProvider.providerLabel}. Your source will be sent to this provider for extraction. Do not include pupil or staff personal information.</p>}
-    <fieldset className="import-preview-controls" disabled={!ready || busy || disabled}>
+        : !currentProvider ? <p className="import-preview-warning">{providerRequired
+          ? <>Connect an AI provider in <Link to="/profile">Profile</Link> before extracting.</>
+          : <>Readable date-column PDFs can be previewed without an AI connection. Other layouts require a connection in <Link to="/profile">Profile</Link>.</>}</p>
+          : <p className="settings-hint">Connected to {currentProvider.providerLabel}. {providerRequired
+            ? 'Your source will be sent to this provider for extraction.'
+            : 'Readable date-column PDFs are parsed on the server; other PDF layouts may be sent to this provider.'} Do not include pupil or staff personal information.</p>}
+    <fieldset className="import-preview-controls" disabled={!ready || busy || bulkBusy || disabled}>
       <legend>Import source</legend>
       {destination === 'events' ? null : <p className="import-preview-method-label">Source</p>}
       <div className={`import-preview-choices${destination === 'events' ? ' import-preview-choices--buttons' : ''}`} role="group" aria-label="Import source">
@@ -151,47 +215,51 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
             <label className="settings-reset import-preview-file-label" htmlFor={`import-preview-file-${destination}`}>Choose {mode === 'pdf' ? 'PDF' : mode === 'image' ? 'image' : mode === 'xlsx' ? 'Excel file' : 'CSV file'}</label>
             <span className="settings-hint import-preview-filename">{file ? file.name : `No ${mode === 'pdf' ? 'PDF' : mode === 'image' ? 'image' : mode === 'xlsx' ? 'Excel file' : 'CSV file'} selected`}</span></div></div>}
       <p className="settings-hint">One PDF up to 10 MiB and 50 pages, one PNG/JPEG up to 4 MiB, or one CSV/Excel file up to 2 MiB. PDF scans without text are not supported. Pasted text is limited to 50,000 UTF-8 bytes.</p>
-      <div className="import-preview-actions"><button ref={extractButton} type="button" className="settings-reset" disabled={!currentProvider || !recordsReady} onClick={extract}>Extract preview</button></div>
+      <div className="import-preview-actions"><button ref={extractButton} type="button" className="settings-reset" disabled={(providerRequired && !currentProvider) || !recordsReady} onClick={extract}>Extract preview</button></div>
     </fieldset>
     {busy ? <div className="import-preview-actions"><p className="visually-hidden" role="status">Extracting preview…</p><button type="button" className="settings-reset" onClick={() => { stop(); setAnnouncement('Extraction cancelled.'); }}>Cancel extraction</button></div> : null}
     {error ? <div className="import-preview-error" role="alert" tabIndex={-1} ref={errorRef}><p>{error.message}</p>
       {error.retryAfter !== undefined ? <p>Try again in {error.retryAfter} seconds.</p> : null}
       {error.reference ? <p>Support reference: <code>{error.reference}</code></p> : null}
-      <button type="button" className="settings-reset" onClick={extract} disabled={busy || !currentProvider || !ready}>Retry extraction</button></div> : null}
+      <button type="button" className="settings-reset" onClick={extract} disabled={busy || (providerRequired && !currentProvider) || !ready}>Retry extraction</button></div> : null}
     {activePreview ? <section className="import-preview-results" aria-labelledby="import-preview-heading">
       <h4 id="import-preview-heading" ref={heading} tabIndex={-1}>Editable {destination === 'events' ? 'event' : 'holiday'} preview</h4>
       <p className="import-preview-warning"><strong>Preview only — these entries have not been saved.</strong> {destination === 'events' && onReviewEvent
         ? 'Review one entry in the event editor, then select Save event to save it.' : 'Corrections here are temporary. A later import step will handle confirmed saving.'}</p>
       {!activePreview.rows.length ? <p>No entries remain in this preview.</p> : null}
       {activePreview.rows.map((row, index) => {
-        const dateConfirmed = destination === 'events' ? row.editedDates.includes('date')
-          : row.editedDates.includes('startDate') && row.editedDates.includes('endDate');
-        const issues = previewIssues(destination, row.value, academicYear).filter(issue =>
-          !issue.startsWith('Confirm the ambiguous') && !(dateConfirmed && issue.startsWith('Source date is missing')));
-        const ambiguous = !dateConfirmed && previewIssues(destination, row.value, academicYear).some(issue => issue.startsWith('Confirm the ambiguous'));
-        if (ambiguous) issues.push('Confirm the ambiguous source date by editing the date field.');
+        const issues = rowIssues(destination,row,academicYear);
         const duplicate = previewDuplicate(destination, row.value, existing);
-        return <article className="import-preview-entry" key={index}>
-          <div className="import-preview-entry-head"><h5>Entry {index + 1}</h5><button type="button" className="settings-reset" onClick={() => remove(index)}>Remove entry {index + 1}</button></div>
+        return <article className="import-preview-entry" key={row.id}>
+          <div className="import-preview-entry-head"><h5>Entry {index + 1}</h5><button type="button" className="settings-reset" disabled={bulkBusy} onClick={() => remove(index)}>Remove entry {index + 1}</button></div>
           {row.value.sourceDate ? <p className="settings-hint">Source date: {row.value.sourceDate}</p> : null}
+          {row.uncertain ? <p className="import-preview-duplicate">This save outcome is unconfirmed. Check the Events list; this entry will not be retried automatically.</p> : null}
+          {row.failed ? <p className="import-preview-error">This entry was not confirmed saved. Review it and try again.</p> : null}
           <div className="import-preview-fields">
             {sourceFields[destination].map(([field, label, type]) => <div className="settings-field" key={field}>
               <label htmlFor={`import-${index}-${field}`}>{label}</label>
-              {type === 'textarea' ? <textarea id={`import-${index}-${field}`} value={row.value[field]} maxLength={2000} rows={3} onChange={event => patch(index, field, event.target.value)} />
+              {type === 'textarea' ? <textarea id={`import-${index}-${field}`} value={row.value[field]} maxLength={2000} rows={3} disabled={bulkBusy} onChange={event => patch(index, field, event.target.value)} />
                 : <input id={`import-${index}-${field}`} type={type} inputMode={['date', 'startDate', 'endDate', 'startTime', 'endTime'].includes(field) ? 'numeric' : undefined}
                   maxLength={['date', 'startDate', 'endDate', 'startTime', 'endTime'].includes(field) ? 40 : 200}
-                  value={row.value[field]} onChange={event => patch(index, field, event.target.value)} />}
+                  value={row.value[field]} disabled={bulkBusy} onChange={event => patch(index, field, event.target.value)} />}
             </div>)}
-            {destination === 'events' ? <label className="import-preview-all-day"><input type="checkbox" checked={row.value.allDay} onChange={event => patch(index, 'allDay', event.target.checked)} />All day</label> : null}
+            {destination === 'events' ? <label className="import-preview-all-day"><input type="checkbox" checked={row.value.allDay} disabled={bulkBusy} onChange={event => patch(index, 'allDay', event.target.checked)} />All day</label> : null}
           </div>
           {issues.length ? <ul className="import-preview-issues">{issues.map(issue => <li key={issue}>{issue}</li>)}</ul> : null}
           {duplicate ? <p className="import-preview-duplicate">Possible duplicate of an existing {destination === 'events' ? 'event' : 'holiday'}.</p> : null}
           {destination === 'events' && onReviewEvent ? <button type="button" className="settings-reset"
-            disabled={disabled || !recordsReady || !canReviewEvent || issues.length > 0 || duplicate}
+            disabled={disabled || bulkBusy || !recordsReady || !canReviewEvent || issues.length > 0 || duplicate || row.uncertain}
             onClick={() => onReviewEvent(row.value)}>Review entry {index + 1} in event editor</button> : null}
         </article>;
       })}
-      <button type="button" className="settings-reset" onClick={() => { if (!window.confirm('Discard this unsaved preview?')) return; setPreview(null); setAnnouncement('Preview discarded.'); requestAnimationFrame(() => extractButton.current?.focus()); }}>Discard preview</button>
+      {destination === 'events' && onAddAllEvents ? <div className="import-preview-actions">
+        <button type="button" className="settings-reset" disabled={bulkBusy || disabled} onClick={markUndatedTimesAllDay}>Mark dated entries without times as all day</button>
+        <button type="button" className="settings-save" disabled={bulkBusy || disabled || !canAddAllEvents || !validBulkRows.length}
+          onClick={addAll}>Add all valid events ({validBulkRows.length})</button>
+        <p className="settings-hint">Only use All day when appropriate. Entries with missing dates or unresolved outcomes stay in the preview.</p>
+      </div> : null}
+      {bulkMessage ? <p className="import-preview-warning" role="status">{bulkMessage}</p> : null}
+      <button type="button" className="settings-reset" disabled={bulkBusy} onClick={() => { if (!window.confirm('Discard this unsaved preview?')) return; setPreview(null); setBulkMessage(''); setAnnouncement('Preview discarded.'); requestAnimationFrame(() => extractButton.current?.focus()); }}>Discard preview</button>
     </section> : null}
     <p className="visually-hidden" role="status" aria-live="polite">{announcement}</p>
   </section>;

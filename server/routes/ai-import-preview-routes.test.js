@@ -4,6 +4,7 @@ import express from 'express';
 import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import { zipSync } from 'fflate';
+import { previewIssues } from '../../shared/importPreview.js';
 import { createRequireSupabaseAuth } from '../middleware/requireSupabaseAuth.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { requestId } from '../middleware/requestId.js';
@@ -129,18 +130,29 @@ test('cancellation keeps the per-user lock until non-cooperative work actually s
 if (process.env.PLANNIX_CALENDAR_REGRESSION_PDF) test('supplied PDF reaches event preview with corroborated dates, never a save', async t => {
   const {extractTextFromHolidayPdf}=await import('../pdf/extractTextFromHolidayPdf.js');
   const source=await readFile(process.env.PLANNIX_CALENDAR_REGRESSION_PDF);
-  const proposed={...event,title:'Open Evening',date:'2026-10-08',sourceDate:'untrusted',
-    allDay:true,startTime:'09:00',endTime:'17:00'};
-  const h=await setup(t,{extractPdf:extractTextFromHolidayPdf,generate:async args=>{
-    assert.match(args.userContent,/October 8: Open Evening/);
-    assert.match(args.userContent,/September 11–13: Kielder Forest Residential/);
-    return {entries:[proposed,{...proposed,date:'2026-10-09'}]};
-  }});
+  let providerCalls=0;
+  const h=await setup(t,{extractPdf:extractTextFromHolidayPdf,generate:async()=>{ providerCalls++; throw Error('Unexpected AI call'); }});
   const response=await h.request(`/extract-pdf?${query('events')}`,source,'application/pdf');
   assert.equal(response.status,200);
   const body=await response.json();
   assert.equal(body.pageCount,3);
-  assert.deepEqual(body.entries[0],{...proposed,sourceDate:'October 8',allDay:false,startTime:'',endTime:''});
-  assert.equal(body.entries[1].date,'','a model-suggested different day is left for review');
-  assert.equal(body.entries[1].sourceDate,'October 8');
+  assert.equal(providerCalls,0,'complete aligned pages do not depend on a provider output cap');
+  assert.equal(body.entries.length,302);
+  assert.equal(body.entries.filter(row=>Boolean(row.date)).length,248);
+  assert.ok(body.entries.some(row=>row.title==='Week)'&&!row.date&&row.sourceDate==='October 22'));
+  assert.ok(body.entries.some(row=>/TBC$/.test(row.title)&&!row.date));
+  assert.ok(body.entries.every(row=>!/- Cancelled$/.test(row.title)));
+  const bounds={startDate:year.academicYearStartDate,endDate:year.academicYearEndDate};
+  assert.equal(body.entries.filter(row=>!previewIssues('events',row,bounds).length).length,0);
+  assert.equal(body.entries.filter(row=>row.date&&!previewIssues('events',{...row,allDay:true},bounds).length).length,248);
+  assert.equal(body.entries.filter(row=>row.title==='SLT').length,38);
+  assert.ok(body.entries.some(row=>row.title==='Open Evening'&&row.date==='2026-10-08'));
+  assert.ok(body.entries.some(row=>row.title==='Yr9 Options Evening'&&row.date==='2027-01-21'));
+  assert.deepEqual(body.entries.filter(row=>row.title.startsWith('Kielder Forest Residential')).map(row=>row.date),
+    ['2026-09-11','2026-09-12','2026-09-13']);
+  assert.deepEqual(body.entries.filter(row=>row.title.startsWith('PGL Residential')).map(row=>row.date),
+    ['2027-05-14','2027-05-15','2027-05-16']);
+  assert.ok(body.entries.some(row=>row.title.includes('Autumn Monitor')&&!row.date));
+  assert.ok(body.entries.every(row=>!row.allDay&&!row.startTime&&!row.endTime));
+  assert.ok(body.entries.every(row=>!/^(?:Key for|Meeting - All Staff|Meeting selected staff|After school event|Autumn Term)/.test(row.title)));
 });

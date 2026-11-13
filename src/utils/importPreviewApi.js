@@ -1,7 +1,8 @@
 import { getSupabaseClient } from '../lib/supabase.js';
 import { serverManagedAuth, serverAuthFetch, captureServerOperationContext } from './serverAuthTransport.js';
 import { API_BASE_URL, ApiError, parseJsonSafe } from './api.js';
-import { IMPORT_DESTINATIONS, IMPORT_IMAGE_BYTES, IMPORT_TEXT_BYTES, normalizeImportPreview } from '../../shared/importPreview.js';
+import { IMPORT_DESTINATIONS, IMPORT_IMAGE_BYTES, IMPORT_TEXT_BYTES, normalizeImportPreview,
+  CALENDAR_PDF_EVENT_PREVIEW_LIMIT } from '../../shared/importPreview.js';
 import { boundaryError } from './holidayReview.js';
 
 export function importSourceError({ mode, text, file }) {
@@ -77,7 +78,8 @@ export function createImportPreviewApi({ fetchImpl = fetch, getSession = session
         || (mode === 'pdf' && (!Number.isInteger(payload.pageCount) || payload.pageCount < 1 || payload.pageCount > 50)))
         throw new ApiError(safeMessages[502], { status: 502, requestId });
       let entries;
-      try { entries = normalizeImportPreview(destination, payload.entries); }
+      try { entries = normalizeImportPreview(destination, payload.entries,
+        mode === 'pdf' && destination === 'events' ? CALENDAR_PDF_EVENT_PREVIEW_LIMIT : undefined); }
       catch { throw new ApiError(safeMessages[502], { status: 502, requestId }); }
       return { destination, entries, ...(mode === 'pdf' ? { pageCount: payload.pageCount } : {}) };
     } catch (error) {

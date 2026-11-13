@@ -1,7 +1,7 @@
 import express from 'express';
 import { verifyHolidayJson } from '../ai/strictHolidayJson.js';
 import { validateImportInput, importGenerationInput, validateImportResult,
-  verifyCalendarEventSuggestions } from '../ai/importPreview.js';
+  verifyCalendarEventSuggestions, calendarPdfEventPreview } from '../ai/importPreview.js';
 import { validateImportImage } from '../ai/importImage.js';
 import { extractCsvText, extractXlsxText, IMPORT_TABULAR_BYTES } from '../ai/importTabular.js';
 import { generateStructuredJsonForUser } from '../ai/generateStructuredJson.js';
@@ -65,6 +65,11 @@ async function settle({ input, mode, data, userId, signal, generate, extractPdf 
       validateImportInput(input);
     }
     if (signal.aborted) throw Object.assign(Error(), { code: 'AI_CANCELLED' });
+    if (mode === 'pdf' && input.destination === 'events') {
+      const entries = calendarPdfEventPreview(input.text, input.academicYearStartDate,
+        input.academicYearEndDate, pageCount);
+      if (entries) return { destination: 'events', entries, pageCount };
+    }
     const result = await generate(importGenerationInput(userId, input, image), { signal });
     if (signal.aborted) throw Object.assign(Error(), { code: 'AI_CANCELLED' });
     const preview = validateImportResult(result, input.destination);

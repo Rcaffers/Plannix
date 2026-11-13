@@ -41,14 +41,15 @@ async function defaultSession() {
 
 export function createEventApi({ fetchImpl = fetch, getSession = defaultSession } = {}) {
   async function request(path, options, fallback) {
-    const operationContext = serverManagedAuth ? captureServerOperationContext() : null;
+    const { operationContext: suppliedContext, ...requestOptions } = options;
+    const operationContext = serverManagedAuth ? suppliedContext || captureServerOperationContext() : null;
     if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     const session = serverManagedAuth ? null : await getSession();
     if (!serverManagedAuth && !session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
     if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     let response;
     try {
-      const init = { ...options, credentials: 'omit', headers: { ...options.headers,
+      const init = { ...requestOptions, credentials: 'omit', headers: { ...options.headers,
         ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.access_token}` }) } };
       response = serverManagedAuth
         ? await serverAuthFetch(`${API_BASE_URL}${path}`, init, { fetchImpl, operationContext })
@@ -68,7 +69,7 @@ export function createEventApi({ fetchImpl = fetch, getSession = defaultSession 
     return { payload, requestId: safeId };
   }
   return {
-    async list(academicYearId, { from, to, signal } = {}) {
+    async list(academicYearId, { from, to, signal, operationContext } = {}) {
       uuid(academicYearId, 'Academic year');
       if ((from === undefined) !== (to === undefined)) throw new ApiError('Both event date filters are required.');
       const query = new URLSearchParams({ academicYearId });
@@ -79,7 +80,7 @@ export function createEventApi({ fetchImpl = fetch, getSession = defaultSession 
         }
         query.set('from', from); query.set('to', to);
       }
-      const { payload, requestId } = await request(`/api/events?${query}`, { method: 'GET', signal }, 'Could not load events.');
+      const { payload, requestId } = await request(`/api/events?${query}`, { method: 'GET', signal, operationContext }, 'Could not load events.');
       if (!Array.isArray(payload?.events) || payload.events.length > 500) throw new ApiError('The server returned invalid event data.');
       const events = payload.events.map(publicEvent);
       const ids = new Set();
@@ -91,11 +92,11 @@ export function createEventApi({ fetchImpl = fetch, getSession = defaultSession 
       })) throw new ApiError('The server returned invalid event data.');
       return { events, requestId };
     },
-    async create(academicYearId, event, { signal } = {}) {
+    async create(academicYearId, event, { signal, operationContext } = {}) {
       uuid(academicYearId, 'Academic year');
       const fields = eventFields(event);
       const { payload, requestId } = await request('/api/events', { method: 'POST', headers: JSON_POST_HEADERS,
-        body: JSON.stringify({ academicYearId, event: fields }), signal }, 'Could not save event.');
+        body: JSON.stringify({ academicYearId, event: fields }), signal, operationContext }, 'Could not save event.');
       const saved = publicEvent(payload?.event);
       if (saved.academicYearId !== academicYearId) throw new ApiError('The server returned invalid event data.');
       return { event: saved, requestId };

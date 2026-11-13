@@ -54,10 +54,16 @@ export function calendarPageLayout(items, pageNumber) {
     previousRun = candidate.index; previousMonth = month;
   }
   const anchors = runs.flatMap(run => run.map(date => ({ ...date, month: run.month || null })));
+  const legend = labelled.find(item => horizontal(item) && /^Key for meetings \/ school events row:/i.test(item.str.trim()));
+  const inLegend = item => legend && horizontal(item)
+    && position(item).x >= position(legend).x - 2 && position(item).x <= position(legend).x + 190
+    && position(item).y <= position(legend).y + 2 && position(item).y >= position(legend).y - 175;
   const placed = [], unresolved = [];
   for (const item of labelled) {
-    const title = item.str.trim();
+    const title = item.str.replace(/\s+/gu, ' ').trim();
     if (!title || /^(?:[1-9]|[12]\d|3[01])$/.test(title) || monthIndex(title) >= 0) continue;
+    if (inLegend(item) || position(item).y > dateY + 5
+      || (vertical(item) && position(item).x < anchors[0].x - 2)) continue;
     if (vertical(item) && Math.abs(item.transform[1]) <= 6.5 && position(item).y < dateY - 12) {
       const nearest = anchors.map((anchor, index) => ({ anchor, index,
         distance: Math.abs(position(item).x - anchor.x) })).sort((a, b) => a.distance - b.distance)[0];
@@ -69,7 +75,7 @@ export function calendarPageLayout(items, pageNumber) {
     if (vertical(item) && Math.abs(item.transform[1]) > 6.5) continue;
     if (!vertical(item) && !horizontal(item)) continue;
     // Administrative labels and unaligned text remain review-only.
-    if (title.length > 3 && !/^(?:Print|QA|Home|SLT)$/i.test(title)) unresolved.push(title);
+    if (title.length > 1 && !/^(?:Print|Printing|QA|Home)$/i.test(title)) unresolved.push(title);
   }
   if (!placed.length) return null;
   const groups = new Map();
@@ -96,5 +102,5 @@ export function calendarPageLayout(items, pageNumber) {
   lines.sort((a, b) => a.index - b.index || b.y - a.y);
   return normalizePdfText([`Page ${pageNumber}: labels aligned with printed day columns. Ranges denote repeated labels on consecutive columns.`,
     ...lines.map(line => line.text),
-    ...[...new Set(unresolved)].map(title => `Unresolved label (no reliable date): ${title}`)].join('\n'));
+    ...unresolved.map(title => `Unresolved label (no reliable date): ${title}`)].join('\n'));
 }
