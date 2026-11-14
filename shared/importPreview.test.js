@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ambiguousNumericDate, normalizeImportPreview, previewDuplicate, previewIssues,
+import { ambiguousNumericDate, defaultEventPreviewAllDay, normalizeImportPreview, previewDuplicate, previewIssues,
   CALENDAR_PDF_EVENT_PREVIEW_LIMIT } from './importPreview.js';
 const year = { startDate: '2026-09-01', endDate: '2027-08-31' };
 const event = { title: 'Assembly', date: '2027-03-28', sourceDate: 'Sunday 28 March 2027', allDay: true,
@@ -20,6 +20,22 @@ test('missing times are not silently invented or labelled all day', () => {
   assert.deepEqual(previewIssues('events', { ...event, allDay: false }, year), ['Choose All day or enter valid paired times.']);
   assert.deepEqual(previewIssues('events', { ...event, allDay: false, startTime: '09:00', endTime: '10:00' }, year), []);
   assert.deepEqual(previewIssues('events', { ...event, startTime: '09:00' }, year), ['All-day entry cannot also have times.']);
+});
+test('editable event import defaults only suggestions with no supplied times to all day', () => {
+  const absent={...event,allDay:false};
+  assert.deepEqual(defaultEventPreviewAllDay(absent),{...absent,allDay:true});
+  assert.deepEqual(absent.allDay,false,'the source value is not mutated');
+  for (const supplied of [
+    {...event,allDay:true},
+    {...event,allDay:false,startTime:'09:00',endTime:'10:00'},
+    {...event,allDay:false,startTime:'09:00'},
+    {...event,allDay:false,startTime:'25:00',endTime:'26:00'},
+    {...event,allDay:true,startTime:'09:00',endTime:'10:00'},
+  ]) assert.deepEqual(defaultEventPreviewAllDay(supplied),supplied);
+  assert.deepEqual(previewIssues('events',defaultEventPreviewAllDay({...event,allDay:false,startTime:'09:00'}),year),
+    ['Choose All day or enter valid paired times.']);
+  assert.deepEqual(previewIssues('events',defaultEventPreviewAllDay({...event,allDay:false,startTime:'25:00',endTime:'26:00'}),year),
+    ['Check event fields.']);
 });
 test('normalization rejects entire collection on unexpected, unsafe or oversized provider output', () => {
   for (const bad of [{ ...event, title: '<script>' }, { ...event, title: 'x'.repeat(201) }, { ...event, ownerId: 'other' }])

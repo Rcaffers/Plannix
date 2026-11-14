@@ -7,6 +7,12 @@ export const CALENDAR_PDF_EVENT_PREVIEW_LIMIT = 500;
 export const IMPORT_TEXT_BYTES = 50_000;
 export const IMPORT_IMAGE_BYTES = 4 * 1024 * 1024;
 export const IMPORT_DESTINATIONS = ['holidays', 'events'];
+// Apply only when a normalized event first enters an editable preview. The
+// extraction schema's false value cannot distinguish "not stated" from a
+// deliberate time choice; the person can uncheck this import default.
+export function defaultEventPreviewAllDay(entry) {
+  return entry.startTime === '' && entry.endTime === '' ? { ...entry, allDay: true } : entry;
+}
 const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
   && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const text = (value, length, multiline = false) => {

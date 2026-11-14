@@ -52,7 +52,8 @@ async function run() {
     'holiday preview shows the selected year label without boundaries');
   check(host.textContent.includes('Preview only — not saved') && !host.querySelector('[name="import-destination"]'), 'holiday destination comes from section');
   input('#import-preview-text-holidays', 'INSET Day'); click('Extract preview'); await settle();
-  check(host.querySelectorAll('.import-preview-entry').length === 1 && host.textContent.includes('Possible duplicate'), 'holiday suggestions are editable in section');
+  check(host.querySelectorAll('.import-preview-entry').length === 1 && host.textContent.includes('Possible duplicate')
+    && !host.querySelector('.import-preview-all-day'), 'holiday suggestions remain editable without an event all-day control');
   input('#import-0-label', 'Corrected INSET Day'); check(host.querySelector('#import-0-label').value === 'Corrected INSET Day', 'preview corrections stay local');
   let prompts = 0; window.confirm = () => { prompts++; return false; }; await router.navigate('/settings/events'); await settle();
   check(router.state.location.pathname === '/settings/academic-year' && prompts === 1, 'preview blocks navigation');
@@ -67,7 +68,13 @@ async function run() {
   'Events import uses five accessible mode buttons with pasted text selected');
   input('#import-preview-text-events', 'Assembly and Trip'); click('Extract preview'); await settle();
   check(host.querySelectorAll('.import-preview-entry').length === 2 && host.textContent.includes('Confirm the ambiguous source date'), 'event preview flags ambiguity');
-  check(host.textContent.includes('Possible duplicate') && host.textContent.includes('Choose All day or enter valid paired times'), 'duplicate and missing times visible');
+  check(host.textContent.includes('Possible duplicate')
+    && [...host.querySelectorAll('.import-preview-all-day input')].every(node=>node.checked)
+    && host.textContent.includes('Entries without times are marked All day by default.'),
+  'duplicate warning and editable all-day import default are visible');
+  flushSync(()=>host.querySelectorAll('.import-preview-all-day input')[1].click());
+  check(host.textContent.includes('Choose All day or enter valid paired times'),
+    'unchecking All day requires paired times without discarding the suggestion');
   window.confirm = () => false; mode('pdf'); await settle();
   check(host.querySelectorAll('.import-preview-entry').length === 2
     && eventModes().find(node => node.textContent === 'Paste text').getAttribute('aria-pressed') === 'true'

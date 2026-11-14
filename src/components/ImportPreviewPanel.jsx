@@ -4,7 +4,7 @@ import { useAcademicYear } from '../context/AcademicYearContext.jsx';
 import { aiConnectionApi } from '../utils/aiConnectionApi.js';
 import { extractImportPreview, importSourceError } from '../utils/importPreviewApi.js';
 import { safeRequestReference } from '../utils/requestReference.js';
-import { previewDuplicate, previewIssues } from '../../shared/importPreview.js';
+import { defaultEventPreviewAllDay, previewDuplicate, previewIssues } from '../../shared/importPreview.js';
 import { boundaryError } from '../utils/holidayReview.js';
 import './ImportPreviewPanel.css';
 
@@ -119,7 +119,9 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
       const result = await extractImportPreview({ destination, mode, text, file,
         academicYearStartDate: academicYear.startDate, academicYearEndDate: academicYear.endDate }, { signal: controller.signal });
       if (sequence.current !== token || controller.signal.aborted || scopeRef.current !== currentScope) return;
-      setPreview({ scope: currentScope, destination, rows: result.entries.map((value,id) => ({ id, value, editedDates: [], uncertain:false })) });
+      setPreview({ scope: currentScope, destination, rows: result.entries.map((value,id) => ({ id,
+        value: destination === 'events' ? defaultEventPreviewAllDay(value) : value,
+        editedDates: [], uncertain:false })) });
       setBulkMessage('');
       setAnnouncement(`${result.entries.length} preview entries extracted. None have been saved.`);
     } catch (failure) {
@@ -143,12 +145,6 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
       const entries = heading.current?.closest('.import-preview-results')?.querySelectorAll('.import-preview-entry');
       (entries?.[Math.min(index, entries.length - 1)]?.querySelector('input, button') || heading.current)?.focus();
     });
-  }
-  function markUndatedTimesAllDay() {
-    if (bulkRef.current || !window.confirm('Mark dated suggestions without times as all day? Review them before saving; the PDF does not establish their times.')) return;
-    setPreview(current => current?.scope === scope ? { ...current, rows: current.rows.map(row =>
-      row.value.date && !row.value.startTime && !row.value.endTime && !row.uncertain
-        ? { ...row, value:{ ...row.value, allDay:true } } : row) } : current);
   }
   async function addAll() {
     if (!onAddAllEvents || !canAddAllEvents || !recordsReady || disabled || bulkRef.current || !validBulkRows.length
@@ -224,8 +220,11 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
       <button type="button" className="settings-reset" onClick={extract} disabled={busy || (providerRequired && !currentProvider) || !ready}>Retry extraction</button></div> : null}
     {activePreview ? <section className="import-preview-results" aria-labelledby="import-preview-heading">
       <h4 id="import-preview-heading" ref={heading} tabIndex={-1}>Editable {destination === 'events' ? 'event' : 'holiday'} preview</h4>
-      <p className="import-preview-warning"><strong>Preview only — these entries have not been saved.</strong> {destination === 'events' && onReviewEvent
-        ? 'Review one entry in the event editor, then select Save event to save it.' : 'Corrections here are temporary. A later import step will handle confirmed saving.'}</p>
+      <p className="import-preview-warning"><strong>Preview only — these entries have not been saved.</strong> {destination === 'events'
+        ? 'Entries without times are marked All day by default. Uncheck it to enter times. ' : null}
+      {destination === 'events' && onReviewEvent
+        ? 'Review one entry in the event editor, then select Save event to save it.'
+        : 'Corrections here are temporary. A later import step will handle confirmed saving.'}</p>
       {!activePreview.rows.length ? <p>No entries remain in this preview.</p> : null}
       {activePreview.rows.map((row, index) => {
         const issues = rowIssues(destination,row,academicYear);
@@ -253,10 +252,9 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
         </article>;
       })}
       {destination === 'events' && onAddAllEvents ? <div className="import-preview-actions">
-        <button type="button" className="settings-reset" disabled={bulkBusy || disabled} onClick={markUndatedTimesAllDay}>Mark dated entries without times as all day</button>
         <button type="button" className="settings-save" disabled={bulkBusy || disabled || !canAddAllEvents || !validBulkRows.length}
           onClick={addAll}>Add all valid events ({validBulkRows.length})</button>
-        <p className="settings-hint">Only use All day when appropriate. Entries with missing dates or unresolved outcomes stay in the preview.</p>
+        <p className="settings-hint">Check the All day choices before saving. Entries with missing dates or unresolved outcomes stay in the preview.</p>
       </div> : null}
       {bulkMessage ? <p className="import-preview-warning" role="status">{bulkMessage}</p> : null}
       <button type="button" className="settings-reset" disabled={bulkBusy} onClick={() => { if (!window.confirm('Discard this unsaved preview?')) return; setPreview(null); setBulkMessage(''); setAnnouncement('Preview discarded.'); requestAnimationFrame(() => extractButton.current?.focus()); }}>Discard preview</button>

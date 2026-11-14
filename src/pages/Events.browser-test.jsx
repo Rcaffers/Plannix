@@ -467,9 +467,8 @@ async function run() {
   'explicit successful save appears in Events and repeated suggestion is flagged as duplicate');
   check(button('Review entry 2 in event editor')?.disabled, 'ambiguous undated suggestion cannot enter the save flow');
   input('#import-1-date', '2028-04-03');
-  flushSync(() => host.querySelector('.import-preview-entry:nth-of-type(2) .import-preview-all-day input').click());
   check(!button('Review entry 2 in event editor')?.disabled,
-    'editing the ambiguous date and choosing all-day makes the suggestion reviewable');
+    'editing the ambiguous date makes the default all-day suggestion reviewable');
   click('Hide events');
   let previewPrompts = 0; window.confirm = () => { previewPrompts++; return false; };
   await router.navigate('/settings'); await settle();
@@ -482,9 +481,10 @@ async function run() {
     startTime:'', endTime:'', location:'', notes:'' });
   previewEntries=['Batch A','Batch B','Batch C'].map(candidate);
   input('#import-preview-text-events','Bulk calendar'); click('Extract preview'); await settle();
-  check(button('Add all valid events (0)')?.disabled,'missing time and all-day choice prevents bulk saving');
-  click('Mark dated entries without times as all day'); await settle();
-  check(!button('Add all valid events (3)')?.disabled,'explicit all-day choice enables three reviewed suggestions');
+  check(!button('Add all valid events (3)')?.disabled
+    && [...host.querySelectorAll('.import-preview-entry .import-preview-all-day input')].every(node=>node.checked)
+    && host.textContent.includes('Entries without times are marked All day by default.'),
+  'no-time suggestions enter the editable preview as all day without saving');
   nextCreateFailure=Object.assign(Error('Known validation failure'),{status:422});
   click('Add all valid events (3)'); await settle();
   check(host.querySelector('.import-preview-warning[role="status"]')?.textContent.includes('2 added, 0 skipped, 1 failed')
@@ -541,6 +541,35 @@ async function run() {
   click('Add all valid events (1)'); await settle();
   check(calls.filter(call=>call.action==='create'&&call.event.title==='Preflight G').length===1,
     'retry after a definite preflight failure writes only once');
+  click('Discard preview'); await settle();
+  previewEntries=[candidate('Default H'),
+    {...candidate('Timed I'),startTime:'09:00',endTime:'10:00'},
+    {...candidate('Partial J'),startTime:'09:00'},
+    {...candidate('Invalid K'),startTime:'25:00',endTime:'26:00'},
+    {...candidate('Explicit L'),allDay:true},
+    {...candidate('Conflicting M'),allDay:true,startTime:'09:00',endTime:'10:00'}];
+  click('Extract preview'); await settle();
+  const checks=[...host.querySelectorAll('.import-preview-entry .import-preview-all-day input')];
+  check(checks.map(node=>node.checked).join(',')==='true,false,false,false,true,true'
+    && host.querySelector('#import-1-startTime')?.value==='09:00'
+    && host.querySelector('#import-1-endTime')?.value==='10:00'
+    && host.querySelector('#import-2-startTime')?.value==='09:00'
+    && host.querySelector('#import-3-startTime')?.value==='25:00'
+    && button('Add all valid events (3)'),
+  'supplied times, partial times, invalid times and explicit all-day choices retain their input values');
+  check(host.querySelectorAll('.import-preview-entry')[2].textContent.includes('Choose All day or enter valid paired times')
+    && host.querySelectorAll('.import-preview-entry')[3].textContent.includes('Check event fields')
+    && host.querySelectorAll('.import-preview-entry')[5].textContent.includes('All-day entry cannot also have times'),
+  'partial, invalid and conflicting time suggestions remain flagged');
+  flushSync(()=>checks[0].click()); await settle();
+  check(!checks[0].checked && button('Add all valid events (2)'),
+    'unchecking the default leaves the suggestion editable but unsaveable without times');
+  flushSync(()=>weekendSwitch.click()); await settle();
+  check(!checks[0].checked && button('Add all valid events (2)'),
+    'an unrelated Events rerender does not reapply the default over the user choice');
+  input('#import-0-startTime','11:00'); input('#import-0-endTime','12:00'); await settle();
+  check(!checks[0].checked && button('Add all valid events (3)'),
+    'adding paired times makes the user override valid without reapplying the default');
   click('Discard preview'); await settle();
   click('Hide events');
   document.body.dataset.testResult = 'passed';
