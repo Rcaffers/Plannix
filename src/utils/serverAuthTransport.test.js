@@ -16,11 +16,51 @@ async function loadServerMode() {
     .replace("import { observeAuthTestOperation } from './serverAuthTestObserver.js';",
       'const observeAuthTestOperation = () => {};')
     .replace("import { invalidateDetailSelector, withDetailTransition } from './pushDetailSelector.js';",
-      'const invalidateDetailSelector = async () => {}; const withDetailTransition = async task => task();');
+      'const invalidateDetailSelector = async () => {}; export const testTransitions = []; const withDetailTransition = async (task, options) => { testTransitions.push(options); return task(); };');
   const file=path.join(directory,'transport.mjs');
   await writeFile(file,transformed);
   return {module:await import(`file://${file}`),cleanup:()=>rm(directory,{recursive:true,force:true})};
 }
+
+test('ordinary refresh keeps the selector while logout still invalidates it', async () => {
+  const previousLocation=globalThis.location;
+  const previousChannel=globalThis.BroadcastChannel;
+  globalThis.BroadcastChannel=undefined;
+  globalThis.location={origin:'https://app.plannix.test'};
+  const {module,cleanup}=await loadServerMode();
+  const requests=[];
+  const fetchImpl=async(input,init)=>{requests.push({path:new URL(input).pathname,method:init.method});
+    return new Response(null,{status:204});};
+  try {
+    module.setServerSessionContext(session,csrf,owner);
+    await module.serverAuthFetch('/__stage3/auth/refresh',{method:'POST'}, {fetchImpl});
+    await module.serverAuthFetch('/__stage3/auth/logout',{method:'POST'},
+      {fetchImpl,operationContext:module.captureServerOperationContext(owner)});
+    assert.deepEqual(module.testTransitions,[{invalidate:false}, {invalidate:true}]);
+    assert.deepEqual(requests.map(request=>request.path),
+      ['/__stage3/auth/refresh','/__stage3/auth/logout']);
+  } finally {globalThis.location=previousLocation;globalThis.BroadcastChannel=previousChannel;
+    await cleanup();}
+});
+
+test('failed and uncertain refresh responses do not clear the selector preemptively', async () => {
+  const previousLocation=globalThis.location;
+  const previousChannel=globalThis.BroadcastChannel;
+  globalThis.BroadcastChannel=undefined;
+  globalThis.location={origin:'https://app.plannix.test'};
+  const {module,cleanup}=await loadServerMode();
+  try {
+    module.setServerSessionContext(session,csrf,owner);
+    const uncertain=new Error('response unavailable');
+    await assert.rejects(module.serverAuthFetch('/__stage3/auth/refresh',
+      {method:'POST'}, {fetchImpl:async()=>{throw uncertain;}}),error=>error===uncertain);
+    const failed=await module.serverAuthFetch('/__stage3/auth/refresh',
+      {method:'POST'}, {fetchImpl:async()=>Response.json({message:'unavailable'},{status:401})});
+    assert.equal(failed.status,401);
+    assert.deepEqual(module.testTransitions,[{invalidate:false},{invalidate:false}]);
+  } finally {globalThis.location=previousLocation;globalThis.BroadcastChannel=previousChannel;
+    await cleanup();}
+});
 
 test('cookie transport uses same-origin credentials and session-bound CSRF without bearer fallback',async()=>{
   const previousLocation=globalThis.location;

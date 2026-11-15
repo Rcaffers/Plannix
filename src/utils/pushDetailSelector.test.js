@@ -59,6 +59,35 @@ test('same-account replacement invalidates the old selector before a new explici
   assert.equal(h.state().selector.sessionName,sessionB);
 });
 
+test('a current-session refresh holds coordination without clearing the selector', async () => {
+  const h=fixture();
+  const observed=await observeDetailSelector(h.browser);
+  await commitDetailSelector({expectedEpoch:observed.epoch,sessionName:sessionA,
+    installationVersion:versionA,policyVersion:policy},h.browser);
+  const before=h.state();
+  h.browser.navigator.locks={request:async (_name,_options,callback)=>callback({})};
+  assert.equal(await withDetailTransition(()=> 'refreshed',
+    {browser:h.browser,invalidate:false}),'refreshed');
+  assert.deepEqual(h.state(),before);
+  assert.deepEqual(h.calls,['observe','commit']);
+});
+
+test('failed or uncertain refresh leaves selector intact for fresh worker authorization', async () => {
+  const h=fixture();
+  const observed=await observeDetailSelector(h.browser);
+  await commitDetailSelector({expectedEpoch:observed.epoch,sessionName:sessionA,
+    installationVersion:versionA,policyVersion:policy},h.browser);
+  const before=h.state();
+  h.browser.navigator.locks={request:async (_name,_options,callback)=>callback({})};
+  for (const error of [new Error('rejected'),new Error('response unavailable')]) {
+    let calls=0;
+    await assert.rejects(withDetailTransition(() => {calls++;throw error;},
+      {browser:h.browser,invalidate:false}),caught=>caught===error);
+    assert.equal(calls,1);
+    assert.deepEqual(h.state(),before);
+  }
+});
+
 test('failed lock acquisition does not run an auth transition twice', async () => {
   const h = fixture();
   let attempts = 0;

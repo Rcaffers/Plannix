@@ -17,9 +17,7 @@ let failStatus = false;
 let policyEnabled = reloadDetail;
 let policyNumber = 1;
 let selectorEpoch = 0;
-let selector = reloadDetail ? { sessionName:'__Host-plannix-s-1',
-  installationVersion:'ca000000-0000-4000-8000-000000000099',
-  policyVersion:'ca000000-0000-4000-8000-000000000001' } : null;
+let selector = null;
 window.staleDetailBinding = false;
 window.failNextDetailPolicy = false;
 let lockDepth = 0;
@@ -33,23 +31,31 @@ window.Notification = { permission: reloadDetail ? 'granted' : 'default', reques
   }; });
   window.Notification.permission = 'granted'; return 'granted';
 } };
-const registration = { active:{ postMessage(message, ports) {
+let workerActive = true;
+const worker = { postMessage(message, ports) {
   const port=ports?.[0];
   if (message.type !== 'plannix-detail-selector' || !port) return;
   if (message.kind === 'observe') port.postMessage(window.failSelectorObservation
     ? {ok:false} : {ok:true,epoch:selectorEpoch,selector});
   else if (message.kind === 'invalidate') {
     selectorEpoch++; selector=null; port.postMessage({ok:true,epoch:selectorEpoch});
-  } else if (message.kind === 'commit' && message.expectedEpoch === selectorEpoch) {
-    selector=message.selector; port.postMessage({ok:true,epoch:selectorEpoch,selector});
+  } else if (message.kind === 'commit' && message.expectedEpoch === selectorEpoch
+    && !window.failSelectorCommit) {
+    selectorEpoch++; selector=message.selector; port.postMessage({ok:true,epoch:selectorEpoch,selector});
   } else port.postMessage({ok:false});
-} }, pushManager: {
+} };
+const registration = { get active() { return workerActive ? worker : null; }, pushManager: {
   getSubscription: async () => subscribed ? subscription : null,
   subscribe: async () => { calls.push('subscribe'); subscribed = true; return subscription; },
 } };
-Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: {
-  register: async () => registration, getRegistration: async () => registration,
-} });
+const serviceWorker = new EventTarget();
+serviceWorker.register = async () => registration;
+serviceWorker.getRegistration = async () => registration;
+window.setSyntheticWorkerActive = active => {
+  workerActive = active;
+  if (active) serviceWorker.dispatchEvent(new Event('controllerchange'));
+};
+Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: serviceWorker });
 let lockTail = Promise.resolve();
 Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: (_name, _options, callback) => {
   const work = lockTail.then(async () => {
@@ -86,6 +92,14 @@ export const pushRequest = async (path, body) => {
     boundToCurrentSession:registered && !window.staleDetailBinding }; }
   if (path === 'detail-policy/status') {
     if (window.staleDetailBinding) throw Error('Synthetic stale binding');
+    if (window.holdDetailStatusAfterCommit && selector) {
+      window.holdDetailStatusAfterCommit=false;
+      window.detailStatusHeld=true;
+      return new Promise(resolve => { window.releaseHeldDetailStatus=() => resolve({
+        enabled:policyEnabled,
+        policyVersion:`ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}`,
+      }); });
+    }
     return {enabled:policyEnabled,policyVersion:`ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}`};
   }
   if (path === 'detail-policy/set') {
@@ -150,8 +164,9 @@ const chooseTime = value => {
 (async () => { try {
   if (reloadDetail) {
     await waitFor(() => document.body.textContent.includes('Lesson details enabled')
+      && selector?.sessionName === '__Host-plannix-s-1'
       && Boolean(button('Disable lesson details') && button('Enable event titles')),
-    'full browser reload restores saved lesson consent and current device readiness');
+    'full browser reload repairs a lost local selector from current server authority');
     check(!document.body.textContent.includes('detail policy is off')
       && !document.body.textContent.includes('detail status is unverified'),
     'full reload reports the confirmed effective device state');
@@ -364,27 +379,69 @@ const chooseTime = value => {
     check(!button('Disable lesson details').disabled && !button('Enable event titles').disabled,
       'saved lesson-only pilot setting needs no new consent or device action');
     selector=null;
+    const beforeRepairWrites=calls.filter(item=>item==='detail-policy/set').length;
     await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
-    await waitFor(() => document.body.textContent.includes("Lesson details enabled for this account; this device's detail setup needs reconnecting")
-      && Boolean(button('Disable lesson details')), 'consent remains distinct from missing worker selector after reload');
+    await waitFor(() => document.body.textContent.includes('Lesson details enabled')
+      && !document.body.textContent.includes('detail setup needs reconnecting')
+      && selector?.sessionName === '__Host-plannix-s-1',
+    'an enabled policy repairs a missing worker selector after reload');
+    check(calls.filter(item=>item==='detail-policy/set').length===beforeRepairWrites,
+      'selector reconciliation never changes the server device policy');
+    selector=null; policyEnabled=false;
+    await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+    await waitFor(() => document.body.textContent.includes("this device's detail policy is off"),
+      'disabled device policy stays disabled after reload');
+    check(selector===null, 'reconciliation cannot re-enable a disabled server policy');
+    policyEnabled=true;
+    selector=null; window.holdDetailStatusAfterCommit=true; window.detailStatusHeld=false;
+    await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+    await waitFor(() => window.detailStatusHeld,
+      'post-write policy confirmation held after selector commit');
+    policyEnabled=false;
+    window.releaseHeldDetailStatus();
+    await waitFor(() => document.body.textContent.includes("this device's detail policy is off"),
+      'policy disabled during selector repair is reported as disabled');
+    check(calls.filter(item=>item==='detail-policy/set').length===beforeRepairWrites,
+      'race cannot re-enable the server device policy');
+    policyEnabled=true;
+    selector=null; window.failSelectorCommit=true;
+    await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+    await waitFor(() => document.body.textContent.includes("this device's detail status is unverified"),
+      'failed selector write cannot report an enabled device');
+    check(selector===null && Boolean(button('Retry notification status')),
+      'failed coordination cannot create a selector and offers a read-only retry');
+    window.failSelectorCommit=false;
+    clickButton('Retry notification status');
+    await waitFor(() => selector?.sessionName === '__Host-plannix-s-1'
+      && !document.body.textContent.includes('detail status is unverified'),
+    'status-only retry repairs after transient worker write failure');
+    selector=null; window.setSyntheticWorkerActive(false);
+    await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+    await waitFor(() => document.body.textContent.includes("this device's detail status is unverified"),
+      'delayed worker activation cannot be reported as a disabled policy');
+    check(selector===null, 'worker unavailable cannot be silently repaired');
+    window.setSyntheticWorkerActive(true);
+    await waitFor(() => document.body.textContent.includes('Lesson details enabled')
+      && !document.body.textContent.includes('detail status is unverified')
+      && selector?.sessionName === '__Host-plannix-s-1',
+    'controller change retries verified selector reconciliation');
     window.failSelectorObservation=true;
     await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
     await waitFor(() => document.body.textContent.includes("Lesson details enabled for this account; this device's detail status is unverified"),
       'failed local selector observation is not called a disabled policy');
     window.failSelectorObservation=false;
-    selector={ sessionName:'__Host-plannix-s-1',
-      installationVersion:'ca000000-0000-4000-8000-000000000099',
-      policyVersion:`ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}` };
+    selector=null;
     await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
     await waitFor(() => document.body.textContent.includes('Lesson details enabled')
       && !document.body.textContent.includes('detail status is unverified'),
-    'verified worker selector restores the effective lesson-only status');
+    'a later load repairs the selector after failed coordination');
     window.holdNextPushStatus=true; window.pushStatusHeld=false;
     await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
     await waitFor(() => window.pushStatusHeld, 'old-session status request held');
     invalidateServerSessionContext();
     setServerSessionContext('__Host-plannix-s-2','synthetic-csrf',
       'ca000000-0000-4000-8000-000000000001');
+    window.staleDetailBinding=true;
     window.releaseHeldPushStatus();
     await navigator.locks.request('plannix-push-device',{mode:'exclusive'},async () => {});
     await tick();

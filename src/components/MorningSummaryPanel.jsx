@@ -398,7 +398,7 @@ export default function MorningSummaryPanel({ userId, organisationId, detailDevi
       </p> : null}
       {currentPreferences.status === 'ready' && accountDetails !== 'Details disabled'
         && detailDevice.bound && !detailDevice.enabled && !detailUnknown && !detailDevice.loading
-        && detailDevice.available ? <p className="settings-hint">Your account consent is saved, but this device is not ready to display details. To retry device enablement, turn an enabled choice off and back on. If setup remains unverified, reconnect notifications on this device.</p> : null}
+        && detailDevice.available ? <p className="settings-hint">Your account consent is saved, but this device is not ready to display details. Use “Retry notification status” above to check this device again. If its subscription or session binding needs reconnecting, use the device controls above.</p> : null}
       <div className="morning-detail-actions">
         {['lesson','event'].map(kind => {
           const field = kind === 'lesson' ? 'lessonDetailConsent' : 'eventTitleConsent';

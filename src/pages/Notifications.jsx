@@ -37,6 +37,40 @@ export default function Notifications({ userId, organisationId }) {
     || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const standalone = navigator.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches;
 
+  // A worker update or a failed transition can leave its local selector absent.
+  // The selector is only a hint: the server must still confirm the ordinary
+  // session, binding and enabled policy before we restore it. This never sets
+  // the device policy or account consent.
+  async function verifiedDetailSelector(context, version, policy, subscription, isCurrent) {
+    const matches = observed => observed?.selector?.sessionName === context.sessionName
+      && observed.selector.installationVersion === version
+      && observed.selector.policyVersion === policy.policyVersion;
+    let observed;
+    try { observed = await observeDetailSelector(); }
+    catch { return { selectorCurrent:null, policyEnabled:policy.enabled }; }
+    if (!isCurrent()) return null;
+    if (matches(observed)) return { selectorCurrent:true, policyEnabled:policy.enabled };
+    if (!policy.enabled) return { selectorCurrent:false, policyEnabled:false };
+    try {
+      await commitDetailSelector({ expectedEpoch:observed.epoch,
+        sessionName:context.sessionName, installationVersion:version,
+        policyVersion:policy.policyVersion });
+      if (!isCurrent()) return null;
+      const confirmed = await pushRequest('detail-policy/status', {
+        endpoint:subscription.endpoint, installationVersion:version,
+      }, { expectedUserId:userId, operationContext:context });
+      if (!isCurrent()) return null;
+      if (typeof confirmed?.enabled !== 'boolean' || !UUID.test(confirmed.policyVersion || ''))
+        return { selectorCurrent:null, policyEnabled:null };
+      if (!confirmed.enabled) return { selectorCurrent:null, policyEnabled:false };
+      if (confirmed.policyVersion !== policy.policyVersion)
+        return { selectorCurrent:null, policyEnabled:true };
+      const current = await observeDetailSelector();
+      return isCurrent() ? { selectorCurrent:matches(current) ? true : null,
+        policyEnabled:true } : null;
+    } catch { return { selectorCurrent:null, policyEnabled:null }; }
+  }
+
   useEffect(() => {
     if (!serverManagedAuth) return undefined;
     const changed = () => {
@@ -51,9 +85,11 @@ export default function Notifications({ userId, organisationId }) {
     };
     window.addEventListener('plannix-server-session-change', changed);
     window.addEventListener('plannix-server-session-mismatch', changed);
+    navigator.serviceWorker?.addEventListener?.('controllerchange', changed);
     return () => {
       window.removeEventListener('plannix-server-session-change', changed);
       window.removeEventListener('plannix-server-session-mismatch', changed);
+      navigator.serviceWorker?.removeEventListener?.('controllerchange', changed);
     };
   }, []);
 
@@ -106,14 +142,12 @@ export default function Notifications({ userId, organisationId }) {
               if (typeof policy?.enabled !== 'boolean' || !UUID.test(policy.policyVersion || ''))
                 throw new Error('Invalid device detail policy.');
               if (isCurrent() && context) {
-                const stored = await observeDetailSelector().catch(() => null);
+                const detail = await verifiedDetailSelector(context,
+                  bindingVersion.current, policy, subscription, isCurrent);
                 if (isCurrent()) {
-                  const selectorCurrent = stored ? stored?.selector?.sessionName === context.sessionName
-                    && stored.selector.installationVersion === bindingVersion.current
-                    && stored.selector.policyVersion === policy.policyVersion : null;
-                  setDetailPolicyEnabled(policy.enabled);
-                  setDetailSelectorCurrent(selectorCurrent);
-                  setDetailEnabled(policy.enabled && selectorCurrent === true);
+                  setDetailPolicyEnabled(detail.policyEnabled);
+                  setDetailSelectorCurrent(detail.selectorCurrent);
+                  setDetailEnabled(detail.policyEnabled === true && detail.selectorCurrent === true);
                 }
               }
             }
@@ -185,16 +219,15 @@ export default function Notifications({ userId, organisationId }) {
       }, { expectedUserId:userId, operationContext:context });
       if (typeof policy?.enabled !== 'boolean' || !UUID.test(policy.policyVersion || ''))
         throw new Error('Invalid device detail policy.');
-      const selector = await observeDetailSelector().catch(() => null);
+      const detail = await verifiedDetailSelector(context,status.version,
+        policy,subscription,()=>{ try { assertDetailAction(context,ticket); return true; }
+          catch { return false; } });
       assertDetailAction(context,ticket);
-      const selectorCurrent = selector ? selector?.selector?.sessionName === context.sessionName
-        && selector.selector.installationVersion === status.version
-        && selector.selector.policyVersion === policy.policyVersion : null;
-      const enabled = policy.enabled && selectorCurrent === true;
-      setDetailPolicyEnabled(policy.enabled);
-      setDetailSelectorCurrent(selectorCurrent);
+      const enabled = detail.policyEnabled === true && detail.selectorCurrent === true;
+      setDetailPolicyEnabled(detail.policyEnabled);
+      setDetailSelectorCurrent(detail.selectorCurrent);
       setDetailEnabled(enabled);
-      return { subscribed:true, bound:true, enabled, serverEnabled:policy.enabled === true };
+      return { subscribed:true, bound:true, enabled, serverEnabled:detail.policyEnabled === true };
     });
   }
 
@@ -322,7 +355,9 @@ export default function Notifications({ userId, organisationId }) {
         {configLoaded && !configured && !loading ? <p role="status">Notifications are not configured on this server yet.</p> : null}
         {permission === 'denied' ? <p role="status">Allow notifications in your browser or device settings before trying again.</p> : null}
         {error ? <p className="settings-error" role="alert">{error}</p> : null}
-        {(error || (coordinated && !loading && configured && registered === null)) ? <button className="settings-reset" type="button" disabled={loading || busy} onClick={() => setReloadKey(value => value + 1)}>Retry notification status</button> : null}
+        {(error || (coordinated && !loading && configured && registered === null)
+          || (!loading && detailPolicyEnabled === true && detailSelectorCurrent !== true))
+          ? <button className="settings-reset" type="button" disabled={loading || busy} onClick={() => setReloadKey(value => value + 1)}>Retry notification status</button> : null}
         {notice ? <p role="status">{notice}</p> : null}
         <div className="settings-actions notification-actions">
           <button className="settings-save" type="button" disabled={!supported || !coordinated || !configured || loading || busy || registered === true || permission === 'denied' || (ios && !standalone)} onClick={enable}>Enable notifications</button>

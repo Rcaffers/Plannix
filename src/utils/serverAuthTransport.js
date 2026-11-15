@@ -220,7 +220,8 @@ export async function serverAuthFetch(input, options = {}, settings = {}) {
       '/__stage3/auth/refresh', '/__stage3/auth/profile/email',
       '/__stage3/auth/profile/password'].includes(pathname);
   return changesAuthority
-    ? withDetailTransition(() => performServerAuthFetch(input, options, settings))
+    ? withDetailTransition(() => performServerAuthFetch(input, options, settings),
+      { invalidate: pathname !== '/__stage3/auth/refresh' })
     : performServerAuthFetch(input, options, settings);
 }
 
