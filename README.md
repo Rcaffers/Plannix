@@ -16,6 +16,8 @@ npm start
 ```
 
 Vite proxies `/auth`, `/api`, and `/holidays` to `http://localhost:4000` during development.
+For server-managed authentication, use the matching local-only setup in
+[Local server-managed authentication](docs/local-server-auth-development.md).
 
 ## Build
 

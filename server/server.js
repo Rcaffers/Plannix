@@ -5,19 +5,27 @@ import { logRouteError } from './middleware/errorHandler.js';
 import { pilotUserFromEnvironment } from './morningSummary/pilotConfig.js';
 import { createMorningSummaryPolling } from './morningSummary/polling.js';
 import { assertBuiltAuthMode } from './config/buildAuthMode.js';
-import fs from 'node:fs';
 
 function startServer() {
   validateProductionEnv();
-  if (env.nodeEnv === 'production' || fs.existsSync(env.distDirectory)) {
+  // Vite serves the development UI. An unrelated build left in dist must not
+  // prevent the API process from starting; production still requires a match.
+  if (env.nodeEnv === 'production') {
     assertBuiltAuthMode(env.distDirectory, env.authMode);
   }
 
-  const server = app.listen(env.port);
+  const server = env.nodeEnv === 'production'
+    ? app.listen(env.port)
+    : app.listen(env.port, 'localhost');
   let polling = null;
   server.on('listening', () => {
     // eslint-disable-next-line no-console
     console.log('Plannix server is listening.');
+    if (env.nodeEnv !== 'production') {
+      let backendHost = 'unconfigured';
+      try { backendHost = new URL(env.supabaseUrl).host; } catch { /* No URL or key is logged. */ }
+      console.log(`Local auth mode: ${env.authMode}; Supabase host: ${backendHost}.`);
+    }
     try {
       const pilotUserId = pilotUserFromEnvironment(process.env, 'MORNING_SUMMARY_POLLING_ENABLED');
       if (pilotUserId) {
