@@ -18,8 +18,9 @@
 .events-list-heading p { color: #52635f; }
 .events-list { display: grid; gap: 0; list-style: none; padding: 0; margin: 0; }
 .events-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   min-width: 0;
   padding: 14px 0;
   border-top: 1px solid rgba(63,127,120,.24);
@@ -27,7 +28,7 @@
 .events-item:last-child { border-bottom: 1px solid rgba(63,127,120,.24); }
 .events-item-copy { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
 .events-item-copy span { color: #52635f; }
-.events-item-actions { align-items: center; min-width: 0; }
+.events-item-actions { align-items: center; justify-content: flex-end; min-width: 0; }
 .events-item-actions button { min-height: 42px; min-width: 0; overflow-wrap: anywhere; white-space: normal; }
 .events-delete { color: #8c3030; border-color: #ccaaaa; }
 .events-notice, .events-error { padding: 12px 14px; margin: 16px 0; border-radius: 10px; background: #f5f5ed; }
@@ -52,6 +53,7 @@
 .events-check input { width: 20px; height: 20px; accent-color: #3f7f78; }
 .events-page :is(button, input, textarea):focus-visible { outline: 3px solid #22564e; outline-offset: 2px; }
 @media (max-width: 520px) {
+  .events-item { grid-template-columns: minmax(0, 1fr); }
   .events-item-actions { width: 100%; }
   .events-item-actions button { flex: 1 1 130px; }
   .events-year { display: grid; }

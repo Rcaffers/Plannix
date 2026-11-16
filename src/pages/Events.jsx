@@ -427,8 +427,8 @@ export default function Events({ userId }) {
         <li className="events-item" key={item.id}>
           <div className="events-item-copy"><strong>{item.title}</strong><span>{item.date} · {item.startTime === null ? 'All day' : `${item.startTime}–${item.endTime}`}</span>
             {item.location ? <span>{item.location}</span> : null}</div>
-          <div className="events-item-actions"><button id={`event-edit-${item.id}`} type="button" className="settings-reset" onClick={() => openEditor(item)} disabled={pending || destructiveReloading || !listReady || conflict || recovery}>Edit {item.title}</button>
-            <button type="button" className="settings-reset events-delete" onClick={() => remove(item)} disabled={pending || destructiveReloading || !listReady || conflict || recovery}>Delete {item.title}</button></div>
+          <div className="events-item-actions"><button id={`event-edit-${item.id}`} type="button" className="settings-reset" aria-label={`Edit ${item.title}`} onClick={() => openEditor(item)} disabled={pending || destructiveReloading || !listReady || conflict || recovery}>Edit event</button>
+            <button type="button" className="settings-reset events-delete" aria-label={`Delete ${item.title}`} onClick={() => remove(item)} disabled={pending || destructiveReloading || !listReady || conflict || recovery}>Delete event</button></div>
         </li>)}
       </ul> : null}
       </div> : null}

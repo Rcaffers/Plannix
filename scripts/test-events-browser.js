@@ -80,7 +80,7 @@ try {
   await send('Input.insertText', { text: 'Keyboard event' }, sessionId);
   await send('Runtime.evaluate', { expression: `(()=>{const node=document.querySelector('#event-date');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(node,'2027-12-01');node.dispatchEvent(new Event('input',{bubbles:true}));[...document.querySelectorAll('button')].find(button=>button.textContent==='Save event').focus()})()` }, sessionId);
   await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
-  const saved = await send('Runtime.evaluate', { expression: `new Promise(resolve=>setTimeout(()=>resolve(Boolean([...document.querySelectorAll('button')].find(button=>button.textContent==='Edit Keyboard event'))),50))`, awaitPromise: true, returnByValue: true }, sessionId);
+  const saved = await send('Runtime.evaluate', { expression: `new Promise(resolve=>setTimeout(()=>resolve(Boolean(document.querySelector('button[aria-label="Edit Keyboard event"]')?.textContent==='Edit event' && document.querySelector('button[aria-label="Delete Keyboard event"]')?.textContent==='Delete event')),50))`, awaitPromise: true, returnByValue: true }, sessionId);
   if (!saved.result.value) {
     const detail = await send('Runtime.evaluate', { expression: `({title:document.querySelector('#event-title')?.value,date:document.querySelector('#event-date')?.value,error:document.querySelector('.events-error')?.textContent})`, returnByValue: true }, sessionId);
     throw Error(`Native Save failed: ${JSON.stringify(detail.result.value)}`);
@@ -89,15 +89,15 @@ try {
   await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
   const expanded = await send('Runtime.evaluate', { expression: `document.querySelector('#events-list-toggle').getAttribute('aria-expanded')==='true' && !document.querySelector('#events-list-panel').hidden`, returnByValue: true }, sessionId);
   assert.equal(expanded.result.value, true, 'Native Enter expands saved Events list');
-  await send('Runtime.evaluate', { expression: `([...document.querySelectorAll('button')].find(button=>button.textContent==='Edit Keyboard event')).focus()` }, sessionId);
+  await send('Runtime.evaluate', { expression: `document.querySelector('button[aria-label="Edit Keyboard event"]').focus()` }, sessionId);
   await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
   const edited = await send('Runtime.evaluate', { expression: `new Promise(resolve=>requestAnimationFrame(()=>resolve(document.activeElement.id==='event-title')))`, awaitPromise: true, returnByValue: true }, sessionId);
   assert.equal(edited.result.value, true, 'Native Enter opens Edit event');
   await send('Runtime.evaluate', { expression: `([...document.querySelectorAll('button')].find(button=>button.textContent==='Cancel')).focus()` }, sessionId);
   await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
-  await send('Runtime.evaluate', { expression: `([...document.querySelectorAll('button')].find(button=>button.textContent==='Delete Keyboard event')).focus()` }, sessionId);
+  await send('Runtime.evaluate', { expression: `document.querySelector('button[aria-label="Delete Keyboard event"]').focus()` }, sessionId);
   await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
-  const deleted = await send('Runtime.evaluate', { expression: `new Promise(resolve=>setTimeout(()=>resolve(![...document.querySelectorAll('button')].some(button=>button.textContent==='Delete Keyboard event')),50))`, awaitPromise: true, returnByValue: true }, sessionId);
+  const deleted = await send('Runtime.evaluate', { expression: `new Promise(resolve=>setTimeout(()=>resolve(!document.querySelector('button[aria-label="Delete Keyboard event"]')),50))`, awaitPromise: true, returnByValue: true }, sessionId);
   assert.equal(deleted.result.value, true, 'Native Enter deletes confirmed event');
   console.log('Native keyboard Add, Cancel, Save, Edit and Delete controls passed.');
   const pendingRecovery = await send('Runtime.evaluate', { expression: 'window.eventsStartRecoveryForUnmount()', awaitPromise: true, returnByValue: true }, sessionId);

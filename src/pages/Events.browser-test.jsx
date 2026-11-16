@@ -75,7 +75,7 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const settle = async () => { await tick(); await tick(); await tick(); };
 const check = (condition, label) => { if (!condition) throw Error(label); results.push(label); };
 const results = [];
-const button = label => [...host.querySelectorAll('button')].find(el => el.textContent === label);
+const button = label => [...host.querySelectorAll('button')].find(el => el.textContent === label || el.getAttribute('aria-label') === label);
 function click(label) { const target = button(label); if (!target) throw Error(`Missing button: ${label}`);
   if (target.closest('[hidden]')) { const toggle = host.querySelector('#events-list-toggle');
     if (!toggle || toggle.getAttribute('aria-expanded') !== 'false') throw Error(`Hidden button: ${label}`);
@@ -156,6 +156,8 @@ async function run() {
   check(button('Show events (1)') && host.querySelector('#events-list-panel').hidden, 'new saved event remains hidden until Show events is chosen');
   click('Show events (1)');
   check(!host.querySelector('#events-list-panel').hidden && button('Edit Assembly'), 'expanded list exposes saved event actions');
+  check(button('Edit Assembly').textContent === 'Edit event' && button('Delete Assembly').textContent === 'Delete event',
+    'saved event actions show concise labels while accessible names identify the event');
   click('Edit Assembly');
   check(host.querySelector('#event-title').value === 'Assembly', 'edit loads record');
   click('Hide events');
@@ -396,6 +398,11 @@ async function run() {
     check(host.scrollWidth <= width + 1, `${width}px no horizontal overflow (${host.scrollWidth}px)`);
     if (width <= 430) check([...host.querySelectorAll('.events-item-copy strong')].find(node => node.textContent === 'T'.repeat(200)).getBoundingClientRect().width <= width,
       `${width}px unbroken title stays within viewport`);
+    const row = button(`Edit ${'T'.repeat(200)}`).closest('.events-item');
+    const copy = row.querySelector('.events-item-copy').getBoundingClientRect();
+    const actions = row.querySelector('.events-item-actions').getBoundingClientRect();
+    check(actions.right <= width + 1 && (width <= 520 ? actions.top >= copy.bottom : actions.left >= copy.right),
+      `${width}px long title keeps actions consistently positioned`);
   }
   click(`Edit ${'T'.repeat(200)}`); input('#event-title', 'Discarded scope draft');
   nextFailure = Object.assign(Error('Changed elsewhere'), { status: 409 }); submit(); await settle();
