@@ -66,6 +66,26 @@ test('PDF and image use bounded raw bodies, with no filename or save operation',
   assert.equal((await h.request(`/extract-image?${query('events')}`, Buffer.from('fake image'), 'image/png')).status, 400);
   assert.equal((await h.request(`/extract-image?${query('events')}`, Buffer.from('fake image'), 'image/svg+xml')).status, 415);
 });
+test('PDF holiday preview derives the stated term gaps but cannot save summer without an opening date', async t => {
+  const calendar = 'Autumn Term 2026\nClosure after school Friday 18th December 2026\n'
+    + 'Spring Term 2027\nINSET DAY 4 Monday 4th January 2027\nRe-open Tuesday 5 th January 2027\n'
+    + 'Closure after school Thursday 25 th March 2027\nSummer Term 2027\n'
+    + 'Re-open Monday 12 th April 2027\nClosure after school Tuesday 20 th July 2027\n'
+    + 'INSET DAY 5 Wednesday 21 st July 2027';
+  const h = await setup(t, { extractPdf: async () => ({ text: calendar, pageCount: 1 }) });
+  const response = await h.request(`/extract-pdf?${query('holidays')}`, Buffer.from('%PDF-synthetic'), 'application/pdf');
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.entries.length, 4);
+  assert.deepEqual(body.entries[0], holiday);
+  assert.deepEqual(body.entries.slice(1).map(row => [row.label, row.startDate, row.endDate]), [
+    ['Christmas holiday', '2026-12-19', '2027-01-03'],
+    ['Easter holiday', '2027-03-26', '2027-04-11'],
+    ['Summer holiday', '2027-07-22', ''],
+  ]);
+  assert.ok(previewIssues('holidays', body.entries.at(-1), { startDate: year.academicYearStartDate,
+    endDate: year.academicYearEndDate }).length > 0, 'summer requires a confirmed end date before saving');
+});
 test('CSV text is extracted without a write and malformed Excel fails before provider generation', async t => {
   const h = await setup(t);
   const csv = await h.request(`/extract-csv?${query('events')}`, Buffer.from('Title,Date\nAssembly,28/03/2027'), 'text/csv');

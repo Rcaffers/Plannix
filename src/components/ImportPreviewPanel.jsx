@@ -222,6 +222,7 @@ export default function ImportPreviewPanel({ userId, destination, existing = [],
       <h4 id="import-preview-heading" ref={heading} tabIndex={-1}>Editable {destination === 'events' ? 'event' : 'holiday'} preview</h4>
       <p className="import-preview-warning"><strong>Preview only — these entries have not been saved.</strong> {destination === 'events'
         ? 'Entries without times are marked All day by default. Uncheck it to enter times. ' : null}
+      {destination === 'holidays' ? 'Check suggested term dates against the document. Complete any missing boundary before adding a holiday. ' : null}
       {destination === 'events' && onReviewEvent
         ? 'Review one entry in the event editor, then select Save event to save it.'
         : 'Corrections here are temporary. A later import step will handle confirmed saving.'}</p>

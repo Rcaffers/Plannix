@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { importGenerationInput, importPreviewSchema, IMPORT_PREVIEW_PROMPT, validateImportResult,
-  verifyCalendarEventSuggestions, calendarPdfEventPreview } from './importPreview.js';
+  verifyCalendarEventSuggestions, calendarPdfEventPreview, reviewCalendarTermGaps } from './importPreview.js';
 import { validateImportImage } from './importImage.js';
 const id = '91000000-0000-4000-8000-000000000001';
 const input = { destination: 'events', text: 'School play on 03/04/2027', academicYearStartDate: '2026-09-01', academicYearEndDate: '2027-08-31' };
@@ -14,6 +14,72 @@ test('preview schema and prompt are server owned and retain unresolved suggestio
   assert.match(IMPORT_PREVIEW_PROMPT, /Never invent missing dates, end dates or times/);
   assert.deepEqual(validateImportResult({ entries: [event] }, 'events'), { destination: 'events', entries: [event] });
   assert.throws(() => validateImportResult({ entries: [event, { ...event, title: '<script>' }] }, 'events'), { code: 'AI_INVALID_RESPONSE' });
+});
+test('term-gap wording excludes the last teaching and reopening days without inventing a summer end', () => {
+  assert.match(IMPORT_PREVIEW_PROMPT, /following day and ends the day before/);
+  assert.match(IMPORT_PREVIEW_PROMPT, /first holiday day takes precedence/);
+  assert.match(IMPORT_PREVIEW_PROMPT, /no stated reopening date, leave its end date empty/);
+});
+test('the one-page holiday-dates PDF wording supplies Christmas and Easter, but no summer end', () => {
+  // Redacted text from 2026-2027-Holiday-dates-approved (1).pdf, preserving
+  // the exact term/closure/reopening/INSET wording and dates.
+  const text = [
+    'Holiday Dates 2026/27',
+    'Autumn Term 2026',
+    'INSET DAY 1 Tuesday 1 st September 2026',
+    'Re-open Wednesday 2 nd September 2026',
+    'Mid Term Closure Monday 26 th October – Friday 30 th October 2026 (inclusive)',
+    'INSET DAY 3 Monday 2 nd November 2026',
+    'Closure after school Friday 18th December 2026',
+    'Spring Term 2027',
+    'INSET DAY 4 Monday 4th January 2027',
+    'Re-open Tuesday 5 th January 2027',
+    'Mid Term Closure Monday 15 th February – Friday 19 th February 2027 (inclusive)',
+    'Closure after school Thursday 25 th March 2027',
+    'Summer Term 2027',
+    'Re-open Monday 12 th April 2027',
+    'Mid Term Closure Monday 31 st May – Friday 4 th June 2027 (inclusive)',
+    'Closure after school Tuesday 20 th July 2027',
+    'INSET DAY 5 Wednesday 21 st July 2027',
+  ].join('\n');
+  const existing = [
+    { label: 'Autumn half term', startDate: '2026-10-26', endDate: '2026-10-30', sourceDate: '26–30 October' },
+    { label: 'INSET Day 4', startDate: '2027-01-04', endDate: '2027-01-04', sourceDate: '4 January' },
+    { label: 'Christmas holiday', startDate: '2026-12-18', endDate: '2027-01-04', sourceDate: 'AI guess' },
+    { label: 'Winter break', startDate: '2026-12-19', endDate: '2027-01-03', sourceDate: 'AI guess' },
+  ];
+  const rows = reviewCalendarTermGaps(existing, text, '2026-09-01', '2027-08-31');
+  assert.equal(rows.length, 5);
+  assert.deepEqual(rows.slice(0, 2), existing.slice(0, 2), 'half term and INSET stay distinct');
+  assert.deepEqual(rows.slice(2).map(row => [row.label, row.startDate, row.endDate]), [
+    ['Christmas holiday', '2026-12-19', '2027-01-03'],
+    ['Easter holiday', '2027-03-26', '2027-04-11'],
+    ['Summer holiday', '2027-07-22', ''],
+  ]);
+  assert.equal(reviewCalendarTermGaps(rows, text, '2026-09-01', '2027-08-31').length, rows.length,
+    'repeated processing does not duplicate aliases');
+  assert.deepEqual(reviewCalendarTermGaps(existing,
+    'Autumn Term 2026\nDecember\nSpring Term 2027\nJanuary\nSummer Term 2027\nJuly',
+    '2026-09-01', '2027-08-31'), existing,
+  'term headings without closure evidence do not create holiday suggestions');
+  const firstDay = text.replace('Closure after school Thursday 25 th March 2027',
+    'Closure after school Thursday 25 th March 2027\nFirst holiday day Saturday 27th March 2027');
+  const overridden = reviewCalendarTermGaps([], firstDay, '2026-09-01', '2027-08-31')
+    .find(row => row.label === 'Easter holiday');
+  assert.deepEqual([overridden.startDate, overridden.endDate], ['2027-03-27', '2027-04-11']);
+  const unrelated = 'Autumn Term 2026\nSpring Term 2027\nSummer Term 2027\n'
+    + 'December 17: Enforced Closure - Move to New Build\nJanuary 5: INSET';
+  assert.deepEqual(reviewCalendarTermGaps([], unrelated, '2026-09-01', '2027-08-31'), [],
+    'the unrelated three-page events calendar supplies no term-gap candidates');
+  const inconsistent = reviewCalendarTermGaps([], text.replace('Spring Term 2027', 'Spring Term 2028'),
+    '2026-09-01', '2027-08-31').find(row => row.label === 'Christmas holiday');
+  assert.deepEqual([inconsistent.startDate, inconsistent.endDate], ['', ''],
+    'an inconsistent academic-year heading leaves Christmas editable and undated');
+  const conflicting = reviewCalendarTermGaps([], text.replace('Closure after school Friday 18th December 2026',
+    'Closure after school Friday 18th December 2026\nClosure after school Monday 21st December 2026'),
+  '2026-09-01', '2027-08-31').find(row => row.label === 'Christmas holiday');
+  assert.deepEqual([conflicting.startDate, conflicting.endDate], ['', ''],
+    'conflicting closing dates cannot become a saveable range');
 });
 test('image signature, dimensions and size are checked without decoding or storage', () => {
   const png = Buffer.alloc(45); Buffer.from('89504e470d0a1a0a', 'hex').copy(png); png.writeUInt32BE(13, 8);

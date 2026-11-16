@@ -1,7 +1,7 @@
 import express from 'express';
 import { verifyHolidayJson } from '../ai/strictHolidayJson.js';
 import { validateImportInput, importGenerationInput, validateImportResult,
-  verifyCalendarEventSuggestions, calendarPdfEventPreview } from '../ai/importPreview.js';
+  verifyCalendarEventSuggestions, calendarPdfEventPreview, reviewCalendarTermGaps } from '../ai/importPreview.js';
 import { validateImportImage } from '../ai/importImage.js';
 import { extractCsvText, extractXlsxText, IMPORT_TABULAR_BYTES } from '../ai/importTabular.js';
 import { generateStructuredJsonForUser } from '../ai/generateStructuredJson.js';
@@ -74,6 +74,8 @@ async function settle({ input, mode, data, userId, signal, generate, extractPdf 
     if (signal.aborted) throw Object.assign(Error(), { code: 'AI_CANCELLED' });
     const preview = validateImportResult(result, input.destination);
     if (mode === 'pdf' && input.destination === 'events') preview.entries = verifyCalendarEventSuggestions(
+      preview.entries, input.text, input.academicYearStartDate, input.academicYearEndDate);
+    if (mode === 'pdf' && input.destination === 'holidays') preview.entries = reviewCalendarTermGaps(
       preview.entries, input.text, input.academicYearStartDate, input.academicYearEndDate);
     return { ...preview, ...(pageCount ? { pageCount } : {}) };
   } finally {
