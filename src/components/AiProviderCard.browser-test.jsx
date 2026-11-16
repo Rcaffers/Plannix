@@ -43,6 +43,44 @@ async function mount(connection = null) {
   flushSync(() => root.render(<AiProviderCard key={Math.random()} />)); await settle();
 }
 async function run() {
+  for (const provider of AI_PROVIDERS) {
+    await mount(); input('select',provider.id);
+    input('input[aria-label="API key"]', credential);
+    const label=`How to get ${provider.id === 'google_gemini' ? 'a' : 'an'} ${provider.label} API key`;
+    const help=button(label);
+    check(Boolean(help),`${provider.label}: provider-specific help is directly available`);
+    click(label);
+    const dialog=host.querySelector('[role="dialog"][aria-modal="true"]');
+    check(Boolean(dialog) && dialog.querySelector('h3')?.textContent===label
+      && dialog.querySelectorAll('ol > li').length===4
+      && [...dialog.querySelectorAll('a')].every(link=>link.href.startsWith('https://')
+        && link.target==='_blank' && link.rel.includes('noopener')),
+    `${provider.label}: official links and numbered setup instructions open`);
+    check(dialog.textContent.includes('billing') && dialog.textContent.includes('paste the key')
+      && dialog.textContent.includes('Disconnect'),
+    `${provider.label}: billing, Plannix save, replacement and removal are explained`);
+    check(!dialog.textContent.includes(credential) && !dialog.innerHTML.includes(credential)
+      && host.querySelector('input[aria-label="API key"]').value === credential,
+    `${provider.label}: help neither exposes nor clears an entered key`);
+    check(document.activeElement===dialog.querySelector('[aria-label="Close API key guide"]'),
+      `${provider.label}: opening the guide moves keyboard focus inside`);
+    const last=dialog.querySelector('.ai-key-help-done');
+    last.focus();
+    dialog.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));
+    check(document.activeElement===dialog.querySelector('[aria-label="Close API key guide"]'),
+      `${provider.label}: Tab stays inside the guide`);
+    dialog.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true}));
+    check(document.activeElement===last,`${provider.label}: Shift-Tab stays inside the guide`);
+    dialog.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    await settle();
+    check(!host.querySelector('[role="dialog"]') && document.activeElement===help,
+      `${provider.label}: Escape closes and returns focus to the help link`);
+    check(host.querySelector('input[aria-label="API key"]').value === credential,
+      `${provider.label}: closing help preserves the entered key`);
+  }
+  await mount({provider:'openai',lastFour:'1234',active:true});
+  check(Boolean(button('How to get an OpenAI API key')),
+    'a saved connection retains provider help after setup guidance is hidden');
   for (const source of AI_PROVIDERS) for (const destination of AI_PROVIDERS.filter(p => p.id !== source.id)) {
     await mount(); input('select', source.id);
     const typed = source.id === 'openai' ? 'sk-TEST_ONLY_OPENAI' : source.id === 'anthropic' ? 'sk-ant-TEST_ONLY' : 'AIza-TEST_ONLY';

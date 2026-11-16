@@ -1,0 +1,121 @@
+.ai-key-help-link {
+  justify-self: start;
+  margin: -6px 0 2px;
+  padding: 3px 0;
+  border: 0;
+  background: none;
+  color: #2d6b63;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.ai-key-help-link:focus-visible,
+.ai-key-help-dialog a:focus-visible,
+.ai-key-help-dialog button:focus-visible {
+  outline: 3px solid #244b47;
+  outline-offset: 3px;
+}
+
+.ai-key-help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 58;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+  padding: 16px;
+  background: rgba(17, 17, 17, 0.48);
+  backdrop-filter: blur(6px);
+}
+
+.ai-key-help-dialog {
+  box-sizing: border-box;
+  width: min(640px, 100%);
+  min-width: 0;
+  max-height: min(90vh, 820px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 22px 22px;
+  border: 1px solid rgba(63, 127, 120, 0.28);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(252, 250, 246, 0.99), rgba(236, 244, 241, 0.97));
+  box-shadow: 0 28px 64px rgba(20, 20, 20, 0.22);
+  color: var(--text);
+}
+
+.ai-key-help-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-key-help-toolbar h3 {
+  margin: 0;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-size: clamp(1.25rem, 3.2vw, 1.55rem);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.ai-key-help-dismiss {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  margin: -6px -6px 0 0;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--text);
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.ai-key-help-body {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  line-height: 1.55;
+}
+
+.ai-key-help-body p {
+  margin: 0 0 12px;
+}
+
+.ai-key-help-body ol {
+  margin: 0 0 16px;
+  padding-left: 24px;
+}
+
+.ai-key-help-body li {
+  margin-bottom: 10px;
+  padding-left: 3px;
+}
+
+.ai-key-help-body a {
+  color: #2d6b63;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.ai-key-help-done {
+  flex: none;
+  align-self: flex-end;
+  min-height: 44px;
+}
+
+@media (max-width: 480px) {
+  .ai-key-help-dialog {
+    max-height: calc(100dvh - 24px);
+    padding: 18px 16px;
+  }
+
+  .ai-key-help-done {
+    width: 100%;
+  }
+}

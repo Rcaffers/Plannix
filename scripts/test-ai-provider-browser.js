@@ -17,7 +17,7 @@ try {
     build: { outDir: directory, emptyOutDir: false, lib: {
       entry: 'src/components/AiProviderCard.browser-test.jsx', formats: ['iife'], name: 'AiProviderTest', fileName: () => 'test.js', cssFileName: 'test',
     } } });
-  await writeFile(path.join(directory, 'index.html'), '<!doctype html><html><head><link rel="stylesheet" href="test.css"></head><body><script>window.testStorageCalls=0;window.testNetworkCalls=0;window.fetch=()=>{window.testNetworkCalls++;throw Error("Network disabled")};for(const name of ["getItem","setItem","removeItem","clear"]){Storage.prototype[name]=()=>{window.testStorageCalls++;throw Error("Storage disabled")}};</script><script src="test.js"></script></body></html>');
+  await writeFile(path.join(directory, 'index.html'), '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="test.css"></head><body><script>window.testStorageCalls=0;window.testNetworkCalls=0;window.fetch=()=>{window.testNetworkCalls++;throw Error("Network disabled")};for(const name of ["getItem","setItem","removeItem","clear"]){Storage.prototype[name]=()=>{window.testStorageCalls++;throw Error("Storage disabled")}};</script><script src="test.js"></script></body></html>');
   chrome = spawn(process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     ['--headless', '--allow-file-access-from-files', '--disable-background-networking', '--disable-component-update', '--no-first-run', '--disable-gpu',
       '--remote-debugging-port=0', '--window-size=1200,1000', `--user-data-dir=${directory}/profile`, `file://${directory}/index.html`],
@@ -61,6 +61,21 @@ try {
   assert.equal(await evaluate('document.querySelector("#ai-provider-title").closest("section").querySelector("input").value'), '');
   assert.equal(await evaluate('window.testStorageCalls'), 0);
   console.log('Native keyboard provider change clears key; no storage.');
+
+  await evaluate('document.querySelector(".ai-key-help-link").click()');
+  assert.equal(await evaluate('document.activeElement?.getAttribute("aria-label")'), 'Close API key guide');
+  for (const width of [320,375,768,1200]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height: 650, deviceScaleFactor: 1, mobile: false }, sessionId);
+    const measured=await evaluate(`(()=>{const dialog=document.querySelector('.ai-key-help-dialog');const rect=dialog.getBoundingClientRect();return {viewport:innerWidth,backdrop:document.querySelector('.ai-key-help-backdrop').getBoundingClientRect().width,left:rect.left,right:rect.right,scroll:dialog.scrollWidth,client:dialog.clientWidth,bodyScroll:document.querySelector('.ai-key-help-body').scrollHeight>document.querySelector('.ai-key-help-body').clientHeight}})()`);
+    assert.ok(measured.left>=0 && measured.right<=width+1 && measured.scroll<=measured.client+1,
+      `${width}px guide fits without horizontal overflow: ${JSON.stringify(measured)}`);
+    if (width <= 375) assert.equal(measured.bodyScroll, true, `${width}px guide scrolls within the modal`);
+  }
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27},sessionId);
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27},sessionId);
+  assert.equal(await evaluate('document.querySelector(".ai-key-help-dialog")===null'),true);
+  assert.equal(await evaluate('document.activeElement?.classList.contains("ai-key-help-link")'),true);
+  console.log('Provider guide focus, Escape and four responsive widths passed.');
 
 } finally {
   socket?.close();
