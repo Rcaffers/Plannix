@@ -1,8 +1,11 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import SettingsSubnav from '../components/SettingsSubnav';
 import { useTimetableLayout } from '../context/TimetableLayoutContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
 import { DEFAULT_LUNCH, DEFAULT_REGISTRATION, TIMETABLE_CYCLE } from '../utils/timetableLayout';
+import { setupGuideKey } from '../utils/setupProgress';
+import { SETUP_GUIDANCE_CHANGED, setupGuidancePreference } from '../utils/setupGuidance';
 import './Settings.css';
 
 const BREAKS_MAX = 6;
@@ -19,13 +22,31 @@ function ensureRegistration(d) {
   return d.registration && typeof d.registration === 'object' ? d.registration : { ...DEFAULT_REGISTRATION };
 }
 
-export default function Settings() {
+export default function Settings({ userId }) {
   const {
     draft, setDraft, resetLayout, save: saveLayout, reload: reloadLayout,
-    dirty: layoutDirty, isPersisted, isLoading: isLayoutLoading, isSaving: isLayoutSaving,
+    dirty: layoutDirty, isPersisted, loadedAcademicYearId, isLoading: isLayoutLoading, isSaving: isLayoutSaving,
     error: layoutError, success: layoutSuccess, requestReference: layoutRequestReference,
   } = useTimetableLayout();
   const { selectedAcademicYearId } = useAcademicYear();
+  const [, refreshGuidance] = useState(0);
+  useEffect(() => {
+    if (!userId) return undefined;
+    const changed = event => {
+      if (!event.detail || event.detail.userId === userId) refreshGuidance(value => value + 1);
+    };
+    const stored = event => {
+      if (event.key === null || event.key === setupGuideKey(userId, 'layout'))
+        refreshGuidance(value => value + 1);
+    };
+    window.addEventListener(SETUP_GUIDANCE_CHANGED, changed);
+    window.addEventListener('storage', stored);
+    return () => {
+      window.removeEventListener(SETUP_GUIDANCE_CHANGED, changed);
+      window.removeEventListener('storage', stored);
+    };
+  }, [userId]);
+  const confirmingRestoredGuidance = setupGuidancePreference(userId, 'layout') === 'shown';
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -330,7 +351,7 @@ export default function Settings() {
           </p>
 
           <div className="settings-actions">
-            <button type="submit" className="settings-save" disabled={isLayoutSaving || isLayoutLoading || (isPersisted && !layoutDirty) || !selectedAcademicYearId}>
+            <button type="submit" className="settings-save" disabled={isLayoutSaving || isLayoutLoading || loadedAcademicYearId !== selectedAcademicYearId || (isPersisted && !layoutDirty && !confirmingRestoredGuidance) || !selectedAcademicYearId}>
               Save timetable layout
             </button>
             <button type="button" className="settings-reset" onClick={handleResetTimetable} disabled={isLayoutSaving}>

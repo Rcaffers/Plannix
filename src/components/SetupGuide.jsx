@@ -81,9 +81,9 @@ export default function SetupGuide({ userId, stepId, children }) {
   const visible = preference === 'shown' || (!checkingOptional && !completed && preference === null);
   const reopen = preference === 'dismissed' || (!checkingOptional && !completed && preference === 'hidden');
   const changeVisibility = next => setSetupGuidanceVisible(userId, stepId, next);
-  if (!step || (!visible && !reopen)) return children;
+  if (!step) return children;
   return <>
-    <div className="container settings-inner settings-inner--wide setup-guide-wrap">
+    {visible || reopen ? <div className="container settings-inner settings-inner--wide setup-guide-wrap">
       {visible ? <aside className="setup-guide" aria-label="Setup guidance">
         <div className="setup-guide-heading">
           <p className="setup-guide-title">{step.title}{step.optional ? ' · Optional' : ''}</p>
@@ -104,7 +104,7 @@ export default function SetupGuide({ userId, stepId, children }) {
       </aside> : <button type="button" className="setup-guide-reopen" onClick={() => changeVisibility(true)}>
         Show setup guidance
       </button>}
-    </div>
+    </div> : null}
     {children}
   </>;
 }

@@ -422,7 +422,7 @@ export default function AcademicYear({ userId }) {
         <form className="settings-timetable-form" onSubmit={handleSubmit}>
           <h2 className="settings-section-title">Details</h2>
           <div className="settings-field">
-            <label htmlFor="academic-year-label">Academic year</label>
+            <label htmlFor="academic-year-label">Academic year name (required)</label>
             <input
               id="academic-year-label"
               type="text"
@@ -435,18 +435,18 @@ export default function AcademicYear({ userId }) {
           </div>
 
           <div className="settings-field">
-            <label htmlFor="academic-year-start">Start date of academic year</label>
+            <label htmlFor="academic-year-start">Start date of academic year (required)</label>
             <input
               id="academic-year-start"
               type="date"
               value={draft.startDate}
               onChange={(e) => setDraft((d) => ({ ...d, startDate: e.target.value }))}
             />
-            <p className="settings-hint">Optional. For your records; holiday blanking uses the holiday date ranges below.</p>
+            <p className="settings-hint">The start and end dates are needed to save the year. A year covering today is selected automatically when you return.</p>
           </div>
 
           <div className="settings-field">
-            <label htmlFor="academic-year-end">End date of academic year</label>
+            <label htmlFor="academic-year-end">End date of academic year (required)</label>
             <input id="academic-year-end" type="date" value={draft.endDate} onChange={(e) => setDraft((d) => ({ ...d, endDate: e.target.value }))} />
             <p className="settings-hint">The end date is inclusive.</p>
           </div>

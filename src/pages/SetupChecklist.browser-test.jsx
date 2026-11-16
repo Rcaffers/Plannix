@@ -18,6 +18,16 @@ function Harness() {
   });
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
+  function NoticeProbe() {
+    const [notice, setNotice] = useState('');
+    return <main><h1>Notifications</h1><Link to="/setup">Checklist</Link>
+      <button type="button" onClick={() => {
+        setNotice('Preferences saved.');
+        finishSetupGuidanceSave(beginSetupGuidanceSave(account, 'notifications'));
+      }}>Save notification preferences</button>
+      <p role="status">{notice}</p>
+    </main>;
+  }
   window.__setupFixture = fixture;
   window.__setupAccount = account;
   window.__setSetupFixture = setFixture;
@@ -28,7 +38,7 @@ function Harness() {
       <Route path="/setup" element={<SetupChecklist userId={account} />} />
       <Route path="/settings/academic-year" element={<SetupGuide userId={account} stepId="year"><main><h1>Academic year</h1><Link to="/setup">Checklist</Link></main></SetupGuide>} />
       <Route path="/profile" element={<SetupGuide userId={account} stepId="ai"><main><h1>Profile</h1><Link to="/setup">Checklist</Link></main></SetupGuide>} />
-      <Route path="/settings/notifications" element={<SetupGuide userId={account} stepId="notifications"><main><h1>Notifications</h1><Link to="/setup">Checklist</Link></main></SetupGuide>} />
+      <Route path="/settings/notifications" element={<SetupGuide userId={account} stepId="notifications"><NoticeProbe /></SetupGuide>} />
       <Route path="/classes" element={<SetupGuide userId={account} stepId="classes">
         <main><h1>Classes</h1><Link to="/setup">Checklist</Link><label htmlFor="fixture-class">Class name</label>
           <input id="fixture-class" value={draft} onChange={event => setDraft(event.target.value)} />

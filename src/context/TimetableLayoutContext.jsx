@@ -82,7 +82,8 @@ export function TimetableLayoutProvider({ children, user }) {
   const resetLayout = useCallback(() => setDraft(createDefaultLayoutDraft()), [setDraft]);
 
   const save = useCallback(async () => {
-    if (saving.current || isLoading || !user?.id || !organisationId || !selectedAcademicYearId) return null;
+    if (saving.current || isLoading || !user?.id || !organisationId || !selectedAcademicYearId
+      || loadedAcademicYearId !== selectedAcademicYearId) return null;
     if (!draft.name.trim()) {
       setError('Enter a timetable name before saving.'); setRequestReference(''); setSuccess('');
       return null;
@@ -105,7 +106,7 @@ export function TimetableLayoutProvider({ children, user }) {
       }
       return null;
     } finally { saving.current = false; if (expectedGeneration === generation.current) setIsSaving(false); }
-  }, [authoritativeLayout, draft, isLoading, organisationId, selectedAcademicYearId, user?.id]);
+  }, [authoritativeLayout, draft, isLoading, loadedAcademicYearId, organisationId, selectedAcademicYearId, user?.id]);
 
   const layout = normalizeLayout(authoritativeLayout || createDefaultLayoutDraft());
   const value = useMemo(() => ({

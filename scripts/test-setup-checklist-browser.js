@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 const directory = await mkdtemp(path.join(tmpdir(), 'plannix-setup-browser-'));
 let chrome; let socket; let originalFailure;
 try {
-  await build({ configFile:false, logLevel:'error', define:{'process.env.NODE_ENV':'"production"'}, esbuild:{jsx:'automatic'},
+  await build({ configFile:false, envDir:directory, logLevel:'error', define:{'process.env.NODE_ENV':'"production"'}, esbuild:{jsx:'automatic'},
     plugins:[{name:'setup-saved-data-fixture',enforce:'pre',resolveId(source, importer) {
       if (importer?.endsWith('/SetupGuide.jsx') && source.startsWith('../context/'))
         return path.resolve('src/pages/SetupChecklist.browser-mocks.js');
@@ -123,8 +123,10 @@ try {
   await waitFor("Boolean(document.querySelector('.setup-checklist'))");
   await evaluate("[...document.querySelectorAll('.setup-checklist-item')][5].querySelector('a').click()");
   await waitFor("Boolean(document.querySelector('.setup-guide'))");
-  await evaluate("window.__completeSetupStep('notifications')");
+  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Save notification preferences').click()");
   await waitFor("!document.querySelector('.setup-guide-wrap')");
+  assert.equal(await evaluate("document.querySelector('main [role=status]')?.textContent"),'Preferences saved.',
+    'hiding completed guidance must not remount the page and erase its saved notice');
   await evaluate("[...document.querySelectorAll('main a')].find(a=>a.textContent==='Checklist').click()");
   await waitFor("Boolean(document.querySelector('.setup-checklist'))");
   await evaluate('window.__setupOptionalActive=false');

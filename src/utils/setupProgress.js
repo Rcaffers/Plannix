@@ -14,7 +14,7 @@ export const SETUP_STEPS = [
   { id: 'placements', title: 'Place your lessons', to: '/classes/input', next: '/timetable',
     explanation: 'Put your saved classes into the repeating timetable.',
     example: 'For example, place 9A Maths in Monday period 1.',
-    save: 'Choose Edit classes, select a slot and class, then wait for the automatic save before choosing Finish editing.' },
+    save: 'Select a slot and class, wait for the automatic save, then choose Finish editing. If editing is paused, choose Edit classes first.' },
   { id: 'ai', title: 'Connect an AI provider', to: '/profile', next: '/setup', optional: true,
     explanation: 'Connect your own AI provider if you want help importing holidays.',
     save: 'Choose a provider and enter its API key in Profile, then save the connection. For security, re-enter the key if a save cannot be confirmed.' },

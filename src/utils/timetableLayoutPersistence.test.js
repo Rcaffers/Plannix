@@ -117,10 +117,15 @@ test('legacy session helpers and layout identities are removed after scoped sess
 test('initial default layout can be saved before its draft becomes dirty', () => {
   const settings = fs.readFileSync(new URL('../pages/Settings.jsx', import.meta.url), 'utf8');
   const expression = settings.match(/className="settings-save" disabled={([^}]+)}/)[1];
-  const disabled = new Function('isLayoutSaving', 'isLayoutLoading', 'isPersisted', 'layoutDirty', 'selectedAcademicYearId', `return ${expression}`);
-  assert.equal(disabled(false, false, false, false, 'year-id'), false);
-  assert.equal(disabled(false, false, true, false, 'year-id'), true);
-  assert.equal(disabled(true, false, false, false, 'year-id'), true);
-  assert.equal(disabled(false, true, false, false, 'year-id'), true);
-  assert.equal(disabled(false, false, false, false, null), true);
+  const disabled = new Function('isLayoutSaving', 'isLayoutLoading', 'isPersisted', 'layoutDirty',
+    'confirmingRestoredGuidance', 'loadedAcademicYearId', 'selectedAcademicYearId', `return ${expression}`);
+  assert.equal(disabled(false, false, false, false, false, 'year-id', 'year-id'), false);
+  assert.equal(disabled(false, false, true, false, false, 'year-id', 'year-id'), true);
+  assert.equal(disabled(false, false, true, false, true, 'year-id', 'year-id'), false,
+    'a restored guide permits an unchanged saved layout to be confirmed');
+  assert.equal(disabled(false, false, true, false, true, 'old-year', 'new-year'), true,
+    'a restored guide cannot save the previous year while the new year loads');
+  assert.equal(disabled(true, false, false, false, true, 'year-id', 'year-id'), true);
+  assert.equal(disabled(false, true, false, false, true, 'year-id', 'year-id'), true);
+  assert.equal(disabled(false, false, false, false, true, null, null), true);
 });

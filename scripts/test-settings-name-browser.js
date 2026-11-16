@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 const directory = await mkdtemp(path.join(tmpdir(), 'plannix-settings-name-'));
 let chrome; let socket;
 try {
-  await build({ configFile:false, logLevel:'error', define:{'process.env.NODE_ENV':'"production"'}, esbuild:{jsx:'automatic'},
+  await build({ configFile:false, envDir:directory, logLevel:'error', define:{'process.env.NODE_ENV':'"production"'}, esbuild:{jsx:'automatic'},
     plugins:[{name:'settings-name-fixture',enforce:'pre',resolveId(source,importer) {
       if ((importer?.endsWith('/TimetableLayoutContext.jsx') || importer?.endsWith('/Settings.jsx'))
         && (source === '../context/AcademicYearContext' || source === './AcademicYearContext'
@@ -80,6 +80,39 @@ try {
   await waitFor(`window.__layoutFetchCalls>${readsBeforeReload} && document.querySelector('#timetable-name')?.value==='My replacement'`);
   assert.equal(await evaluate("window.__storedLayout.name"),'My replacement');
   assert.equal(await evaluate("document.querySelector('#timetable-periods')?.value"),'6','reload preserves the saved period edit');
+  assert.equal(await evaluate("document.querySelector('.settings-timetable-form button[type=submit]').disabled"),true,
+    'unchanged saved layout does not offer an ordinary redundant save');
+  await evaluate('window.__restoreLayoutGuidance()');
+  await waitFor("!document.querySelector('.settings-timetable-form button[type=submit]').disabled");
+  assert.equal(await evaluate('window.__layoutGuidancePreference()'),'shown');
+  await evaluate('window.__layoutSaveFailure=true;document.querySelector(".settings-timetable-form button[type=submit]").click()');
+  await waitFor("!!document.querySelector('.settings-error')");
+  assert.equal(await evaluate('window.__layoutGuidancePreference()'),'shown',
+    'failed unchanged save retains restored guidance');
+  assert.equal(await evaluate("document.querySelector('.settings-timetable-form button[type=submit]').disabled"),false,
+    'failed unchanged save remains available for retry');
+  await evaluate('window.__layoutSaveFailure=false;window.__holdLayoutSave=true;document.querySelector(".settings-timetable-form button[type=submit]").click()');
+  await waitFor("typeof window.__resolveLayoutSave==='function'");
+  assert.equal(await evaluate('window.__layoutGuidancePreference()'),'shown',
+    'pending unchanged save retains restored guidance');
+  assert.equal(await evaluate("document.querySelector('.settings-timetable-form button[type=submit]').disabled"),true,
+    'pending save prevents duplicate submissions');
+  await evaluate('window.__holdLayoutSave=false;window.__resolveLayoutSave()');
+  await waitFor("window.__layoutGuidancePreference()==='completed'");
+  assert.equal(await evaluate("document.querySelector('.settings-timetable-form button[type=submit]').disabled"),true,
+    'successful unchanged save completes guidance and restores ordinary disabled state');
+  await evaluate('window.__restoreLayoutGuidance();window.__holdYearTwoFetch=true;window.__selectMockAcademicYear("year-2")');
+  await waitFor("typeof window.__resolveYearTwoFetch==='function'");
+  assert.equal(await evaluate("document.querySelector('.settings-timetable-form button[type=submit]').disabled"),true,
+    'a new academic year cannot save the previous year layout while its load is pending');
+  const savesBeforeNewYear=await evaluate('window.__layoutSaveCalls');
+  await evaluate('document.querySelector(".settings-timetable-form").requestSubmit()');
+  assert.equal(await evaluate('window.__layoutSaveCalls'),savesBeforeNewYear,
+    'programmatic submit also cannot save the previous year layout');
+  await evaluate('window.__holdYearTwoFetch=false;window.__resolveYearTwoFetch()');
+  await waitFor("!document.querySelector('.settings-timetable-form button[type=submit]').disabled");
+  assert.equal(await evaluate("document.querySelector('#timetable-name')?.value"),'My timetable',
+    'new year receives its own default layout after the held load');
   console.log('Rendered Settings name clearing, retyping, blank save validation, successful save and reload passed.');
 } finally {
   try{socket?.close();}catch{ /* Browser is closing. */ }

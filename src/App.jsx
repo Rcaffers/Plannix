@@ -422,7 +422,7 @@ export default function App() {
             <Route path="/privacy" element={<PrivacyGate />} />
             <Route
               path="/settings"
-              element={privateRoute(<SetupGuide userId={user?.id} stepId="layout"><Settings /></SetupGuide>)}
+              element={privateRoute(<SetupGuide userId={user?.id} stepId="layout"><Settings userId={user?.id} /></SetupGuide>)}
             />
             <Route path="/setup" element={privateRoute(<SetupChecklist userId={user?.id} />)} />
             <Route
