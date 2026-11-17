@@ -41,10 +41,11 @@ CSRF token, lesson or event is stored there.
 
 ## Authorization and local coordination
 
-The worker hashes its current PushSubscription endpoint in memory. It holds
-the origin-wide `plannix-push-device` Web Lock while reading selectors,
-checking the default-off server gate, checking fresh ordinary session status,
-getting a no-store detail response, and calling `showNotification`. The
+The worker hashes its current PushSubscription endpoint in memory. It first
+observes the selector, then holds the origin-wide `plannix-push-device` Web
+Lock while rechecking its epoch, checking the default-off server gate and fresh
+ordinary session status, getting a no-store detail response, rechecking the
+epoch again, and calling `showNotification`. The
 production session guard and database authorization verify owner, binding,
 pilot, reference, delivery record, school day, consents and expiry. Missing
 storage, lock, subscription, matching session or server authorization selects
@@ -62,13 +63,26 @@ working lock and fresh server authority to display details. The final
 authorization-to-display race under simultaneous coordination failure remains
 an activation gate below.
 
-The decision has a four-second deadline, including a one-second initial
-storage bound and one-second bound on a started display promise. Generic text
-is used only **before** a detail `showNotification` call begins. Rejection,
-timeout or uncertain completion after that point never triggers a second
-notification. Timeout and abort do not cancel an OS display request. Fetched
-details stay in worker memory until that call. Displayed content may persist
+The decision has a four-second deadline before display, including a one-second
+initial storage bound. Generic text is used only **before** a detail
+`showNotification` call begins. Once it begins, the push event waits for the
+display promise to settle or for the browser to end the event; rejection or
+uncertain completion never triggers a second notification. A browser-imposed
+event lifetime limit can still leave OS display uncertain. Timeout and abort
+do not cancel an OS display request. Fetched details stay in worker memory
+until that call. Displayed content may persist
 on lock screens and connected watches and cannot be recalled.
+
+If the browser never settles the display promise, the worker retains the device
+lock until the browser ends the push event. Queued authentication transitions
+have a 1.5-second lock-acquisition deadline, then proceed after a best-effort
+selector invalidation; they do not wait indefinitely for notification display.
+Normal logout first waits up to eight seconds for device cleanup and then
+offers the existing explicit “Sign out anyway” path if cleanup is uncertain.
+Account-wide consent saves use the bounded transition path. Device-policy,
+registration and removal controls that directly request the device lock can
+remain pending until the browser releases it. This remains an uncertain local
+coordination case; it cannot make an already-started OS display revocable.
 
 ## Activation gates and residual limits
 

@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { webcrypto } from 'node:crypto';
 import test from 'node:test';
 import { buildMorningSummary } from '../../src/utils/morningSummary.js';
-import { createMorningSummaryDelivery } from '../morningSummary/delivery.js';
+import { createMorningSummaryDelivery, summaryPayload } from '../morningSummary/delivery.js';
 import { createMorningSummaryDetailService } from '../morningSummary/detail.js';
 
 const script = readFileSync(new URL('../../public/push-sw.js', import.meta.url), 'utf8');
@@ -400,7 +400,37 @@ test('versioned summary payload opens only a locally constructed authenticated d
   assert.equal(w.notifications.length, 1);
 });
 
-function detailFixture({ fetchImpl, showImpl, locks, timerImpl = setTimeout } = {}) {
+test('the scheduler payload reaches a cold worker and retains generic fallback before display', async () => {
+  const notificationRef = 'cf000000-0000-4000-8000-000000000003';
+  const wire = JSON.stringify(summaryPayload({ date:'2026-11-17',
+    lessons:[{period:'P1',className:'Synthetic class',title:'Lesson',isPpa:false}],
+    events:[{title:'Synthetic event'}] }, notificationRef));
+  const w = worker(); // No selector storage or detail APIs on this cold start.
+  let job;
+  w.listeners.get('push')({ data:{json:() => JSON.parse(wire)}, waitUntil:value => {job=value;} });
+  assert.ok(job,'the scheduled payload must be retained by pushEvent.waitUntil');
+  await job;
+  assert.equal(w.notifications.length,1);
+  assert.equal(w.notifications[0][1].body,'Open Plannix to view your morning summary.');
+  assert.doesNotMatch(JSON.stringify(w.notifications),/Synthetic class|Synthetic event/);
+});
+
+test('a rejected generic OS display is not counted as a displayed notification', async () => {
+  let attempts = 0;
+  const w = worker({ registration:{showNotification:async () => {
+    attempts++;
+    throw new Error('synthetic display rejection');
+  }} });
+  const payload = summaryPayload({date:'2026-11-17',lessons:[{period:'P1'}],events:[]},
+    'cf000000-0000-4000-8000-000000000003');
+  let job;
+  w.listeners.get('push')({data:{json:() => payload},waitUntil:value => {job=value;}});
+  await assert.rejects(job,/synthetic display rejection/);
+  assert.equal(attempts,1,'a failed display is not replayed');
+});
+
+function detailFixture({ fetchImpl, showImpl, locks, timerImpl = setTimeout,
+  clearTimerImpl = clearTimeout } = {}) {
   const listeners = new Map();
   const shown = [];
   const selector = { sessionName:'__Host-plannix-s-2',
@@ -441,7 +471,8 @@ function detailFixture({ fetchImpl, showImpl, locks, timerImpl = setTimeout } = 
       }},
     clients:{matchAll:async () => [],openWindow:async () => {}},
   };
-  vm.runInNewContext(script,{self,URL,indexedDB,AbortController,setTimeout:timerImpl,clearTimeout,
+  vm.runInNewContext(script,{self,URL,indexedDB,AbortController,setTimeout:timerImpl,
+    clearTimeout:clearTimerImpl,
     TextEncoder,TextDecoder,Uint8Array,Response,Number,queueMicrotask});
   const payload = {type:'plannix-morning-summary',version:1,
     notificationRef:'cf000000-0000-4000-8000-000000000003',
@@ -662,12 +693,59 @@ test('unsupported worker locks, changed session and pre-display timeout use gene
   assert.equal(timeout.shown[0][1].body,timeout.payload.body);
 });
 
+test('a non-cooperative authorization result after the pre-display deadline cannot start a second display', async () => {
+  const heldConfig = deferred();
+  let configRequested = false;
+  const locks = lockManager();
+  const timers = new Map();
+  let nextTimer = 0;
+  const h = detailFixture({locks,
+    fetchImpl:async input => {
+      const path = new URL(input).pathname;
+      if (path.endsWith('detail-display-config')) { configRequested = true; await heldConfig.promise;
+        return Response.json({enabled:true}); }
+      if (path.endsWith('/status')) return Response.json({authenticated:true,sessionName:'__Host-plannix-s-2'});
+      return Response.json({date:'2026-11-17',week:'A',lessons:[{period:'P1',
+        className:'Synthetic class',title:'Synthetic lesson',isPpa:false}],events:[],
+        lessonDetailsIncluded:true,eventTitlesIncluded:false});
+    },
+    timerImpl:(callback,delay) => {const id=++nextTimer;timers.set(id,{callback,delay});return id;},
+    clearTimerImpl:id => timers.delete(id)});
+  const work = h.deliver();
+  await until(() => configRequested && locks.state().held);
+  const deadline=[...timers.values()].find(item => item.delay===4000);
+  assert.ok(deadline,'the pre-display decision must be bounded');
+  deadline.callback();
+  await work;
+  assert.equal(h.shown.length,1);
+  assert.equal(h.shown[0][1].body,h.payload.body);
+  heldConfig.resolve();
+  await until(() => !locks.state().held);
+  assert.equal(h.shown.length,1,'late authorization cannot display details after generic fallback');
+});
+
 test('a rejected or unsettled display attempt never starts a generic second display', async () => {
   const failed = detailFixture({showImpl:async () => {throw new Error('OS rejected');}});
   await failed.deliver();
   assert.equal(failed.shown.length,1);
-  const pending = detailFixture({showImpl:() => new Promise(() => {})});
-  await pending.deliver();
+  const display = deferred();
+  const locks = lockManager();
+  const timers = new Map();
+  let nextTimer = 0;
+  const pending = detailFixture({showImpl:() => display.promise,locks,
+    timerImpl:(callback,delay) => { const id = ++nextTimer; timers.set(id,{callback,delay}); return id; },
+    clearTimerImpl:id => timers.delete(id)});
+  let settled = false;
+  const work = pending.deliver().finally(() => { settled = true; });
+  await until(() => pending.shown.length === 1);
+  assert.equal(timers.size,0,'all pre-display deadlines are cleared when OS display starts');
+  assert.equal(settled,false,'push waitUntil must retain an unsettled OS display after the detail deadline');
+  assert.equal(locks.state().held,true,'the device lock remains held through the display attempt');
   assert.equal(pending.shown.length,1);
   assert.notEqual(pending.shown[0][1].body,pending.payload.body);
+  display.resolve();
+  await work;
+  await until(() => !locks.state().held);
+  assert.equal(settled,true);
+  assert.equal(pending.shown.length,1);
 });

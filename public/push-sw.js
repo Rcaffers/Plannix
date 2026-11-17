@@ -228,12 +228,21 @@ async function showMorning(payload) {
   });
   let displayStarted = false;
   const controller = new AbortController();
+  let decisionTimer;
+  const decisionDeadline = new Promise((_, reject) => {
+    decisionTimer = setTimeout(() => {
+      if (displayStarted) return;
+      controller.abort();
+      reject(new Error('detail deadline'));
+    }, DETAIL_DEADLINE_MS);
+  });
   try {
-    const stored = await deadline(() => selectorTransaction(), 1000, controller);
-    const selector = stored.selector;
-    if (!validSelector(selector) || typeof self.navigator?.locks?.request !== 'function'
-      || !self.crypto?.subtle || !self.registration.pushManager?.getSubscription) throw new Error('detail unavailable');
-    await deadline(() => self.navigator.locks.request(DETAIL_LOCK,
+    const work = (async () => {
+      const stored = await deadline(() => selectorTransaction(), 1000, controller);
+      const selector = stored.selector;
+      if (!validSelector(selector) || typeof self.navigator?.locks?.request !== 'function'
+        || !self.crypto?.subtle || !self.registration.pushManager?.getSubscription) throw new Error('detail unavailable');
+      await self.navigator.locks.request(DETAIL_LOCK,
       { mode: 'exclusive', signal: controller.signal }, async lock => {
         if (!lock || controller.signal.aborted) throw new Error('detail unavailable');
         const current = await selectorTransaction();
@@ -266,15 +275,21 @@ async function showMorning(payload) {
         if (controller.signal.aborted || latest.epoch !== stored.epoch)
           throw new Error('detail unavailable');
         displayStarted = true;
-        // After this call starts, failure or timeout is uncertain. A second
-        // generic display could duplicate an OS notification.
-        await deadline(() => self.registration.showNotification(payload.title, {
+        clearTimeout(decisionTimer);
+        // After this call starts, failure or browser termination is uncertain. A second
+        // generic display could duplicate an OS notification. Keep the push
+        // event alive until the display promise settles or the browser ends it.
+        await self.registration.showNotification(payload.title, {
           body, tag: 'plannix-morning-summary',
           data: { type: 'morning', notificationRef: payload.notificationRef },
-        }), 1000);
-      }), DETAIL_DEADLINE_MS, controller);
+        });
+      });
+    })();
+    await Promise.race([work, decisionDeadline]);
   } catch {
     if (!displayStarted) await generic();
+  } finally {
+    clearTimeout(decisionTimer);
   }
 }
 

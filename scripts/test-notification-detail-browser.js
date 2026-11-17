@@ -8,6 +8,7 @@ import path from 'node:path';
 const directory = await mkdtemp(path.join(tmpdir(),'plannix-detail-browser-'));
 const workerSource = await readFile(new URL('../public/push-sw.js',import.meta.url),'utf8');
 const fixtureWorker = `${workerSource}\n// Synthetic local subscription; no push service registration or push is sent.
+let fixtureSequence = 0;
 self.registration.pushManager.getSubscription = async () => ({endpoint:'https://push.example.test/device'});
 self.addEventListener('message', event => {
   if (event.data?.type === 'fixture-capability' && event.ports?.[0]) {
@@ -17,11 +18,12 @@ self.addEventListener('message', event => {
   }
   if (event.data?.type !== 'fixture-deliver' || !event.ports?.[0]) return;
   const port = event.ports[0];
+  const sequence = ++fixtureSequence;
   const payload = {type:'plannix-morning-summary',version:1,
-    notificationRef:'cf000000-0000-4000-8000-000000000003',
+    notificationRef:'cf000000-0000-4000-8000-'+String(sequence).padStart(12,'0'),
     title:'Your Plannix day',body:'Open Plannix to view your morning summary.'};
-  const work = showMorning(payload).then(() => port.postMessage({done:true}),
-    () => port.postMessage({done:false}));
+  const work = showMorning(payload).then(() => port.postMessage({done:true,sequence}),
+    () => port.postMessage({done:false,sequence}));
   event.waitUntil(work);
 });`;
 const page = `<!doctype html><meta charset="utf-8"><script>
@@ -121,6 +123,10 @@ try {
     selector:{sessionName:'__Host-plannix-s-2',installationVersion:'cf000000-0000-4000-8000-000000000001',
       policyVersion:'cf000000-0000-4000-8000-000000000002'}})`);
   assert.equal(committed.ok,true);
+  const fixtureRef=sequence=>`cf000000-0000-4000-8000-${String(sequence).padStart(12,'0')}`;
+  const notificationBodies=() => evaluate(tab,`window.registration.getNotifications({tag:'plannix-morning-summary'})
+    .then(items=>items.map(item=>({body:item.body,title:item.title,ref:item.data?.notificationRef})))`);
+  assert.deepEqual(await notificationBodies(),[],'the fresh profile has no earlier summary notification');
   await evaluate(tab,`(()=>{window.releaseTabLock=null;window.tabLock=new Promise(resolve=>{window.releaseTabLock=resolve});
     window.heldLock=navigator.locks.request('plannix-push-device',{mode:'exclusive'},()=>window.tabLock);return true})()`);
   await until(async () => (await evaluate(tab,
@@ -142,10 +148,15 @@ try {
   const invalidated=await evaluate(tab,"window.command('invalidate')");
   assert.equal(invalidated.ok,true);
   releaseDetail();releaseDetail=null;
-  assert.equal((await evaluate(tab,'window.delivery')).done,true);
-  const notifications=await evaluate(tab,`window.registration.getNotifications({tag:'plannix-morning-summary'})
-    .then(items=>items.map(item=>({body:item.body,title:item.title})))`);
+  const firstDelivery=await evaluate(tab,'window.delivery');
+  assert.equal(firstDelivery.done,true);
+  await until(async () => {const items=await notificationBodies();return items.length===1
+    && items[0].ref===fixtureRef(firstDelivery.sequence)
+    && items[0].body==='Open Plannix to view your morning summary.';},
+  'generic notification for the first delivery');
+  const notifications=await notificationBodies();
   assert.equal(notifications.length,1);
+  assert.equal(notifications[0].ref,fixtureRef(firstDelivery.sequence));
   assert.equal(notifications[0].body,'Open Plannix to view your morning summary.');
   assert.doesNotMatch(JSON.stringify(notifications),/Synthetic lesson/);
   holdNextDetail=false;
@@ -153,15 +164,22 @@ try {
   assert.equal((await evaluate(tab,`window.command('commit',{expectedEpoch:${fresh.epoch},
     selector:{sessionName:'__Host-plannix-s-2',installationVersion:'cf000000-0000-4000-8000-000000000001',
       policyVersion:'cf000000-0000-4000-8000-000000000004'}})`)).ok,true);
-  assert.equal((await evaluate(tab,'window.deliver()')).done,true);
-  const detailed=await evaluate(tab,`window.registration.getNotifications({tag:'plannix-morning-summary'})
-    .then(items=>items.map(item=>item.body))`);
+  const secondDelivery=await evaluate(tab,'window.deliver()');
+  assert.equal(secondDelivery.done,true);
+  await until(async () => {const items=await notificationBodies();return items.length===1
+    && items[0].ref===fixtureRef(secondDelivery.sequence)
+    && /Synthetic lesson/.test(items[0].body);},'detailed notification for the second delivery');
+  const detailed=(await notificationBodies()).map(item=>item.body);
   assert.equal(detailed.length,1);
   assert.match(detailed[0],/Synthetic lesson/);
   currentSessionName='__Host-plannix-s-3';
-  assert.equal((await evaluate(tab,'window.deliver()')).done,true);
-  const replaced=await evaluate(tab,`window.registration.getNotifications({tag:'plannix-morning-summary'})
-    .then(items=>items.map(item=>item.body))`);
+  const thirdDelivery=await evaluate(tab,'window.deliver()');
+  assert.equal(thirdDelivery.done,true);
+  await until(async () => {const items=await notificationBodies();return items.length===1
+    && items[0].ref===fixtureRef(thirdDelivery.sequence)
+    && items[0].body==='Open Plannix to view your morning summary.';},
+  'generic notification for the replacement-session delivery');
+  const replaced=(await notificationBodies()).map(item=>item.body);
   assert.deepEqual(replaced,['Open Plannix to view your morning summary.']);
   console.log('Native Chrome worker/tab lock, stale selector, synthetic detail display and same-account session mismatch passed.');
 } catch (error) {primary=error;}
