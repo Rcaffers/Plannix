@@ -12,6 +12,8 @@ const nativeFetch = globalThis.fetch;
 globalThis.fetch = () => { throw Error('External network disabled in import preview route tests'); };
 test.after(() => { globalThis.fetch = nativeFetch; });
 const { registerAiImportPreviewRoutes } = await import('./ai-import-preview-routes.js');
+const { extractTextFromHolidayPdf } = await import('../pdf/extractTextFromHolidayPdf.js');
+const { createImportPreviewApi } = await import('../../src/utils/importPreviewApi.js');
 const id = '91000000-0000-4000-8000-000000000001';
 const year = { academicYearStartDate: '2026-09-01', academicYearEndDate: '2027-08-31' };
 const event = { title: 'Assembly', date: '', sourceDate: '03/04/2027', allDay: false,
@@ -36,7 +38,7 @@ async function setup(t, options = {}) {
   const request = (path, body, contentType = 'application/json', token = 'confirmed', extra = {}) => nativeFetch(base + path,
     { method: 'POST', headers: { 'Content-Type': contentType, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: contentType === 'application/json' && typeof body !== 'string' ? JSON.stringify(body) : body, ...extra });
-  return { calls, logs, request };
+  return { calls, logs, request, origin: `http://127.0.0.1:${server.address().port}` };
 }
 test('confirmed authentication and server-owned destination schema are required', async t => {
   const h = await setup(t), body = { destination: 'events', text: 'Assembly on 03/04/2027', ...year };
@@ -86,6 +88,33 @@ test('PDF holiday preview derives the stated term gaps but cannot save summer wi
   assert.ok(previewIssues('holidays', body.entries.at(-1), { startDate: year.academicYearStartDate,
     endDate: year.academicYearEndDate }).length > 0, 'summer requires a confirmed end date before saving');
 });
+test('the supplied holiday PDF passes through the real HTTP upload and PDF extractor',
+  { skip: !process.env.PLANNIX_HOLIDAY_PDF_TEST_PATH }, async t => {
+    const file = await readFile(process.env.PLANNIX_HOLIDAY_PDF_TEST_PATH);
+    let generated;
+    const h = await setup(t, { extractPdf: extractTextFromHolidayPdf,
+      generate: async args => { generated = args; return { entries: [] }; } });
+    const response = await h.request(`/extract-pdf?${query('holidays')}`, file, 'application/pdf');
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.pageCount, 1);
+    assert.deepEqual(body.entries.map(row => [row.label, row.startDate, row.endDate]), [
+      ['Christmas holiday', '2026-12-19', '2027-01-03'],
+      ['Easter holiday', '2027-03-26', '2027-04-11'],
+      ['Summer holiday', '2027-07-22', ''],
+    ]);
+    assert.match(generated.userContent, /Closure after school Friday 18th December 2026\n/);
+    assert.match(generated.userContent, /INSET DAY 4 Monday 4th January 2027\nRe-open Tuesday 5 th January 2027/);
+    assert.match(generated.userContent, /Closure after school Thursday 25 th March 2027\n/);
+    assert.match(generated.userContent, /Re-open Monday 12 th April 2027\n/);
+    assert.ok(previewIssues('holidays', body.entries[2], { startDate: year.academicYearStartDate,
+      endDate: year.academicYearEndDate }).length > 0);
+    const client = createImportPreviewApi({ getSession: async () => ({ access_token: 'confirmed' }),
+      fetchImpl: (path, init) => nativeFetch(`${h.origin}${path}`, init) });
+    const parsed = await client({ destination: 'holidays', mode: 'pdf',
+      file: new File([file], 'holiday-dates.pdf', { type: 'application/pdf' }), ...year });
+    assert.deepEqual(parsed.entries, body.entries, 'the browser transport accepts the real route response');
+  });
 test('CSV text is extracted without a write and malformed Excel fails before provider generation', async t => {
   const h = await setup(t);
   const csv = await h.request(`/extract-csv?${query('events')}`, Buffer.from('Title,Date\nAssembly,28/03/2027'), 'text/csv');

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { aiConnectionApi } from '../utils/aiConnectionApi.js';
-import { extractSchoolHolidaysFromPdf, pdfFileError } from '../utils/holidayPdfExtractionApi.js';
+import { pdfFileError } from '../utils/holidayPdfExtractionApi.js';
 import { extractSchoolHolidays } from '../utils/holidayExtractionApi.js';
 import { extractImportPreview, importSourceError } from '../utils/importPreviewApi.js';
 import { boundaryError, MAX_HOLIDAY_TEXT_BYTES, mergeReviewedHolidays, suggestionError, textBytes } from '../utils/holidayReview.js';
@@ -66,7 +66,7 @@ export default function SchoolHolidayAiImport({ draft, yearLabel, userId, onDraf
   const datesError = boundaryError(draft.startDate, draft.endDate);
   const bytes = textBytes(text);
   const sourceError = mode === 'text' ? (!text.trim() || bytes > MAX_HOLIDAY_TEXT_BYTES ? 'Paste up to 50,000 bytes of calendar text.' : '')
-    : mode === 'pdf' ? pdfFileError(file) : importSourceError({ mode, text, file });
+    : mode === 'pdf' ? pdfFileError(file) || importSourceError({ mode, text, file }) : importSourceError({ mode, text, file });
   function changeMode(nextMode) {
     if (nextMode === mode || (hasReview && !window.confirm('Discard these unsaved holiday suggestions?'))) return;
     cancel(); setMode(nextMode); setReview(null); setError(null); setAnnouncement('');
@@ -78,13 +78,14 @@ export default function SchoolHolidayAiImport({ draft, yearLabel, userId, onDraf
     setBusy(true); setError(null); setReview(null); setAnnouncement('');
     try {
       const boundaries = { academicYearStartDate: draft.startDate, academicYearEndDate: draft.endDate };
-      const imported = ['image', 'xlsx', 'csv'].includes(mode);
+      const imported = ['pdf', 'image', 'xlsx', 'csv'].includes(mode);
       const holidays = imported
         ? (await extractImportPreview({ destination: 'holidays', mode, file, ...boundaries }, { signal: controller.signal })).entries
-        : mode === 'pdf' ? (await extractSchoolHolidaysFromPdf({ file, ...boundaries }, { signal: controller.signal })).holidays
-          : await extractSchoolHolidays({ text, ...boundaries }, { signal: controller.signal });
+        : await extractSchoolHolidays({ text, ...boundaries }, { signal: controller.signal });
       if (operation.current !== controller || controller.signal.aborted) return;
-      setReview(holidays.map(({ sourceDate, ...holiday }) => ({ holiday, included: true,
+      setReview(holidays.map(({ sourceDate, ...holiday }) => ({ holiday,
+        included: !imported || (!suggestionError(holiday, draft.startDate, draft.endDate)
+          && !previewIssues('holidays', { ...holiday, sourceDate }, draft).length),
         ...(imported ? { sourceDate, editedDates: [] } : {}) })));
     } catch (failure) {
       if (operation.current !== controller || controller.signal.aborted) return;
@@ -150,7 +151,8 @@ export default function SchoolHolidayAiImport({ draft, yearLabel, userId, onDraf
             const files = event.target.files;
             const chosen = files?.length === 1 ? files[0] : null;
             operation.current?.abort(); operation.current = null; setBusy(false); setError(null);
-            const invalid = mode === 'pdf' ? pdfFileError(chosen) : importSourceError({ mode, text, file: chosen });
+            const invalid = mode === 'pdf' ? pdfFileError(chosen) || importSourceError({ mode, text, file: chosen })
+              : importSourceError({ mode, text, file: chosen });
             if (invalid) { clearFile(); setError(new Error(invalid)); } else setFile(chosen);
           }} />
           <label className="settings-reset school-holiday-file-button" htmlFor="school-holiday-file">Choose {fileTypes[mode].name}</label>

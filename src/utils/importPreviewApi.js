@@ -9,7 +9,8 @@ export function importSourceError({ mode, text, file }) {
   if (mode === 'text') return typeof text !== 'string' || !text.trim() || new TextEncoder().encode(text).length > IMPORT_TEXT_BYTES
     ? 'Paste up to 50,000 bytes of calendar text.' : '';
   if (!(file instanceof Blob) || !file.size) return 'Choose a non-empty document.';
-  if (mode === 'pdf') return file.type !== 'application/pdf' || file.size > 10 * 1024 * 1024
+  if (mode === 'pdf') return (file.type !== 'application/pdf' && !(file.type === '' && /\.pdf$/i.test(file.name || '')))
+    || file.size > 10 * 1024 * 1024
     ? 'Choose one PDF no larger than 10 MiB.' : '';
   if (mode === 'image') return !['image/png', 'image/jpeg'].includes(file.type) || file.size > IMPORT_IMAGE_BYTES
     ? 'Choose one PNG or JPEG image no larger than 4 MiB.' : '';
@@ -55,7 +56,8 @@ export function createImportPreviewApi({ fetchImpl = fetch, getSession = session
       const init = { method: 'POST', credentials: 'omit', cache: 'no-store', signal,
         headers: { ...(serverManagedAuth ? {} : { Authorization: `Bearer ${active.access_token}` }),
           'Content-Type': mode === 'text' ? 'application/json'
-          : mode === 'csv' ? 'text/csv' : mode === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : file.type },
+          : mode === 'pdf' ? 'application/pdf'
+            : mode === 'csv' ? 'text/csv' : mode === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : file.type },
         body: mode === 'text' ? JSON.stringify({ destination, text, academicYearStartDate, academicYearEndDate }) : file };
       const response = serverManagedAuth
         ? await serverAuthFetch(`${API_BASE_URL}${path}`, init, { fetchImpl, operationContext })

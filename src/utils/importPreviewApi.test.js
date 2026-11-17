@@ -45,6 +45,18 @@ test('file and text limits reject before session lookup', async () => {
   assert.equal(lookups, 0);
   assert.match(importSourceError({ mode: 'image', file: new Blob(['x'], { type: 'image/svg+xml' }) }), /PNG or JPEG/);
   assert.match(importSourceError({ mode: 'xlsx', file: new File(['x'], 'calendar.xls', { type: 'application/octet-stream' }) }), /Excel/);
+  assert.equal(importSourceError({ mode: 'pdf', file: new File(['%PDF-synthetic'], 'calendar.pdf') }), '',
+    'a PDF with an empty browser MIME type remains uploadable');
+  assert.match(importSourceError({ mode: 'pdf', file: new File(['x'], 'calendar.txt') }), /PDF/);
+});
+test('MIME-less PDF file uses the PDF content type on the authenticated upload', async () => {
+  let header;
+  const extract = createImportPreviewApi({ getSession: async () => ({ access_token: 'synthetic-session' }),
+    fetchImpl: async (_url, init) => { header = init.headers['Content-Type'];
+      return new Response(JSON.stringify({ destination: 'holidays', entries: [], pageCount: 1 })); } });
+  await extract({ destination: 'holidays', mode: 'pdf',
+    file: new File(['%PDF-synthetic'], 'calendar.pdf'), ...year });
+  assert.equal(header, 'application/pdf');
 });
 test('complete calendar PDF can return more than the AI preview limit without expanding other sources', async () => {
   const entries=Array.from({length:101},(_,i)=>({...event,title:`Meeting ${i}`}));
@@ -53,4 +65,17 @@ test('complete calendar PDF can return more than the AI preview limit without ex
       ...(url.includes('extract-pdf')?{pageCount:3}:{})}))});
   assert.equal((await extract({destination:'events',mode:'pdf',file,...year})).entries.length,101);
   await assert.rejects(extract({destination:'events',mode:'text',text:'Meetings',...year}),/safely read/);
+});
+test('holiday PDF response retains supported term ranges and an incomplete summer boundary', async () => {
+  const entries = [
+    { label: 'Christmas holiday', startDate: '2026-12-19', endDate: '2027-01-03', sourceDate: 'Closure 2026-12-18; reopen 2027-01-05' },
+    { label: 'Easter holiday', startDate: '2027-03-26', endDate: '2027-04-11', sourceDate: 'Closure 2027-03-25; reopen 2027-04-12' },
+    { label: 'Summer holiday', startDate: '2027-07-22', endDate: '', sourceDate: 'Closure 2027-07-20; next opening not stated' },
+  ];
+  const extract = createImportPreviewApi({ getSession: async () => ({ access_token: 'synthetic-session' }),
+    fetchImpl: async url => {
+      assert.match(url, /\/api\/ai\/import-preview\/extract-pdf/);
+      return new Response(JSON.stringify({ destination: 'holidays', entries, pageCount: 1 }));
+    } });
+  assert.deepEqual((await extract({ destination: 'holidays', mode: 'pdf', file, ...year })).entries, entries);
 });

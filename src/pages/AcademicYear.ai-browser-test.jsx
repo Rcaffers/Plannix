@@ -22,15 +22,20 @@ export function useAcademicYear() {
     saveAcademicYear: async draft => { saves.push(structuredClone(draft)); setYear(draft); return draft; } };
 }
 export const aiConnectionApi = { load: async () => { providerLoads++; return provider; } };
-export const pdfFileError = file => file instanceof Blob && file.type === 'application/pdf' && file.size <= 10 * 1024 * 1024 ? '' : 'Choose one PDF no larger than 10 MiB.';
+export const pdfFileError = file => file instanceof Blob && (!file.type || file.type === 'application/pdf')
+  && file.size <= 10 * 1024 * 1024 ? '' : 'Choose one PDF no larger than 10 MiB.';
 export const extractSchoolHolidays = async input => { legacyCalls.push({ mode: 'text', input });
   return [{ label: 'Reviewed INSET Day', startDate: '2026-09-02', endDate: '2026-09-02' }]; };
-export const extractSchoolHolidaysFromPdf = async input => { legacyCalls.push({ mode: 'pdf', input });
-  return { holidays: [{ label: 'PDF INSET Day', startDate: '2026-09-04', endDate: '2026-09-04' }] }; };
+export const extractSchoolHolidaysFromPdf = async () => { throw Error('Legacy PDF route must not be used.'); };
 export { importSourceError };
 export const extractImportPreview = async (input, { signal }) => {
   requests.push({ input, signal }); if (gate) await gate;
   if (fail) throw Object.assign(Error('Could not extract a preview.'), { requestId: '91000000-0000-4000-8000-000000000009' });
+  if (input.mode === 'pdf') return { destination: 'holidays', entries: [
+    { label: 'Christmas holiday', startDate: '2026-12-19', endDate: '2027-01-03', sourceDate: 'Closure 2026-12-18; reopen 2027-01-05' },
+    { label: 'Easter holiday', startDate: '2027-03-26', endDate: '2027-04-11', sourceDate: 'Closure 2027-03-25; reopen 2027-04-12' },
+    { label: 'Summer holiday', startDate: '2027-07-22', endDate: '', sourceDate: 'Closure 2027-07-20; next opening not stated' },
+  ] };
   return { destination: 'holidays', entries: [{ label: `${input.mode.toUpperCase()}${input.file?.type === 'image/jpeg' ? ' JPEG' : ''} INSET Day`, startDate: '2026-09-03', endDate: '2026-09-03',
     sourceDate: input.file?.name?.startsWith('ambiguous') ? '03/04/2027' : '3 September 2026' }] };
 };
@@ -95,8 +100,38 @@ async function run() {
   click('Save academic year'); await settle();
   check(saves.length === 1 && saves[0].holidays.some(holiday => holiday.label === 'Corrected INSET Day'),
     'Save academic year remains the persistence action for reviewed holidays');
+  click('Upload PDF');
+  chooseFile('not-a-pdf.txt', '');
+  check(button('Extract holidays from PDF').disabled && host.textContent.includes('Choose one PDF no larger than 10 MiB.'),
+    'PDF picker rejects a MIME-less non-PDF file before extraction');
+  const pdfFile = chooseFile('holiday-dates.pdf', 'application/pdf'), pdfSaves = saves.length;
+  click('Extract holidays from PDF'); await settle();
+  check(requests.at(-1)?.input.mode === 'pdf' && requests.at(-1)?.input.file === pdfFile
+    && requests.at(-1)?.input.academicYearStartDate === '2026-09-01'
+    && requests.at(-1)?.input.academicYearEndDate === '2027-08-31'
+    && !legacyCalls.some(call => call.mode === 'pdf'), 'PDF uses the holiday preview route');
+  check(host.querySelector('#suggestion-0-label')?.value === 'Christmas holiday'
+    && host.querySelector('#suggestion-0-startDate')?.value === '2026-12-19'
+    && host.querySelector('#suggestion-0-endDate')?.value === '2027-01-03'
+    && host.querySelector('#suggestion-1-label')?.value === 'Easter holiday'
+    && host.querySelector('#suggestion-1-startDate')?.value === '2027-03-26'
+    && host.querySelector('#suggestion-1-endDate')?.value === '2027-04-11'
+    && saves.length === pdfSaves, 'Christmas and Easter reach the rendered preview with supported dates');
+  check(host.querySelector('#suggestion-2-label')?.value === 'Summer holiday'
+    && host.querySelector('#suggestion-2-endDate')?.value === ''
+    && !host.querySelectorAll('.school-holiday-include input')[2].checked
+    && !button('Add selected holidays').disabled,
+  'summer remains visible, undated and excluded while valid holidays can be added');
+  click('Add selected holidays'); await settle();
+  const draftLabels = [...host.querySelectorAll('#school-holidays-panel .settings-holiday-card input[type="text"]')]
+    .map(node => node.value);
+  check(saves.length === pdfSaves && draftLabels.includes('Christmas holiday')
+    && draftLabels.includes('Easter holiday') && !draftLabels.includes('Summer holiday'),
+  'PDF review adds only confirmed holidays to the draft');
+  click('Save academic year'); await settle();
+  check(saves.length === pdfSaves + 1 && saves.at(-1).holidays.some(holiday => holiday.label === 'Easter holiday'),
+    'the academic-year save remains the persistence step for PDF holidays');
   for (const [mode, filename, type, action, label] of [
-    ['pdf', 'calendar.pdf', 'application/pdf', 'Extract holidays from PDF', 'PDF INSET Day'],
     ['image', 'calendar.png', 'image/png', 'Extract holidays from image', 'IMAGE INSET Day'],
     ['image', 'calendar.jpg', 'image/jpeg', 'Extract holidays from image', 'IMAGE JPEG INSET Day'],
     ['xlsx', 'calendar.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Extract holidays from Excel file', 'XLSX INSET Day'],
@@ -109,9 +144,7 @@ async function run() {
     click(action); await settle();
     check(host.querySelector('#suggestion-0-label')?.value === label && saves.length === beforeSave,
       `${mode} extraction enters the same review without saving`);
-    if (mode === 'pdf') check(legacyCalls.at(-1)?.mode === 'pdf' && legacyCalls.at(-1)?.input.file === file,
-      'PDF retains the bounded established extraction service');
-    else check(requests.at(-1)?.input.mode === mode && requests.at(-1)?.input.file === file
+    check(requests.at(-1)?.input.mode === mode && requests.at(-1)?.input.file === file
       && requests.at(-1)?.input.destination === 'holidays', `${mode} uses the bounded document extraction service`);
     if (mode === 'image') {
       flushSync(() => host.querySelector('.school-holiday-include input').click());
@@ -155,6 +188,9 @@ async function run() {
   check(host.textContent.includes('Confirm the ambiguous source date') && button('Add selected holidays').disabled,
     'ambiguous document dates remain visible and cannot be added without correction');
   input('#suggestion-0-startDate', '2027-04-03'); input('#suggestion-0-endDate', '2027-04-03');
+  check(!host.querySelector('.school-holiday-include input').checked,
+    'correcting an excluded suggestion does not silently opt it into addition');
+  flushSync(() => host.querySelector('.school-holiday-include input').click());
   check(!button('Add selected holidays').disabled, 'correcting both ambiguous dates enables draft addition');
   click('+ Add holiday'); await settle();
   document.body.dataset.step = 'manual school';
