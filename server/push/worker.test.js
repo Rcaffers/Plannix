@@ -103,6 +103,34 @@ test('lock probe serializes page-held then worker-held orders with terminal rele
   assert.deepEqual(locks.state(),{held:false,pending:0});
   assert.equal(w.notifications.length,0);
 });
+test('worker activation requires an explicit same-origin window message', async () => {
+  let requests = 0;
+  const w = worker({ skipWaiting:async () => { requests++; },
+    indexedDB:{open() {throw Error('update read selector storage');}},
+    fetch() {throw Error('update made a network request');},
+    registration:{showNotification() {throw Error('update displayed notification');},
+      pushManager:{getSubscription() {throw Error('update read subscription');}}} });
+  const message = w.listeners.get('message');
+  const acknowledgements = [];
+  const port = {postMessage:value => acknowledgements.push(value)};
+  const send = (source, ports=[port]) => {
+    let work;
+    message({data:{type:'plannix-activate-push-update',version:1},source,ports,
+      waitUntil:value => {work=value;}});
+    return work;
+  };
+  assert.equal(requests,0,'install does not activate automatically');
+  assert.equal(w.listeners.has('install'),false);
+  assert.equal(w.listeners.has('activate'),false);
+  assert.equal(send({type:'window',url:'https://other.example.test/' }),undefined);
+  assert.equal(send({type:'worker',url:'https://plannix.example.test/' }),undefined);
+  assert.equal(send({type:'window',url:'https://plannix.example.test/' },[]),undefined);
+  assert.equal(requests,0);
+  await send({type:'window',url:'https://plannix.example.test/notifications'});
+  assert.equal(requests,1);
+  assert.equal(acknowledgements.length,1);
+  assert.equal(acknowledgements[0].accepted,true);
+});
 test('lock probe rejects foreign clients and missing ports without lock or notification work', () => {
   let claims=0;
   const w = worker({ navigator:{locks:{ request() {claims++;} }},

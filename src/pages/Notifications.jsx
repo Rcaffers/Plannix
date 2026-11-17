@@ -86,10 +86,12 @@ export default function Notifications({ userId, organisationId }) {
     window.addEventListener('plannix-server-session-change', changed);
     window.addEventListener('plannix-server-session-mismatch', changed);
     navigator.serviceWorker?.addEventListener?.('controllerchange', changed);
+    window.addEventListener('plannix-push-worker-activated', changed);
     return () => {
       window.removeEventListener('plannix-server-session-change', changed);
       window.removeEventListener('plannix-server-session-mismatch', changed);
       navigator.serviceWorker?.removeEventListener?.('controllerchange', changed);
+      window.removeEventListener('plannix-push-worker-activated', changed);
     };
   }, []);
 
@@ -356,7 +358,8 @@ export default function Notifications({ userId, organisationId }) {
         {permission === 'denied' ? <p role="status">Allow notifications in your browser or device settings before trying again.</p> : null}
         {error ? <p className="settings-error" role="alert">{error}</p> : null}
         {(error || (coordinated && !loading && configured && registered === null)
-          || (!loading && detailPolicyEnabled === true && detailSelectorCurrent !== true))
+          || (!loading && detailAvailable && bindingCurrent
+            && detailSelectorCurrent !== true && detailPolicyEnabled !== false))
           ? <button className="settings-reset" type="button" disabled={loading || busy} onClick={() => setReloadKey(value => value + 1)}>Retry notification status</button> : null}
         {notice ? <p role="status">{notice}</p> : null}
         <div className="settings-actions notification-actions">

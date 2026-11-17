@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import Notifications from './Notifications.jsx';
+import PushWorkerUpdateNotice from '../components/PushWorkerUpdateNotice.jsx';
 import { restoreSetupGuidance, setupGuidancePreference } from '../utils/setupGuidance.js';
 import { serverManagedAuth, invalidateServerSessionContext,
   setServerSessionContext } from '../utils/serverAuthTransport.js';
@@ -44,10 +45,13 @@ const worker = { postMessage(message, ports) {
     selectorEpoch++; selector=message.selector; port.postMessage({ok:true,epoch:selectorEpoch,selector});
   } else port.postMessage({ok:false});
 } };
-const registration = { get active() { return workerActive ? worker : null; }, pushManager: {
+worker.scriptURL = 'file:///push-sw.js';
+let activeWorker = worker;
+const registration = Object.assign(new EventTarget(), { waiting:null, installing:null, update:async () => {}, pushManager: {
   getSubscription: async () => subscribed ? subscription : null,
   subscribe: async () => { calls.push('subscribe'); subscribed = true; return subscription; },
-} };
+} });
+Object.defineProperty(registration,'active',{get:() => workerActive ? activeWorker : null});
 const serviceWorker = new EventTarget();
 serviceWorker.register = async () => registration;
 serviceWorker.getRegistration = async () => registration;
@@ -132,7 +136,7 @@ function NotificationFixture() {
     }
     setUserId(next);
   };
-  return <Notifications userId={userId} organisationId="cb000000-0000-4000-8000-000000000011" />;
+  return <><PushWorkerUpdateNotice /><Notifications userId={userId} organisationId="cb000000-0000-4000-8000-000000000011" /></>;
 }
 const router = createMemoryRouter([{ path: '/settings/notifications', element: <NotificationFixture /> },
   { path: '/settings', element: <main>Settings</main> }], { initialEntries: ['/settings/notifications'] });
@@ -391,7 +395,8 @@ const chooseTime = value => {
     await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
     await waitFor(() => document.body.textContent.includes("this device's detail policy is off"),
       'disabled device policy stays disabled after reload');
-    check(selector===null, 'reconciliation cannot re-enable a disabled server policy');
+    check(selector===null && !button('Retry notification status'),
+      'reconciliation cannot re-enable or offer selector repair for a disabled server policy');
     policyEnabled=true;
     selector=null; window.holdDetailStatusAfterCommit=true; window.detailStatusHeld=false;
     await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
@@ -411,10 +416,15 @@ const chooseTime = value => {
     check(selector===null && Boolean(button('Retry notification status')),
       'failed coordination cannot create a selector and offers a read-only retry');
     window.failSelectorCommit=false;
+    const policyWritesBeforeRetry = calls.filter(item => item === 'detail-policy/set').length;
+    const preferenceWritesBeforeRetry = window.summaryPreferenceSaves?.length || 0;
     clickButton('Retry notification status');
     await waitFor(() => selector?.sessionName === '__Host-plannix-s-1'
       && !document.body.textContent.includes('detail status is unverified'),
     'status-only retry repairs after transient worker write failure');
+    check(calls.filter(item => item === 'detail-policy/set').length === policyWritesBeforeRetry
+      && (window.summaryPreferenceSaves?.length || 0) === preferenceWritesBeforeRetry,
+    'selector retry changes neither device policy nor account consent');
     selector=null; window.setSyntheticWorkerActive(false);
     await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
     await waitFor(() => document.body.textContent.includes("this device's detail status is unverified"),
@@ -450,8 +460,9 @@ const chooseTime = value => {
       && !document.body.textContent.includes('This device: Unknown'),
     'held old-session status reaches its terminal lock release without changing the new session UI');
     window.dispatchEvent(new Event('plannix-server-session-change'));
-    await waitFor(() => document.body.textContent.includes("Lesson details enabled for this account; this device's detail setup needs reconnecting"),
-      'same-account replacement reloads current device status after stale completion');
+    await waitFor(() => document.body.textContent.includes('Lesson details enabled for this account; this device needs reconnecting')
+      && document.querySelector('.notification-state')?.textContent.includes('This device: Subscribed'),
+    'same-account replacement reloads current device status after stale completion');
   }
   button('Send test notification').click(); await tick();
   check(calls.includes('test') && document.body.textContent.includes('not guaranteed'), 'server test path and truthful feedback');
@@ -552,6 +563,49 @@ const chooseTime = value => {
   await tick(); await tick();
   check(document.body.textContent.includes('Could not load this notification’s day')
     && !document.body.textContent.includes('Linked lesson'), 'failed linked day never displays stale data');
+  if (serverManagedAuth) {
+    // The route remount above restores the fixture's first account. Restore its
+    // matching session too before testing the worker's readiness notification.
+    subscribed = true;
+    window.forceUnregisteredStatus = false;
+    window.staleDetailBinding = false;
+    window.switchNotificationUser('ca000000-0000-4000-8000-000000000001');
+    window.dispatchEvent(new Event('plannix-server-session-change'));
+    await waitFor(() => document.querySelector('.notification-state')?.textContent.includes('This device: Subscribed'),
+      'worker update fixture has a verified matching account and session');
+  }
+  const installed = new EventTarget();
+  installed.state = 'installed'; installed.scriptURL = 'file:///push-sw.js';
+  const activateSyntheticWorker = function (_message,[port]) {
+    port.postMessage({accepted:true});
+    activeWorker = this;
+    registration.waiting = null;
+    this.state = 'activated';
+    this.dispatchEvent(new Event('statechange'));
+  };
+  installed.postMessage = activateSyntheticWorker;
+  registration.waiting = installed;
+  registration.dispatchEvent(new Event('updatefound'));
+  await waitFor(() => Boolean(button('Update now')), 'waiting worker update prompt');
+  button('Later').click(); await tick();
+  check(!button('Update now') && registration.waiting === installed,
+    'deferring leaves the worker waiting and the current page intact');
+  const newer = new EventTarget();
+  newer.state = 'installed'; newer.scriptURL = 'file:///push-sw.js';
+  newer.postMessage = activateSyntheticWorker;
+  registration.waiting = newer;
+  registration.dispatchEvent(new Event('updatefound'));
+  await waitFor(() => Boolean(button('Update now')), 'new waiting worker update prompt');
+  const configBeforeUpdate = calls.filter(item => item === 'config').length;
+  let activationNotices = 0;
+  const activated = () => { activationNotices++; };
+  window.addEventListener('plannix-push-worker-activated', activated);
+  button('Update now').click();
+  await waitFor(() => registration.active === newer && !button('Update now'), 'explicit worker activation');
+  await waitFor(() => activationNotices === 1, 'one activation acknowledgement');
+  if (serverManagedAuth) await waitFor(() => calls.filter(item => item === 'config').length > configBeforeUpdate,
+    'notification readiness after activation');
+  window.removeEventListener('plannix-push-worker-activated', activated);
   if (serverManagedAuth) {
     window.name='plannix-notification-detail-reload';
     document.body.dataset.testResult='reload-pending';

@@ -16,6 +16,20 @@ const LOCK_PROBE_LIMIT_MS = 5000;
 let selectorQueue = Promise.resolve();
 let lockProbeActive = false;
 
+// Only a same-origin window's explicit update action may bypass the normal
+// waiting phase. There is deliberately no install-time skipWaiting or claim.
+// Existing pages keep their drafts and are never reloaded by this worker.
+function updateRequest(event) {
+  try {
+    const port = event.ports?.length === 1 ? event.ports[0] : null;
+    if (!port || typeof port.postMessage !== 'function'
+      || event.source?.type !== 'window'
+      || new URL(event.source.url).origin !== self.location.origin) return;
+    port.postMessage({ accepted:true });
+    event.waitUntil?.(self.skipWaiting());
+  } catch { /* A failed update request leaves normal activation available. */ }
+}
+
 function openSelectorDatabase() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open('plannix-push-detail-selector', 1);
@@ -129,6 +143,10 @@ async function runLockProbe(port) {
 }
 
 self.addEventListener('message', event => {
+  if (event.data?.type === 'plannix-activate-push-update' && event.data.version === 1) {
+    updateRequest(event);
+    return;
+  }
   if (event.data?.type === 'plannix-worker-lock-probe' && event.data.version === 1) {
     try {
       const port = event.ports?.length === 1 ? event.ports[0] : null;
