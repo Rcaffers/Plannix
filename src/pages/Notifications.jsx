@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import SettingsSubnav from '../components/SettingsSubnav';
 import MorningSummaryPanel from '../components/MorningSummaryPanel.jsx';
+import PushWorkerUpdateNotice from '../components/PushWorkerUpdateNotice.jsx';
 import { currentPushSubscription, disableCurrentDevice, pushRequest, pushSupport, reconcilePushAccount, vapidBytes, waitForPushAccountReconciliation } from '../utils/pushNotifications';
 import { pushCoordinationSupported, PUSH_LOCK_UNAVAILABLE, withPushDeviceLock } from '../utils/pushDeviceLock';
 import { serverManagedAuth, captureServerOperationContext,
@@ -345,6 +346,7 @@ export default function Notifications({ userId, organisationId }) {
       <SettingsSubnav />
       <div className="settings-timetable-form">
         <h2 className="settings-section-title">This device</h2>
+        <PushWorkerUpdateNotice />
         <p className="settings-hint">Notifications are personal to this signed-in account and this device. A test contains no lesson details.</p>
         <div className="notification-state">
           <p><strong>Browser support:</strong> {supported ? 'Supported' : 'Unavailable in this browser or insecure context'}</p>

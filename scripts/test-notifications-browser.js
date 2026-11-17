@@ -43,13 +43,18 @@ try {
     result = await waitForResult();
   }
   assert.equal(result.result.value[0], 'passed', result.result.value[1]);
+  const noticeResult = await send('Runtime.evaluate', { expression: `new Promise((resolve,reject)=>{window.showSyntheticUpdateNotice();let n=0;const timer=setInterval(()=>{if(document.querySelector('.push-update-notice button')){clearInterval(timer);resolve(true)}else if(++n>80){clearInterval(timer);reject(Error('Update notice did not render'))}},25)})`, awaitPromise: true, returnByValue: true }, sessionId);
+  assert.equal(noticeResult.result.value,true);
   const widths = [320,375,390,430,768,820,1024,1366];
   for (const width of widths) {
     await send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false }, sessionId);
-    const measured = await send('Runtime.evaluate', { expression: `({width:innerWidth,scroll:document.documentElement.scrollWidth,card:document.querySelector('.settings-timetable-form').getBoundingClientRect().width})`, returnByValue: true }, sessionId);
+    const measured = await send('Runtime.evaluate', { expression: `(()=>{const notice=document.querySelector('.push-update-notice');const card=document.querySelector('.settings-timetable-form');const buttons=[...notice.querySelectorAll('button')].map(node=>node.getBoundingClientRect());return {width:innerWidth,scroll:document.documentElement.scrollWidth,card:card.getBoundingClientRect().width,noticeRight:notice.getBoundingClientRect().right,cardRight:card.getBoundingClientRect().right,stacked:buttons[1].top>buttons[0].bottom-1}})()`, returnByValue: true }, sessionId);
     assert.ok(measured.result.value.scroll <= width + 1, `${width}px overflow`);
+    assert.ok(measured.result.value.noticeRight <= measured.result.value.cardRight + 1, `${width}px update notice stays inside device card`);
+    if (width <= 390) assert.equal(measured.result.value.stacked,true,`${width}px update actions stack`);
+    if (width >= 768) assert.equal(measured.result.value.stacked,false,`${width}px update actions sit side by side`);
   }
-  console.log('Notifications rendered flow and 8 responsive widths passed.');
+  console.log('Notifications rendered flow and update notice at 8 responsive widths passed.');
 } finally {
   socket?.close();
   if (chrome && chrome.exitCode === null) { chrome.kill(); await new Promise(resolve => { chrome.once('exit', resolve); setTimeout(resolve, 3000); }); }

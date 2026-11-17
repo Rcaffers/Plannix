@@ -1,12 +1,7 @@
 .push-update-notice {
-  margin: 0 auto;
-  padding: 12px 18px;
-  max-width: 1100px;
-  border: 1px solid var(--border-color, #8b98a5);
-  border-radius: 8px;
-  background: var(--surface, #fff);
+  margin: 0 0 16px;
 }
-.push-update-notice p { margin: 0 0 10px; }
+.push-update-notice p { margin: 0 0 8px; }
 .push-update-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 @media (max-width: 420px) {
   .push-update-actions { flex-direction: column; }

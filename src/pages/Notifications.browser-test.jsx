@@ -2,7 +2,6 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import Notifications from './Notifications.jsx';
-import PushWorkerUpdateNotice from '../components/PushWorkerUpdateNotice.jsx';
 import { restoreSetupGuidance, setupGuidancePreference } from '../utils/setupGuidance.js';
 import { serverManagedAuth, invalidateServerSessionContext,
   setServerSessionContext } from '../utils/serverAuthTransport.js';
@@ -52,6 +51,13 @@ const registration = Object.assign(new EventTarget(), { waiting:null, installing
   subscribe: async () => { calls.push('subscribe'); subscribed = true; return subscription; },
 } });
 Object.defineProperty(registration,'active',{get:() => workerActive ? activeWorker : null});
+window.showSyntheticUpdateNotice = () => {
+  const waiting = new EventTarget();
+  waiting.state = 'installed';
+  waiting.scriptURL = 'file:///push-sw.js';
+  registration.waiting = waiting;
+  registration.dispatchEvent(new Event('updatefound'));
+};
 const serviceWorker = new EventTarget();
 serviceWorker.register = async () => registration;
 serviceWorker.getRegistration = async () => registration;
@@ -136,7 +142,7 @@ function NotificationFixture() {
     }
     setUserId(next);
   };
-  return <><PushWorkerUpdateNotice /><Notifications userId={userId} organisationId="cb000000-0000-4000-8000-000000000011" /></>;
+  return <Notifications userId={userId} organisationId="cb000000-0000-4000-8000-000000000011" />;
 }
 const router = createMemoryRouter([{ path: '/settings/notifications', element: <NotificationFixture /> },
   { path: '/settings', element: <main>Settings</main> }], { initialEntries: ['/settings/notifications'] });
@@ -179,6 +185,7 @@ const chooseTime = value => {
     return;
   }
   await tick(); await tick();
+  check(!document.querySelector('.push-update-notice'), 'no update notice appears without a waiting worker');
   check(calls.includes('config') && !calls.includes('permission'), 'permission is not requested on load');
   check(document.body.textContent.includes('Morning summaries are not active yet'), 'summary preference cannot imply scheduling');
   check(document.querySelector('#morning-academic-year')?.value === 'cb000000-0000-4000-8000-000000000010'
@@ -587,22 +594,53 @@ const chooseTime = value => {
   registration.waiting = installed;
   registration.dispatchEvent(new Event('updatefound'));
   await waitFor(() => Boolean(button('Update now')), 'waiting worker update prompt');
+  const notice = document.querySelector('.push-update-notice');
+  check(notice?.parentElement?.classList.contains('settings-timetable-form')
+    && notice.previousElementSibling?.textContent === 'This device'
+    && notice.nextElementSibling?.textContent.startsWith('Notifications are personal')
+    && getComputedStyle(notice).borderTopWidth === '0px'
+    && getComputedStyle(notice).backgroundColor === 'rgba(0, 0, 0, 0)',
+  'update notice sits inside the device card immediately after its heading without a separate banner');
+  await router.navigate('/settings'); await tick();
+  check(!document.querySelector('.push-update-notice'), 'available update notice is absent outside Notifications');
+  await router.navigate('/settings/notifications');
+  await waitFor(() => Boolean(button('Update now')), 'waiting update reappears on Notifications');
   button('Later').click(); await tick();
   check(!button('Update now') && registration.waiting === installed,
     'deferring leaves the worker waiting and the current page intact');
+  await router.navigate('/settings'); await tick();
+  await router.navigate('/settings/notifications'); await tick();
+  check(!button('Update now') && registration.waiting === installed,
+    'Later stays deferred after leaving and returning to Notifications');
   const newer = new EventTarget();
   newer.state = 'installed'; newer.scriptURL = 'file:///push-sw.js';
   newer.postMessage = activateSyntheticWorker;
   registration.waiting = newer;
   registration.dispatchEvent(new Event('updatefound'));
   await waitFor(() => Boolean(button('Update now')), 'new waiting worker update prompt');
+  newer.postMessage = () => { throw Error('synthetic activation failure'); };
+  button('Update now').click();
+  await waitFor(() => document.querySelector('.push-update-notice [role="alert"]')?.textContent.includes('Could not request the worker update.')
+    && button('Update now')?.disabled === false,
+    'failed activation remains available with accessible error feedback');
+  let releaseActivation;
+  newer.postMessage = function (message, ports) {
+    releaseActivation = () => activateSyntheticWorker.call(this, message, ports);
+  };
   const configBeforeUpdate = calls.filter(item => item === 'config').length;
   let activationNotices = 0;
   const activated = () => { activationNotices++; };
   window.addEventListener('plannix-push-worker-activated', activated);
   button('Update now').click();
+  await waitFor(() => Boolean(releaseActivation) && Boolean(button('Updating…'))
+    && document.querySelector('.push-update-notice [role="status"]')?.textContent.includes('Installing'),
+  'pending update announces progress and disables duplicate actions');
+  check(button('Later')?.disabled === true, 'Later cannot interrupt a pending activation');
+  releaseActivation();
   await waitFor(() => registration.active === newer && !button('Update now'), 'explicit worker activation');
   await waitFor(() => activationNotices === 1, 'one activation acknowledgement');
+  await waitFor(() => !document.querySelector('.push-update-notice'),
+    'successful activation removes the notice');
   if (serverManagedAuth) await waitFor(() => calls.filter(item => item === 'config').length > configBeforeUpdate,
     'notification readiness after activation');
   window.removeEventListener('plannix-push-worker-activated', activated);

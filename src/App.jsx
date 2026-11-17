@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { matchPath, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import './App.css';
 import Header from './components/Header';
-import PushWorkerUpdateNotice from './components/PushWorkerUpdateNotice';
 import Hero from './components/Hero';
 import HomeHighlights from './components/HomeHighlights';
 import ProjectGrid from './components/ProjectGrid';
@@ -399,7 +398,6 @@ export default function App() {
             logoutCanSkipCleanup={logoutCanSkipCleanup}
             onSignup={handleSignup}
           />
-          <PushWorkerUpdateNotice />
           <Routes>
             <Route
               path="/"
