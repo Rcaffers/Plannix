@@ -520,15 +520,6 @@ export default function Events({ userId }) {
           onClick={() => setListExpanded(value => !value)}>
           {listExpanded ? 'Hide events' : `Show events (${events.length})`}
         </button> : null}</div>
-      <button ref={addRef} type="button" className="add-row-button" onClick={() => openEditor()} disabled={pending || destructiveReloading || !listReady || conflict || recovery || !canAddEvent(events)}>Add event</button>
-      <div className="events-export">
-        <button type="button" className="settings-reset" onClick={exportSavedEvents}
-          disabled={!!yearError || !listReady || loadedScope !== scopeKey || (!events.length && !academicYear.holidays?.length) || pending || destructiveReloading || exporting}>
-          {exporting ? 'Preparing export…' : 'Export events'}
-        </button>
-        <p className="settings-hint">Download a one-off copy of saved events, holidays and INSET days to import into your calendar. Later changes in Plannix won’t update the exported copy.</p>
-      </div>
-      {exportError ? <p className="events-error" role="alert">{exportError}</p> : null}
       {listReady || inlineEditor ? <div id="events-list-panel" hidden={!listExpanded} aria-labelledby="events-list-toggle">
       {!events.length && !error ? <p className="events-notice">No events yet. Add an event for this academic year.</p> : null}
       {events.length ? <ul className="events-list" aria-label="Events in selected academic year">{events.map(item =>
@@ -541,6 +532,15 @@ export default function Events({ userId }) {
         </li>)}
       </ul> : null}
       </div> : null}
+      <button ref={addRef} type="button" className="add-row-button" onClick={() => openEditor()} disabled={pending || destructiveReloading || !listReady || conflict || recovery || !canAddEvent(events)}>Add event</button>
+      <div className="events-export">
+        <button type="button" className="settings-reset" onClick={exportSavedEvents}
+          disabled={!!yearError || !listReady || loadedScope !== scopeKey || (!events.length && !academicYear.holidays?.length) || pending || destructiveReloading || exporting}>
+          {exporting ? 'Preparing export…' : 'Export events'}
+        </button>
+        <p className="settings-hint">Download a one-off copy of saved events, holidays and INSET days to import into your calendar. Later changes in Plannix won’t update the exported copy.</p>
+      </div>
+      {exportError ? <p className="events-error" role="alert">{exportError}</p> : null}
       {!inlineEditor ? editorForm : null}
     </> : null}
     </section>

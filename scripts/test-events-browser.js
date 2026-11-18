@@ -56,6 +56,32 @@ try {
       `${width}px sections retain spacing and subtle dividers`);
   }
   console.log(JSON.stringify(measurements));
+  async function verifyActionOrder(width, label) {
+    const order = await send('Runtime.evaluate', {expression:`(()=>{const panel=document.querySelector('#events-list-panel');const add=document.querySelector('.events-list-section > .add-row-button');const exp=document.querySelector('.events-export');const heading=document.querySelector('.events-list-heading');const rect=node=>node.getBoundingClientRect();return {panelBeforeAdd:panel.nextElementSibling===add,exportAfterAdd:add.nextElementSibling===exp,addBelowContent:rect(add).top >= rect(panel.hidden?heading:panel).bottom+12,exportBelowAdd:rect(exp).top >= rect(add).bottom+12,overflow:document.documentElement.scrollWidth>innerWidth+1}})()`,returnByValue:true},sessionId);
+    assert.deepEqual(order.result.value,{panelBeforeAdd:true,exportAfterAdd:true,addBelowContent:true,exportBelowAdd:true,overflow:false},`${width}px ${label} list keeps Add and Export after its content`);
+  }
+  for (const width of [320,375,390,430,768,820,1024,1366]) {
+    await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false},sessionId);
+    await verifyActionOrder(width,'collapsed');
+    await send('Runtime.evaluate',{expression:`document.querySelector('#events-list-toggle').click()`},sessionId);
+    await send('Runtime.evaluate',{expression:`new Promise(resolve=>requestAnimationFrame(resolve))`,awaitPromise:true},sessionId);
+    await verifyActionOrder(width,'expanded');
+    await send('Runtime.evaluate',{expression:`document.querySelector('#events-list-toggle').click()`},sessionId);
+    await send('Runtime.evaluate',{expression:`new Promise(resolve=>requestAnimationFrame(resolve))`,awaitPromise:true},sessionId);
+  }
+  await send('Runtime.evaluate',{expression:`window.switchEventsUser('30000000-0000-4000-8000-000000000002')`},sessionId);
+  const emptyReady=await send('Runtime.evaluate',{expression:`new Promise((resolve,reject)=>{let n=0;const timer=setInterval(()=>{if(document.querySelector('#events-list-toggle')?.textContent==='Show events (0)'){clearInterval(timer);resolve(true)}else if(++n>80){clearInterval(timer);reject(Error('Empty account did not load'))}},25)})`,awaitPromise:true,returnByValue:true},sessionId);
+  assert.equal(emptyReady.result.value,true);
+  for (const width of [375,1366]) {
+    await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false},sessionId);
+    await verifyActionOrder(width,'empty collapsed');
+    await send('Runtime.evaluate',{expression:`document.querySelector('#events-list-toggle').click()`},sessionId);
+    await send('Runtime.evaluate',{expression:`new Promise(resolve=>requestAnimationFrame(resolve))`,awaitPromise:true},sessionId);
+    await verifyActionOrder(width,'empty expanded');
+    await send('Runtime.evaluate',{expression:`document.querySelector('#events-list-toggle').click()`},sessionId);
+    await send('Runtime.evaluate',{expression:`new Promise(resolve=>requestAnimationFrame(resolve))`,awaitPromise:true},sessionId);
+  }
+
   const exportReady = await send('Runtime.evaluate', { expression: `new Promise((resolve,reject)=>{window.switchEventsUser('30000000-0000-4000-8000-000000000001');window.selectEventsYear('10000000-0000-4000-8000-000000000001');let n=0;const timer=setInterval(()=>{const button=[...document.querySelectorAll('button')].find(item=>item.textContent==='Export events');if(button&&!button.disabled){clearInterval(timer);button.focus();resolve(true)}else if(++n>80){clearInterval(timer);reject(Error('Saved export was not ready'))}},25)})`, awaitPromise: true, returnByValue: true }, sessionId);
   assert.equal(exportReady.result.value,true);
   await send('Runtime.evaluate', {expression:`document.querySelector('.events-list-section > .add-row-button').focus()`},sessionId);
@@ -103,6 +129,14 @@ try {
   await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
   const expanded = await send('Runtime.evaluate', { expression: `document.querySelector('#events-list-toggle').getAttribute('aria-expanded')==='true' && !document.querySelector('#events-list-panel').hidden`, returnByValue: true }, sessionId);
   assert.equal(expanded.result.value, true, 'Native Enter expands saved Events list');
+  await send('Runtime.evaluate',{expression:`[...document.querySelectorAll('#events-list-panel .events-item-actions button')].at(-1).focus()`},sessionId);
+  for (const selector of ['.events-list-section > .add-row-button','.events-export button']) {
+    await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9},sessionId);
+    await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9},sessionId);
+    const next=await send('Runtime.evaluate',{expression:`document.activeElement===document.querySelector(${JSON.stringify(selector)})`,returnByValue:true},sessionId);
+    assert.equal(next.result.value,true,'Expanded list keyboard order continues from final event to Add then Export');
+  }
+
   await send('Runtime.evaluate', { expression: `document.querySelector('button[aria-label="Edit Keyboard event"]').focus()` }, sessionId);
   await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
   const edited = await send('Runtime.evaluate', { expression: `new Promise(resolve=>requestAnimationFrame(()=>resolve(document.activeElement.id==='event-title')))`, awaitPromise: true, returnByValue: true }, sessionId);
@@ -110,6 +144,7 @@ try {
   for (const width of [320,375,390,430,768,820,1024,1366]) {
     await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false},sessionId);
     const layout=await send('Runtime.evaluate',{expression:`(()=>{const form=document.querySelector('.events-form');const row=form?.closest('.events-item');const rect=node=>node.getBoundingClientRect();return {inline:!!row&&row.lastElementChild===form,overflow:document.documentElement.scrollWidth>innerWidth+1,controlsFit:!!form&&[...form.querySelectorAll('input,textarea,button')].every(node=>rect(node).left>=0&&rect(node).right<=innerWidth+1),formBelowActions:!!row&&rect(form).top>=rect(row.querySelector('.events-item-actions')).bottom}})()`,returnByValue:true},sessionId);
+    await verifyActionOrder(width,'inline editing');
     assert.deepEqual(layout.result.value,{inline:true,overflow:false,controlsFit:true,formBelowActions:true},`${width}px open inline editor layout`);
   }
   await send('Emulation.setDeviceMetricsOverride',{width:430,height:900,deviceScaleFactor:1,mobile:false},sessionId);
