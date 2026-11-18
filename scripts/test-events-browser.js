@@ -55,6 +55,14 @@ try {
       `${width}px sections retain spacing and subtle dividers`);
   }
   console.log(JSON.stringify(measurements));
+  const exportReady = await send('Runtime.evaluate', { expression: `new Promise((resolve,reject)=>{window.switchEventsUser('30000000-0000-4000-8000-000000000001');window.selectEventsYear('10000000-0000-4000-8000-000000000001');let n=0;const timer=setInterval(()=>{const button=[...document.querySelectorAll('button')].find(item=>item.textContent==='Export events');if(button&&!button.disabled){clearInterval(timer);button.focus();resolve(true)}else if(++n>80){clearInterval(timer);reject(Error('Saved export was not ready'))}},25)})`, awaitPromise: true, returnByValue: true }, sessionId);
+  assert.equal(exportReady.result.value,true);
+  const beforeExport = await send('Runtime.evaluate', { expression: 'window.eventsExportCount || 0', returnByValue:true }, sessionId);
+  const exportKey = async type => send('Input.dispatchKeyEvent', { type, key:'Enter', code:'Enter', windowsVirtualKeyCode:13, ...(type==='keyDown'?{text:'\r'}:{}) }, sessionId);
+  await exportKey('keyDown'); await exportKey('keyUp');
+  const afterExport = await send('Runtime.evaluate', { expression: `new Promise(resolve=>{let n=0;const timer=setInterval(()=>{if((window.eventsExportCount||0)>${beforeExport.result.value}||++n>80){clearInterval(timer);resolve({count:window.eventsExportCount||0,active:document.activeElement?.textContent,error:document.querySelector('.events-export + .events-error')?.textContent})}},25)})`, awaitPromise:true, returnByValue:true }, sessionId);
+  assert.equal(afterExport.result.value.count,beforeExport.result.value+1,`Native Enter downloads one saved calendar: ${JSON.stringify(afterExport.result.value)}`);
+  await send('Runtime.evaluate', { expression: `new Promise(resolve=>{window.selectEventsYear('10000000-0000-4000-8000-000000000002');let n=0;const timer=setInterval(()=>{if([...document.querySelectorAll('button')].some(item=>item.textContent==='Add event'&&!item.disabled)||++n>80){clearInterval(timer);resolve(true)}},25)})`, awaitPromise:true }, sessionId);
   await send('Emulation.setDeviceMetricsOverride', { width: 430, height: 900, deviceScaleFactor: 1, mobile: false }, sessionId);
   const key = async (type, name, code, text) => send('Input.dispatchKeyEvent', { type, key: name, code, windowsVirtualKeyCode: 13, ...(text ? { text } : {}) }, sessionId);
   await send('Runtime.evaluate', { expression: `([...document.querySelectorAll('.events-import-section .import-preview-choices button')].find(button=>button.textContent==='Upload PDF')).focus()` }, sessionId);

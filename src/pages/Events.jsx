@@ -9,6 +9,7 @@ import { safeRequestReference } from '../utils/requestReference.js';
 import { MAX_PERSONAL_EVENTS } from '../../shared/personalEvent.js';
 import { previewDuplicate } from '../../shared/importPreview.js';
 import { blankEventDraft, canAddEvent, confirmedDraftUnchanged, draftFromEvent, matchingCreatedEvents, sortPersonalEvents, validateEventDraft } from '../utils/eventPage.js';
+import { buildEventsCalendar, downloadEventsCalendar, eventsCalendarFileName } from '../utils/eventsCalendarExport.js';
 import { useWeekendEventsPreference } from '../hooks/useWeekendEventsPreference.js';
 import './Settings.css';
 import './Events.css';
@@ -33,12 +34,16 @@ export default function Events({ userId }) {
   const [recovery, setRecovery] = useState(null);
   const [notice, setNotice] = useState('');
   const [announcement, setAnnouncement] = useState('');
+  const [loadedScope, setLoadedScope] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
   const scopeKey = `${userId || ''}:${scopeOf(selectedAcademicYearId, academicYear)}`;
   const scopeRef = useRef(scopeKey);
   scopeRef.current = scopeKey;
   const listGeneration = useRef(0);
   const listController = useRef(null);
   const mutationController = useRef(null);
+  const exportController = useRef(null);
   const pendingRef = useRef(false);
   const destructiveReloadRef = useRef(false);
   const destructiveReloadGeneration = useRef(0);
@@ -93,12 +98,15 @@ export default function Events({ userId }) {
     const controller = new AbortController();
     listController.current = controller;
     const generation = ++listGeneration.current;
+    setLoadedScope(null);
     setListStatus('loading'); setAnnouncement('Loading events…');
     try {
       const result = await eventApi.list(selectedAcademicYearId, { signal: controller.signal });
       if (scopeRef.current !== key || listGeneration.current !== generation || controller.signal.aborted) return false;
       setEvents(sortPersonalEvents(result.events));
+      setLoadedScope(key);
       setListStatus('ready');
+      setExportError('');
       const mayDiscard = confirmedDraft && confirmedDraftUnchanged(confirmedDraft, draftVersion.current, editorRef.current);
       if (mayDiscard) {
         const oldId = editorRef.current?.id;
@@ -129,6 +137,8 @@ export default function Events({ userId }) {
     scopeRef.current = scopeKey;
     listGeneration.current += 1;
     listController.current?.abort();
+    exportController.current?.abort(); exportController.current = null;
+    setExporting(false); setExportError(''); setLoadedScope(null);
     mutationController.current?.abort(); mutationController.current = null;
     pendingRef.current = false; setPending(false);
     destructiveReloadGeneration.current += 1;
@@ -140,11 +150,50 @@ export default function Events({ userId }) {
       scopeRef.current = '';
       listGeneration.current += 1;
       listController.current?.abort();
+      exportController.current?.abort(); exportController.current = null;
       mutationController.current?.abort(); mutationController.current = null;
       destructiveReloadGeneration.current += 1;
       destructiveReloadRef.current = false;
     };
   }, [scopeKey, ready, load]);
+
+  async function exportSavedEvents() {
+    if (!ready || !listReady || loadedScope !== scopeKey || !events.length
+      || pendingRef.current || destructiveReloadRef.current || exportController.current) return;
+    const key = scopeKey;
+    const yearId = selectedAcademicYearId;
+    const year = academicYear;
+    const controller = new AbortController();
+    exportController.current = controller;
+    setExporting(true); setExportError('');
+    let context = null;
+    try {
+      context = serverManagedAuth ? captureServerOperationContext(userId) : null;
+      const result = await eventApi.list(yearId, { signal:controller.signal, operationContext:context });
+      if (controller.signal.aborted || scopeRef.current !== key) return;
+      if (context) assertServerOperationContext(context);
+      if (!result.events.length) {
+        setEvents([]);
+        setExportError('There are no saved events to export for this academic year.');
+        return;
+      }
+      const calendar = buildEventsCalendar(result.events, yearId);
+      if (controller.signal.aborted || scopeRef.current !== key) return;
+      if (context) assertServerOperationContext(context);
+      downloadEventsCalendar(calendar, eventsCalendarFileName(year));
+      setAnnouncement('Saved events calendar downloaded.');
+    } catch {
+      let currentSession = true;
+      if (context) { try { assertServerOperationContext(context); } catch { currentSession = false; } }
+      if (!controller.signal.aborted && scopeRef.current === key && currentSession)
+        setExportError('Could not export saved events. Please try again.');
+    } finally {
+      if (exportController.current === controller) {
+        exportController.current = null;
+        if (scopeRef.current === key) setExporting(false);
+      }
+    }
+  }
 
   function openEditor(event = null) {
     if (pendingRef.current || destructiveReloadRef.current || !listReady || conflict || recovery
@@ -420,6 +469,14 @@ export default function Events({ userId }) {
           onClick={() => setListExpanded(value => !value)}>
           {listExpanded ? 'Hide events' : `Show events (${events.length})`}
         </button> : null}</div>
+      <div className="events-export">
+        <button type="button" className="settings-reset" onClick={exportSavedEvents}
+          disabled={!listReady || loadedScope !== scopeKey || !events.length || pending || destructiveReloading || exporting}>
+          {exporting ? 'Preparing export…' : 'Export events'}
+        </button>
+        <p className="settings-hint">Download a one-off copy to import into your calendar. Later changes in Plannix won’t update the exported copy.</p>
+      </div>
+      {exportError ? <p className="events-error" role="alert">{exportError}</p> : null}
       <button ref={addRef} type="button" className="add-row-button" onClick={() => openEditor()} disabled={pending || destructiveReloading || !listReady || conflict || recovery || !canAddEvent(events)}>Add event</button>
       {listReady ? <div id="events-list-panel" hidden={!listExpanded} aria-labelledby="events-list-toggle">
       {!events.length && !error ? <p className="events-notice">No events yet. Add an event for this academic year.</p> : null}

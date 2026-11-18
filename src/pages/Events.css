@@ -16,6 +16,8 @@
 .events-list-heading { align-items: baseline; justify-content: space-between; margin: 0; }
 .events-list-heading p { margin: 0; }
 .events-list-heading p { color: #52635f; }
+.events-export { display: grid; gap: 8px; justify-items: start; min-width: 0; }
+.events-export .settings-hint { margin: 0; }
 .events-list { display: grid; gap: 0; list-style: none; padding: 0; margin: 0; }
 .events-item {
   display: grid;

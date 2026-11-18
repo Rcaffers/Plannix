@@ -18,11 +18,23 @@ export const extractImportPreview = async () => ({ destination: 'events', entrie
 const YEAR_A = '10000000-0000-4000-8000-000000000001';
 const YEAR_B = '10000000-0000-4000-8000-000000000002';
 const USER_A = '30000000-0000-4000-8000-000000000001';
+const USER_B = '30000000-0000-4000-8000-000000000002';
+let currentUser = USER_A;
+let downloaded = null;
+const originalAnchorClick = HTMLAnchorElement.prototype.click;
+URL.createObjectURL = blob => { downloaded = { blob, filename:null }; return 'blob:plannix-events-test'; };
+URL.revokeObjectURL = () => {};
+HTMLAnchorElement.prototype.click = function () {
+  if (this.download?.endsWith('.ics')) { downloaded.filename = this.download;
+    window.eventsExportCount = (window.eventsExportCount || 0) + 1; return; }
+  return originalAnchorClick.call(this);
+};
 let nextEventNumber = 1;
 let guard = () => true;
 let selectedYear = YEAR_A;
 const yearListeners = new Set();
 const yearSetter = value => { selectedYear = value; for (const listener of yearListeners) listener(value); };
+window.selectEventsYear = yearSetter;
 const records = new Map([[YEAR_A, []], [YEAR_B, []]]);
 const calls = [];
 let nextFailure = null;
@@ -43,7 +55,7 @@ export function useAcademicYear() {
 }
 function fail() { const failure = nextFailure; nextFailure = null; if (failure) throw failure; }
 export const eventApi = {
-  async list(id, options) { calls.push({ action: 'list', id, signal: options.signal }); if (listGate) await listGate; fail(); return { events: structuredClone(records.get(id) || []) }; },
+  async list(id, options) { const user=currentUser; calls.push({ action: 'list', id, user, signal: options.signal }); if (listGate) await listGate; fail(); return { events: structuredClone(user===USER_A ? records.get(id) || [] : []) }; },
   async create(id, event) { calls.push({ action: 'create', id, event }); if (mutationGate) await mutationGate;
     const failure = nextCreateFailure || nextFailure; nextCreateFailure = null; nextFailure = null; if (failure && !failure.accepted) throw failure;
     const saved = { ...event, id: `20000000-0000-4000-8000-${String(nextEventNumber++).padStart(12, '0')}`, academicYearId: id, revision: 1 };
@@ -58,8 +70,13 @@ export const eventApi = {
 };
 const host = document.createElement('div'); document.body.append(host);
 const root = createRoot(host);
+function EventsFixture() {
+  const [userId, setUserId] = useState(USER_A);
+  window.switchEventsUser = next => { currentUser = next; setUserId(next); };
+  return <Events userId={userId} />;
+}
 const router = createMemoryRouter([
-  { path: '/settings/events', element: <Events userId={USER_A} /> },
+  { path: '/settings/events', element: <EventsFixture /> },
   { path: '/settings', element: <main>Settings destination</main> },
   { path: '/profile', element: <main>Profile destination</main> },
 ], { initialEntries: ['/settings', '/settings/events', '/profile'], initialIndex: 1 });
@@ -136,6 +153,8 @@ async function run() {
   check(button('Show events (0)')?.getAttribute('aria-expanded') === 'false'
     && button('Show events (0)').getAttribute('aria-controls') === 'events-list-panel'
     && host.querySelector('#events-list-panel')?.hidden, 'loaded Events list starts collapsed with an accessible count');
+  check(button('Export events')?.disabled && host.textContent.includes('Later changes in Plannix won’t update the exported copy.'),
+    'empty list disables the one-off export and explains that it will not sync');
   click('Show events (0)');
   check(!host.querySelector('#events-list-panel').hidden && host.textContent.includes('No events yet'), 'expanding reveals the empty state');
   click('Hide events');
@@ -153,6 +172,20 @@ async function run() {
   check(calls.filter(x => x.action === 'create').length === 1, 'one all-day create');
   check(calls.find(x => x.action === 'create').event.startTime === null, 'all-day request has no times');
   check(host.textContent.includes('1 of 500 events'), 'canonical response updates count');
+  check(button('Export events') && !button('Export events').disabled, 'saved event enables export');
+  click('Export events'); await settle();
+  check(downloaded?.filename === 'plannix-events-2026-27.ics'
+    && (await downloaded.blob.text()).includes('SUMMARY:Assembly')
+    && (await downloaded.blob.text()).includes('DTEND;VALUE=DATE:20261002'),
+  'export downloads only the saved academic-year event with exclusive all-day end');
+  const firstDownload = downloaded;
+  nextFailure = Object.assign(Error('Synthetic list failure'), { status:503 });
+  click('Export events'); await settle();
+  check(downloaded === firstDownload && host.querySelector('.events-export + .events-error')?.textContent.includes('Could not export saved events'),
+    'fresh-read failure leaves the prior download untouched and offers a safe retry');
+  click('Export events'); await settle();
+  check(downloaded !== firstDownload && !host.querySelector('.events-export + .events-error'),
+    'successful export retry clears its error without changing saved events');
   check(button('Show events (1)') && host.querySelector('#events-list-panel').hidden, 'new saved event remains hidden until Show events is chosen');
   click('Show events (1)');
   check(!host.querySelector('#events-list-panel').hidden && button('Edit Assembly'), 'expanded list exposes saved event actions');
@@ -166,6 +199,10 @@ async function run() {
   'collapsing saved rows leaves the open editor, weekend preference and AI preview available');
   click('Show events (1)');
   input('#event-title', 'Unsaved switch draft');
+  click('Export events'); await settle();
+  check((await downloaded.blob.text()).includes('SUMMARY:Assembly')
+    && !(await downloaded.blob.text()).includes('Unsaved switch draft'),
+  'export ignores unsaved editor changes');
   const callsBeforePreferenceChange = calls.length;
   flushSync(() => weekendSwitch.click()); await settle();
   check(!weekendSwitch.checked && host.textContent.includes('Assembly')
@@ -274,6 +311,7 @@ async function run() {
   flushSync(() => yearSetter(YEAR_B)); await settle();
   check(oldSignal.aborted, 'year switch aborts previous list request');
   check(button('Add event').disabled && host.textContent.includes('Event count unavailable'), 'new year is not ready before complete list response');
+  check(button('Export events').disabled, 'year change disables export until the new year list loads');
   check(!host.querySelector('#events-list-toggle') && !host.querySelector('#events-list-panel'), 'pending list has no misleading count or toggle');
   check([...host.querySelectorAll('[role="status"]')].filter(node => node.textContent.includes('Loading events')).length === 1,
     'pending list has one loading announcement');
@@ -346,6 +384,7 @@ async function run() {
   flushSync(() => yearSetter(YEAR_A)); await settle();
   check(host.querySelector('.events-error')?.textContent.includes('Support reference:') && button('Retry'), 'load error and support reference remain visible');
   check(button('Add event').disabled && !host.textContent.includes('0 of 500 events') && !host.textContent.includes('No events yet'), 'failed list blocks creation and does not claim zero events');
+  check(button('Export events').disabled, 'failed list disables export');
   check(!host.querySelector('#events-list-toggle') && !host.querySelector('#events-list-panel'), 'failed list has no event count or collapsed result');
   click('Retry'); await settle();
   check(!host.querySelector('.events-error') && host.textContent.includes('1 of 500 events') && !button('Add event').disabled, 'list retry restores complete canonical count and creation');
@@ -577,8 +616,40 @@ async function run() {
   input('#import-0-startTime','11:00'); input('#import-0-endTime','12:00'); await settle();
   check(!checks[0].checked && button('Add all valid events (3)'),
     'adding paired times makes the user override valid without reapplying the default');
+  const savedBeforePreviewExport = records.get(YEAR_B);
+  records.set(YEAR_B, savedBeforePreviewExport.filter(item => item.id !== 'long-unbroken'));
+  const downloadsBeforePreviewExport = window.eventsExportCount;
+  click('Export events'); await settle();
+  const previewExport = await downloaded.blob.text();
+  check(window.eventsExportCount === downloadsBeforePreviewExport + 1
+    && downloaded.filename === 'plannix-events-2027-28.ics'
+    && !previewExport.includes('Default H') && !previewExport.includes('Timed I')
+    && !previewExport.includes('Partial J') && !previewExport.includes('Conflicting M'),
+  'unsaved import-preview suggestions are absent from the saved Events export');
+  records.set(YEAR_B, savedBeforePreviewExport);
   click('Discard preview'); await settle();
   click('Hide events');
+  const priorDownload = downloaded;
+  let releaseExport;
+  listGate = new Promise(resolve => { releaseExport = resolve; });
+  click('Export events'); await settle();
+  check(button('Preparing export…')?.disabled && downloaded === priorDownload,
+    'pending export blocks repeat clicks and does not download before authorization completes');
+  flushSync(() => window.switchEventsUser(USER_B)); await settle();
+  listGate = null; releaseExport(); await settle();
+  check(downloaded === priorDownload && button('Export events')?.disabled,
+    'late old-account export cannot download or enable export under the replacement account');
+  flushSync(() => window.switchEventsUser(USER_A));
+  flushSync(() => yearSetter(YEAR_A)); await settle();
+  const priorYearDownload = downloaded;
+  let releaseOldYearExport;
+  listGate = new Promise(resolve => { releaseOldYearExport = resolve; });
+  click('Export events'); await settle();
+  flushSync(() => yearSetter(YEAR_B)); await settle();
+  check(button('Export events')?.disabled, 'year change disables the old export while the new list is pending');
+  listGate = null; releaseOldYearExport(); await settle();
+  check(downloaded === priorYearDownload && host.textContent.includes('2027/28'),
+    'late old-year export cannot download under the new academic year');
   document.body.dataset.testResult = 'passed';
   document.body.append(Object.assign(document.createElement('pre'), { textContent: `${results.length} Events browser assertions passed` }));
 }
