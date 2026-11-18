@@ -30,6 +30,9 @@ test('past styling uses the London calendar day, not elapsed hours or UTC day', 
   const today = '2027-03-29';
   assert.equal(isPastClassMonitorRow({ type: 'lesson', date: '2027-03-28' }, today), true);
   assert.equal(isPastClassMonitorRow({ type: 'closure', date: today }, today), false);
+  assert.equal(isPastClassMonitorRow({ type: 'lesson', date: today }, today), false);
+  assert.equal(londonCalendarToday(new Date('2026-12-31T23:59:59Z')), '2026-12-31');
+  assert.equal(londonCalendarToday(new Date('2027-01-01T00:00:00Z')), '2027-01-01');
   assert.equal(isPastClassMonitorRow({ type: 'lesson', date: '2027-03-30' }, today), false);
   assert.equal(isPastClassMonitorRow({ type: 'holiday', visibleStart: '2027-03-27', visibleEnd: today }, today), false);
   assert.equal(isPastClassMonitorRow({ type: 'school-unknown', visibleStart: '2027-03-27', visibleEnd: '2027-03-28' }, today), true);

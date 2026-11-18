@@ -22,7 +22,11 @@ let setYear, gate, failNext = false, revisionMismatch = false;
 const requests = [];
 window.reportDownloads = [];
 window.reportPrintCalls = 0;
-window.print = () => { window.reportPrintCalls += 1; };
+window.reportPrintedLessonTitles = [];
+
+window.print = () => { window.reportPrintCalls += 1;
+  window.reportPrintedLessonTitles = [...document.querySelectorAll('.reports-results .session-lesson-title')].map(node=>node.textContent);
+};
 URL.createObjectURL = blob => { window.reportDownloads.push({ size: blob.size, type: blob.type }); return 'blob:reports-fixture'; };
 URL.revokeObjectURL = () => {};
 HTMLAnchorElement.prototype.click = function () {
@@ -77,6 +81,8 @@ export async function fetchDatedTimetableSessions(scope, { signal }) {
       : scope.weekStartDate === '2026-11-02' ? [
         { id: 'dated', classId: CLASS_A, periodId: PERIOD,
           day: 0, title: 'Dated title', notes: 'Dated notes' },
+        { id: 'future-dated', classId: CLASS_A, periodId: PERIOD,
+          day: 2, title: 'Future dated lesson', notes: 'Future notes' },
         { id: 'long-dated', classId: CLASS_A, periodId: PERIOD_TWO,
           day: 0, title: LONG_TITLE, notes: 'Long-title details' },
       ] : [] };
@@ -166,6 +172,39 @@ async function run() {
     && training.textContent.includes('Lesson not held — Training day')
     && halfTerm.textContent.includes('School holiday or closure — Half term'),
   'past lesson tiles retain orange; closures and school/public ranges use solid gold report borders and original labels');
+  const hideButton = () => host.querySelector('.reports-actions button[aria-controls="class-monitor-results"]');
+  const fullTitles = [...host.querySelectorAll('.reports-results .session-lesson-title')].map(node=>node.textContent);
+  const beforeToggleRequests=requests.length;
+  check(hideButton().textContent.trim()==='Hide past lessons' && hideButton().getAttribute('aria-pressed')==='false'
+    && printButton().nextElementSibling===hideButton(), 'full list starts visible with accessible Hide past lessons next to Print');
+  flushSync(()=>hideButton().click()); await settle();
+  check(hideButton().textContent.trim()==='Show all lessons' && hideButton().getAttribute('aria-pressed')==='true'
+    && !host.querySelector('.reports-results').textContent.includes('Past dated lesson')
+    && host.querySelector('.reports-results').textContent.includes('Dated title')
+    && host.querySelector('.reports-results').textContent.includes('Future dated lesson') && requests.length===beforeToggleRequests,
+    'hide removes only earlier lessons, keeps today and makes no data requests');
+  flushSync(()=>printButton().click());
+  check(!window.reportPrintedLessonTitles.includes('Past dated lesson') && window.reportPrintedLessonTitles.includes('Dated title'),
+    'Print receives the filtered displayed lessons');
+  flushSync(()=>hideButton().click()); await settle();
+  check(JSON.stringify([...host.querySelectorAll('.reports-results .session-lesson-title')].map(node=>node.textContent))===JSON.stringify(fullTitles),
+    'Show all restores the original complete order');
+  flushSync(()=>hideButton().click());
+  input('#report-class',CLASS_B); await settle();
+  check(hideButton().getAttribute('aria-pressed')==='false' && hideButton().textContent.trim()==='Hide past lessons',
+    'changing class resets the display toggle without retaining previous class rows');
+  input('#report-class',CLASS_A); await settle();
+  flushSync(()=>hideButton().click());
+  flushSync(()=>setYear(YEAR_B)); await settle();
+  check(hideButton().getAttribute('aria-pressed')==='false' && hideButton().disabled && !host.querySelector('.reports-results'),
+    'changing year resets the toggle and disables it until a class report loads');
+  flushSync(()=>setYear(YEAR_A)); await settle(); input('#report-class',CLASS_A); await settle();
+  input('#report-from','2026-09-14'); input('#report-to','2026-09-14'); await settle();
+  flushSync(()=>hideButton().click()); await settle();
+  check(host.querySelector('.reports-results [role="status"]')?.textContent.includes('No current or future lessons')
+    && !host.querySelector('.reports-lesson'), 'all-past report shows a clear current/future empty state');
+  flushSync(()=>hideButton().click()); await settle();
+  check(host.querySelector('.reports-results').textContent.includes('Past dated lesson'), 'empty filtered view can restore its saved lesson');
   input('#report-from', '2026-10-28'); input('#report-to', '2026-10-29'); await settle();
   check(host.textContent.includes('portion in selected dates') && !host.textContent.includes('Lesson not held — INSET Day'),
     'inclusive date filter clips overlapping holiday and clears old rows');

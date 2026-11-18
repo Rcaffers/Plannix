@@ -43,6 +43,7 @@ export default function Reports({ user, clock = systemClock }) {
   const [selection, setSelection] = useState({ yearId: null, classId: '' });
   const [dates, setDates] = useState({ yearId: null, from: '', to: '' });
   const [retry, setRetry] = useState(0);
+  const [lessonDisplay, setLessonDisplay] = useState({ scope:'', hidePast:false });
   const [result, setResult] = useState({ scope: '', status: 'idle', rows: [], error: null });
   const [exportError, setExportError] = useState({ scope: '', message: '' });
   const [today, setToday] = useState(() => londonCalendarToday(clock()));
@@ -59,11 +60,18 @@ export default function Reports({ user, clock = systemClock }) {
     && layout.timetableId && classId && !dateError
     ? `${user.id}:${user.organisationId}:${yearId}:${layout.timetableId}:${layout.revision}:${sessions.revision}:${classes.revision}:${classId}:${from}:${to}:${JSON.stringify(academicYear.holidays)}` : '';
   const active = result.scope === scope ? result : { scope, status: scope ? 'loading' : 'idle', rows: [], error: null };
+  const displayScope = `${user?.id || ''}:${user?.organisationId || ''}:${yearId || ''}:${classId}`;
+  const hidePast = lessonDisplay.scope === displayScope && lessonDisplay.hidePast;
+  const displayedRows = hidePast ? active.rows.filter(row => row.type !== 'lesson' || !isPastClassMonitorRow(row, today)) : active.rows;
   const selectedClass = savedClasses.find(entry => entry.id === classId);
   const canUseReport = Boolean(scope && selectedClass && active.status === 'ready' && !dateError
     && !yearError && !classes.error && !layout.error && !classes.isLoading && !layout.isLoading);
   const patternScope = useMemo(() => ({ organisationId: user?.organisationId, academicYearId: yearId,
     timetableId: layout.timetableId }), [user?.organisationId, yearId, layout.timetableId]);
+
+  useEffect(() => {
+    setLessonDisplay({ scope:displayScope, hidePast:false });
+  }, [displayScope]);
 
   useEffect(() => {
     setToday(londonCalendarToday(clock()));
@@ -159,6 +167,10 @@ export default function Reports({ user, clock = systemClock }) {
       <div className="reports-actions">
         <button type="button" className="settings-reset" disabled={!canUseReport} onClick={exportExcel}>Export Excel</button>
         <button type="button" className="settings-reset" disabled={!canUseReport} onClick={() => { if (canUseReport) window.print(); }}>Print</button>
+        <button type="button" className="settings-reset" disabled={!canUseReport} aria-pressed={hidePast}
+          aria-controls="class-monitor-results" onClick={() => setLessonDisplay({ scope:displayScope, hidePast:!hidePast })}>
+          {hidePast ? 'Show all lessons' : 'Hide past lessons'}
+        </button>
       </div>
       {exportError.scope === scope && exportError.message ? <p className="reports-error" role="alert">{exportError.message}</p> : null}
       {canUseReport ? <div className="reports-print-header"><h1>Class Monitor</h1>
@@ -166,9 +178,10 @@ export default function Reports({ user, clock = systemClock }) {
         <p><strong>From:</strong> {dateLabel(from)} · <strong>To:</strong> {dateLabel(to)}</p>
         <p>{REPORT_LIMITATIONS}</p>
       </div> : null}
-      {active.status === 'ready' ? <section className="reports-results" aria-label={`Class Monitor for ${selectedClass?.name || 'class'}`}>
-        {!active.rows.length ? <p>No scheduled lessons or school closures for this class in the selected dates.</p> : null}
-        {active.rows.map((row, index) => ['holiday', 'school-unknown'].includes(row.type)
+      {active.status === 'ready' ? <section id="class-monitor-results" className="reports-results" aria-label={`Class Monitor for ${selectedClass?.name || 'class'}`}>
+        {hidePast && !displayedRows.some(row => row.type === 'lesson') ? <p role="status">No current or future lessons for this class in the selected dates.</p> : null}
+        {!hidePast && !active.rows.length ? <p>No scheduled lessons or school closures for this class in the selected dates.</p> : null}
+        {displayedRows.map((row, index) => ['holiday', 'school-unknown'].includes(row.type)
           ? <article className="reports-holiday" key={`holiday-${index}`}><h3>{row.type === 'school-unknown' ? `School holiday or closure — ${row.label}` : row.label}</h3>
             <p>{dateLabel(row.visibleStart)} – {dateLabel(row.visibleEnd)}{row.visibleStart !== row.startDate || row.visibleEnd !== row.endDate ? ' (portion in selected dates)' : ''}</p></article>
           : <article className={`reports-entry${row.type === 'closure' ? ' reports-entry--closure' : ''}`} key={`${row.date}-${row.periodId}-${row.sessionId || index}`}>

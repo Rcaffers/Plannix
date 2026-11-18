@@ -51,6 +51,8 @@ try {
     const measurement = await send('Runtime.evaluate', { expression: '({viewport:innerWidth,scroll:document.documentElement.scrollWidth,card:(()=>{const r=document.querySelector(".reports-card").getBoundingClientRect();return {left:r.left,right:r.right}})(),past:(()=>{const e=document.querySelector(".reports-lesson--past");if(!e)return null;const r=e.getBoundingClientRect(),s=getComputedStyle(e),outer=getComputedStyle(e.closest(".reports-entry"));return {left:r.left,right:r.right,border:s.borderLeftWidth,background:s.backgroundColor,outerBackground:outer.backgroundColor,outerBorder:outer.borderLeftWidth}})(),yellow:(()=>{const nodes=[...document.querySelectorAll(".reports-holiday,.reports-entry--closure")],card=document.querySelector(".reports-card").getBoundingClientRect();return {count:nodes.length,fit:nodes.every(e=>{const r=e.getBoundingClientRect();return r.left>=card.left-1&&r.right<=card.right+1}),style:nodes.every(e=>{const s=getComputedStyle(e);return s.backgroundColor==="rgba(250, 240, 220, 0.55)"&&s.borderTopStyle==="solid"&&s.borderTopColor==="rgba(200, 160, 90, 0.45)"&&s.borderTopLeftRadius==="12px"})}})()})', returnByValue: true }, sessionId);
     const value = measurement.result.value;
     measurements.push(value);
+    const actions=await send('Runtime.evaluate',{expression:`[...document.querySelectorAll('.reports-actions button')].every(node=>{const r=node.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1&&r.height>=44})`,returnByValue:true},sessionId);
+    assert.equal(actions.result.value,true,`${width}px report actions remain usable and within the viewport`);
     const filters = (await send('Runtime.evaluate', { expression: `(() => {
       const rect = selector => { const r = document.querySelector(selector).getBoundingClientRect();
         return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
@@ -126,6 +128,28 @@ try {
     fromWidth: filters.from.width, toWidth: filters.to.width,
     shortTile: lessons.short.display, longTitleFragments: lessons.long.titleLines,
   }))));
+  await send('Runtime.evaluate',{expression:`[...document.querySelectorAll('.reports-actions button')].find(node=>node.textContent==='Print').focus()`},sessionId);
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9},sessionId);
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9},sessionId);
+  const toggleFocus=await send('Runtime.evaluate',{expression:`document.activeElement===document.querySelector('.reports-actions button[aria-pressed]')`,returnByValue:true},sessionId);
+  assert.equal(toggleFocus.result.value,true,'Tab moves from Print to the lesson toggle');
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32},sessionId);
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32},sessionId);
+  const filtered=await send('Runtime.evaluate',{expression:`new Promise(resolve=>requestAnimationFrame(()=>resolve(document.querySelector('.reports-actions button[aria-pressed]').getAttribute('aria-pressed')==='true'&&!document.querySelector('.reports-lesson--past'))))`,awaitPromise:true,returnByValue:true},sessionId);
+  assert.equal(filtered.result.value,true,'Space toggles past lessons off using the native button');
+  await send('Emulation.setEmulatedMedia',{media:'print'},sessionId);
+  const filteredPrint=await send('Page.printToPDF',{printBackground:false,preferCSSPageSize:true},sessionId);
+  const filteredTask=getDocument({data:new Uint8Array(Buffer.from(filteredPrint.data,'base64')),useSystemFonts:true});
+  const filteredPdf=await filteredTask.promise;
+  let filteredText='';
+  for(let pageNumber=1;pageNumber<=filteredPdf.numPages;pageNumber++)filteredText+=(await (await filteredPdf.getPage(pageNumber)).getTextContent()).items.map(item=>item.str).join(' ');
+  await filteredTask.destroy();
+  assert.match(filteredText,/Dated title/);
+  assert.match(filteredText,/Future dated lesson/);
+  assert.doesNotMatch(filteredText,/Past dated lesson|Hide past lessons|Show all lessons/);
+  await send('Emulation.setEmulatedMedia',{media:'screen'},sessionId);
+  await send('Runtime.evaluate',{expression:`document.querySelector('.reports-actions button[aria-pressed]').click()`},sessionId);
+  await send('Runtime.evaluate',{expression:`new Promise(resolve=>requestAnimationFrame(resolve))`,awaitPromise:true},sessionId);
   const printLayout = await send('Runtime.evaluate', { expression: `(() => {
     const host = document.querySelector('.reports-page').parentElement;
     host.classList.add('page-shell');
@@ -169,6 +193,7 @@ try {
   await pdfTask.destroy();
   const allPrintedText = printedText.join(' ');
   assert.match(allPrintedText, /Class Monitor/);
+  assert.match(allPrintedText, /Past dated lesson/);
   assert.match(allPrintedText, /7A/);
   assert.match(allPrintedText, /2026\/27/);
   assert.match(allPrintedText, /earlier versions of the layout and pattern are not archived/);
