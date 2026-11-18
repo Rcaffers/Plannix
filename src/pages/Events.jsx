@@ -65,10 +65,19 @@ export default function Events({ userId }) {
     && academicYear.startDate && academicYear.endDate && !yearLoading);
   const loading = listStatus === 'loading';
   const listReady = listStatus === 'ready';
-  const focusList = () => requestAnimationFrame(() => {
-    if (addRef.current && !addRef.current.disabled) addRef.current.focus();
-    else headingRef.current?.focus();
-  });
+  const operationCurrent = (key, controller, context) => {
+    if (scopeRef.current !== key || controller.signal.aborted) return false;
+    try { if (context) assertServerOperationContext(context); return true; }
+    catch { return false; }
+  };
+  const focusList = () => {
+    const key = scopeRef.current;
+    requestAnimationFrame(() => {
+      if (scopeRef.current !== key) return;
+      if (addRef.current && !addRef.current.disabled) addRef.current.focus();
+      else headingRef.current?.focus();
+    });
+  };
 
   const approveLeave = useCallback(() => !pendingRef.current && !destructiveReloadRef.current && (!(dirtyRef.current || previewDirtyRef.current)
     || window.confirm('Discard unsaved event changes?')), []);
@@ -101,9 +110,11 @@ export default function Events({ userId }) {
     const generation = ++listGeneration.current;
     setLoadedScope(null);
     setListStatus('loading'); setAnnouncement('Loading events…');
+    let context = null;
     try {
+      context = serverManagedAuth ? captureServerOperationContext(userId) : null;
       const result = await eventApi.list(selectedAcademicYearId, { signal: controller.signal });
-      if (scopeRef.current !== key || listGeneration.current !== generation || controller.signal.aborted) return false;
+      if (!operationCurrent(key, controller, context) || listGeneration.current !== generation) return false;
       setEvents(sortPersonalEvents(result.events));
       setLoadedScope(key);
       setListStatus('ready');
@@ -124,11 +135,13 @@ export default function Events({ userId }) {
       setAnnouncement('Events loaded.');
       return result.events;
     } catch (cause) {
-      if (scopeRef.current === key && listGeneration.current === generation && !controller.signal.aborted) {
+      if (operationCurrent(key, controller, context) && listGeneration.current === generation) {
         setError(errorDetails(cause, 'Could not load events.'));
         setListStatus('error');
         setAnnouncement('');
-        requestAnimationFrame(() => errorRef.current?.focus());
+        requestAnimationFrame(() => {
+          if (operationCurrent(key, controller, context)) errorRef.current?.focus();
+        });
       }
       return null;
     }
@@ -204,8 +217,13 @@ export default function Events({ userId }) {
     setError(null); setNotice(''); setConflict(false);
     const draft = event ? draftFromEvent(event) : blankEventDraft();
     draftVersion.current += 1;
+    if (event) setListExpanded(true);
     setEditor({ id: event?.id || null, revision: event?.revision || null, baseline: draft, draft });
-    requestAnimationFrame(() => titleRef.current?.focus());
+    const key = scopeKey;
+    const id = event?.id || null;
+    requestAnimationFrame(() => {
+      if (scopeRef.current === key && editorRef.current?.id === id) titleRef.current?.focus({ preventScroll: Boolean(event) });
+    });
   }
   function reviewImportEvent(value) {
     if (!ready || !listReady || pendingRef.current || destructiveReloadRef.current || conflict || recovery
@@ -281,10 +299,15 @@ export default function Events({ userId }) {
   }
   function cancel() {
     if (pendingRef.current || destructiveReloadRef.current || (recovery && !recovery.resolution)) return;
+    const id = editor?.id;
+    const key = scopeKey;
     draftVersion.current += 1;
     setEditor(null); setRecovery(null); setNotice('');
     if (!conflict) setError(null);
-    focusList();
+    if (id) requestAnimationFrame(() => {
+      if (scopeRef.current === key) document.getElementById(`event-edit-${id}`)?.focus({ preventScroll:true });
+    });
+    else focusList();
   }
   function patch(field, value) {
     if (destructiveReloadRef.current) return;
@@ -308,17 +331,21 @@ export default function Events({ userId }) {
     const key = scopeKey;
     pendingRef.current = true; setPending(true); setError(null); setRecovery(null); setAnnouncement('Saving event…');
     const controller = new AbortController(); mutationController.current = controller;
+    let context = null;
     try {
+      context = serverManagedAuth ? captureServerOperationContext(userId) : null;
       const response = editor.id
         ? await eventApi.update(editor.id, editor.revision, result.event, { signal: controller.signal })
         : await eventApi.create(selectedAcademicYearId, result.event, { signal: controller.signal });
-      if (scopeRef.current !== key || controller.signal.aborted) return;
+      if (!operationCurrent(key, controller, context)) return;
       setEvents(current => sortPersonalEvents([...current.filter(item => item.id !== response.event.id), response.event]));
       if (editor.fromImport) setListExpanded(true);
-      setEditor(null); setConflict(false); setAnnouncement('Event saved.');
-      requestAnimationFrame(() => document.getElementById(`event-edit-${response.event.id}`)?.focus());
+      setEditor(null); setConflict(false); setNotice('Event saved.'); setAnnouncement('Event saved.');
+      requestAnimationFrame(() => {
+        if (operationCurrent(key, controller, context)) document.getElementById(`event-edit-${response.event.id}`)?.focus();
+      });
     } catch (cause) {
-      if (scopeRef.current !== key || controller.signal.aborted) return;
+      if (!operationCurrent(key, controller, context)) return;
       if (uncertainResult(cause)) {
         setRecovery({ action: editor.id ? 'update' : 'create', id: editor.id, revision: editor.revision,
           attempted: result.event, resolution: null });
@@ -327,7 +354,9 @@ export default function Events({ userId }) {
       if (!uncertainResult(cause) && editor.id && (cause?.status === 409 || cause?.status === 404)
         && !String(cause?.message).includes('same title') && !String(cause?.message).includes('500 events')) setConflict(true);
       setAnnouncement('');
-      requestAnimationFrame(() => errorRef.current?.focus());
+      requestAnimationFrame(() => {
+        if (operationCurrent(key, controller, context)) errorRef.current?.focus();
+      });
     } finally {
       if (mutationController.current === controller) {
         pendingRef.current = false;
@@ -342,15 +371,17 @@ export default function Events({ userId }) {
     const key = scopeKey;
     pendingRef.current = true; setPending(true); setError(null); setRecovery(null); setAnnouncement('Deleting event…');
     const controller = new AbortController(); mutationController.current = controller;
+    let context = null;
     try {
+      context = serverManagedAuth ? captureServerOperationContext(userId) : null;
       await eventApi.remove(item.id, item.revision, { signal: controller.signal });
-      if (scopeRef.current !== key || controller.signal.aborted) return;
+      if (!operationCurrent(key, controller, context)) return;
       setEvents(current => current.filter(record => record.id !== item.id));
       if (editor?.id === item.id) setEditor(null);
       setConflict(false); setAnnouncement('Event deleted.');
       focusList();
     } catch (cause) {
-      if (scopeRef.current !== key || controller.signal.aborted) return;
+      if (!operationCurrent(key, controller, context)) return;
       if (uncertainResult(cause)) {
         setRecovery({ action: 'delete', id: item.id, revision: item.revision, resolution: null });
         setError({ message: 'The delete outcome could not be confirmed. Reload events before trying again.', reference: safeRequestReference(cause) });
@@ -359,7 +390,9 @@ export default function Events({ userId }) {
         if (cause?.status === 409 || cause?.status === 404) setConflict(true);
       }
       setAnnouncement('');
-      requestAnimationFrame(() => errorRef.current?.focus());
+      requestAnimationFrame(() => {
+        if (operationCurrent(key, controller, context)) errorRef.current?.focus();
+      });
     } finally {
       if (mutationController.current === controller) {
         pendingRef.current = false;
@@ -405,6 +438,7 @@ export default function Events({ userId }) {
     if (destructiveReloadRef.current || recovery?.resolution !== 'match' || !recovery.candidate || (dirty && !window.confirm('Discard this draft and open the saved event?'))) return;
     const candidate = recovery.candidate;
     const draft = draftFromEvent(candidate);
+    setListExpanded(true);
     setEditor({ id: candidate.id, revision: candidate.revision, baseline: draft, draft });
     setRecovery(null); setError(null);
     requestAnimationFrame(() => titleRef.current?.focus());
@@ -414,6 +448,20 @@ export default function Events({ userId }) {
     setRecovery(null); setEditor(null); setError(null);
     focusList();
   }
+
+  const inlineEditor = Boolean(editor?.id && events.some(item => item.id === editor.id));
+  const editorForm = editor ? <form className="events-form" onSubmit={save} noValidate aria-labelledby="events-form-heading">
+        <h3 id="events-form-heading" className="settings-section-title">{editor.id ? 'Edit event' : 'Add event'}</h3>
+        <div className="settings-field"><label htmlFor="event-title">Title</label><input id="event-title" ref={titleRef} type="text" value={editor.draft.title} maxLength={200} onChange={e => patch('title', e.target.value)} disabled={pending || destructiveReloading} required /></div>
+        <div className="settings-field"><label htmlFor="event-date">Date</label><input id="event-date" type="date" min={academicYear.startDate} max={academicYear.endDate} value={editor.draft.date} onChange={e => patch('date', e.target.value)} disabled={pending || destructiveReloading} required /></div>
+        <label className="events-check"><input type="checkbox" checked={editor.draft.allDay} onChange={e => patch('allDay', e.target.checked)} disabled={pending || destructiveReloading} />All day</label>
+        {!editor.draft.allDay ? <div className="events-times"><div className="settings-field"><label htmlFor="event-startTime">Start time</label><input id="event-startTime" type="time" value={editor.draft.startTime} onChange={e => patch('startTime', e.target.value)} disabled={pending || destructiveReloading} required /></div>
+          <div className="settings-field"><label htmlFor="event-endTime">End time</label><input id="event-endTime" type="time" value={editor.draft.endTime} onChange={e => patch('endTime', e.target.value)} disabled={pending || destructiveReloading} required /></div></div> : null}
+        <div className="settings-field"><label htmlFor="event-location">Location (optional)</label><input id="event-location" type="text" value={editor.draft.location} maxLength={200} onChange={e => patch('location', e.target.value)} disabled={pending || destructiveReloading} /></div>
+        <div className="settings-field"><label htmlFor="event-notes">Notes (optional)</label><textarea id="event-notes" value={editor.draft.notes} maxLength={2000} rows={4} onChange={e => patch('notes', e.target.value)} disabled={pending || destructiveReloading} /></div>
+        <div className="settings-actions"><button type="button" className="settings-reset" onClick={cancel} disabled={pending || destructiveReloading || (recovery && !recovery.resolution)}>Cancel</button>
+          <button type="submit" className="settings-save" disabled={pending || destructiveReloading || conflict || recovery || !listReady}>Save event</button></div>
+      </form> : null;
 
   return <main className="settings-page events-page"><div className="container settings-inner--wide">
     <p className="settings-breadcrumb"><Link to="/">Home</Link><span aria-hidden> / </span><Link to="/settings">Settings</Link><span aria-hidden> / </span>Events</p>
@@ -467,7 +515,7 @@ export default function Events({ userId }) {
     {ready ? <>
       <div className="events-list-heading"><p>{listReady ? `${events.length} of ${MAX_PERSONAL_EVENTS} events` : 'Event count unavailable'}</p>
         {listReady ? <button id="events-list-toggle" type="button" className="settings-reset"
-          aria-expanded={listExpanded} aria-controls="events-list-panel"
+          disabled={inlineEditor} aria-expanded={listExpanded} aria-controls="events-list-panel"
           aria-label={`${listExpanded ? 'Hide' : 'Show'} events (${events.length})`}
           onClick={() => setListExpanded(value => !value)}>
           {listExpanded ? 'Hide events' : `Show events (${events.length})`}
@@ -481,7 +529,7 @@ export default function Events({ userId }) {
       </div>
       {exportError ? <p className="events-error" role="alert">{exportError}</p> : null}
       <button ref={addRef} type="button" className="add-row-button" onClick={() => openEditor()} disabled={pending || destructiveReloading || !listReady || conflict || recovery || !canAddEvent(events)}>Add event</button>
-      {listReady ? <div id="events-list-panel" hidden={!listExpanded} aria-labelledby="events-list-toggle">
+      {listReady || inlineEditor ? <div id="events-list-panel" hidden={!listExpanded} aria-labelledby="events-list-toggle">
       {!events.length && !error ? <p className="events-notice">No events yet. Add an event for this academic year.</p> : null}
       {events.length ? <ul className="events-list" aria-label="Events in selected academic year">{events.map(item =>
         <li className="events-item" key={item.id}>
@@ -489,21 +537,11 @@ export default function Events({ userId }) {
             {item.location ? <span>{item.location}</span> : null}</div>
           <div className="events-item-actions"><button id={`event-edit-${item.id}`} type="button" className="settings-reset" aria-label={`Edit ${item.title}`} onClick={() => openEditor(item)} disabled={pending || destructiveReloading || !listReady || conflict || recovery}>Edit event</button>
             <button type="button" className="settings-reset events-delete" aria-label={`Delete ${item.title}`} onClick={() => remove(item)} disabled={pending || destructiveReloading || !listReady || conflict || recovery}>Delete event</button></div>
+          {editor?.id === item.id ? editorForm : null}
         </li>)}
       </ul> : null}
       </div> : null}
-      {editor ? <form className="events-form" onSubmit={save} noValidate aria-labelledby="events-form-heading">
-        <h3 id="events-form-heading" className="settings-section-title">{editor.id ? 'Edit event' : 'Add event'}</h3>
-        <div className="settings-field"><label htmlFor="event-title">Title</label><input id="event-title" ref={titleRef} type="text" value={editor.draft.title} maxLength={200} onChange={e => patch('title', e.target.value)} disabled={pending || destructiveReloading} required /></div>
-        <div className="settings-field"><label htmlFor="event-date">Date</label><input id="event-date" type="date" min={academicYear.startDate} max={academicYear.endDate} value={editor.draft.date} onChange={e => patch('date', e.target.value)} disabled={pending || destructiveReloading} required /></div>
-        <label className="events-check"><input type="checkbox" checked={editor.draft.allDay} onChange={e => patch('allDay', e.target.checked)} disabled={pending || destructiveReloading} />All day</label>
-        {!editor.draft.allDay ? <div className="events-times"><div className="settings-field"><label htmlFor="event-startTime">Start time</label><input id="event-startTime" type="time" value={editor.draft.startTime} onChange={e => patch('startTime', e.target.value)} disabled={pending || destructiveReloading} required /></div>
-          <div className="settings-field"><label htmlFor="event-endTime">End time</label><input id="event-endTime" type="time" value={editor.draft.endTime} onChange={e => patch('endTime', e.target.value)} disabled={pending || destructiveReloading} required /></div></div> : null}
-        <div className="settings-field"><label htmlFor="event-location">Location (optional)</label><input id="event-location" type="text" value={editor.draft.location} maxLength={200} onChange={e => patch('location', e.target.value)} disabled={pending || destructiveReloading} /></div>
-        <div className="settings-field"><label htmlFor="event-notes">Notes (optional)</label><textarea id="event-notes" value={editor.draft.notes} maxLength={2000} rows={4} onChange={e => patch('notes', e.target.value)} disabled={pending || destructiveReloading} /></div>
-        <div className="settings-actions"><button type="button" className="settings-reset" onClick={cancel} disabled={pending || destructiveReloading || (recovery && !recovery.resolution)}>Cancel</button>
-          <button type="submit" className="settings-save" disabled={pending || destructiveReloading || conflict || recovery || !listReady}>Save event</button></div>
-      </form> : null}
+      {!inlineEditor ? editorForm : null}
     </> : null}
     </section>
     {ready ? <section className="events-card-section events-import-section" aria-labelledby="events-import-heading">

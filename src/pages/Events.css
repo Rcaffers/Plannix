@@ -27,6 +27,7 @@
   padding: 14px 0;
   border-top: 1px solid rgba(63,127,120,.24);
 }
+.events-item > .events-form { grid-column: 1 / -1; width: 100%; box-sizing: border-box; }
 .events-item:last-child { border-bottom: 1px solid rgba(63,127,120,.24); }
 .events-item-copy { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
 .events-item-copy span { color: #52635f; }

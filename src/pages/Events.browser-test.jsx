@@ -83,6 +83,7 @@ export const eventApi = {
     const saved = { ...event, id: `20000000-0000-4000-8000-${String(nextEventNumber++).padStart(12, '0')}`, academicYearId: id, revision: 1 };
     records.set(id, [...records.get(id), saved]); if (failure) throw failure; return { event: saved }; },
   async update(id, revision, event) { calls.push({ action: 'update', id, revision, event });
+    if (mutationGate) await mutationGate;
     const failure = nextFailure; nextFailure = null; if (failure && !failure.accepted) throw failure;
     const yearId = [...records].find(([, items]) => items.some(x => x.id === id))?.[0]; const saved = { ...event, id, academicYearId: yearId, revision: revision + 1 };
     records.set(yearId, records.get(yearId).map(x => x.id === id ? saved : x)); if (failure) throw failure; return { event: saved }; },
@@ -216,10 +217,9 @@ async function run() {
   click('Edit Assembly');
   check(host.querySelector('#event-title').value === 'Assembly', 'edit loads record');
   click('Hide events');
-  check(host.querySelector('#events-list-panel').hidden && host.querySelector('#event-title').value === 'Assembly'
+  check(button('Hide events').disabled && !host.querySelector('#events-list-panel').hidden && host.querySelector('#event-title').value === 'Assembly'
     && host.querySelector('.events-weekend-setting') && host.querySelector('.import-preview-panel'),
-  'collapsing saved rows leaves the open editor, weekend preference and AI preview available');
-  click('Show events (1)');
+  'saved-event editing keeps its row and inline form visible alongside preference and preview controls');
   input('#event-title', 'Unsaved switch draft');
   click('Export events'); await settle();
   check((await downloaded.blob.text()).includes('SUMMARY:Assembly')
@@ -720,6 +720,84 @@ async function run() {
   listGate = null; releaseOldYearExport(); await settle();
   check(downloaded === priorYearDownload && host.textContent.includes('2027/28'),
     'late old-year export cannot download under the new academic year');
+  const originalYearARecords = records.get(YEAR_A);
+  const firstInlineId = '70000000-0000-4000-8000-000000000001';
+  const secondInlineId = '70000000-0000-4000-8000-000000000002';
+  const inlineRecord = (id,title,date) => ({id,title,date,academicYearId:YEAR_A,revision:1,startTime:null,endTime:null,location:null,notes:null});
+  records.set(YEAR_A,[inlineRecord(firstInlineId,'Inline first','2026-10-01'),inlineRecord(secondInlineId,'Inline second','2026-10-02')]);
+  flushSync(() => yearSetter(YEAR_A)); await settle();
+  click('Show events (2)');
+  const focusCalls = [];
+  const originalFocus = HTMLElement.prototype.focus;
+  HTMLElement.prototype.focus = function(options) { if(this.id==='event-title')focusCalls.push(options); return originalFocus.call(this,options); };
+  click('Edit Inline first'); await new Promise(resolve=>requestAnimationFrame(resolve));
+  HTMLElement.prototype.focus = originalFocus;
+  const firstRow = button('Edit Inline first').closest('.events-item');
+  check(firstRow.lastElementChild?.matches('.events-form') && firstRow.nextElementSibling?.contains(button('Edit Inline second'))
+    && host.querySelectorAll('.events-form').length===1 && focusCalls.at(-1)?.preventScroll===true,
+    'saved editor is beneath its event before the next event and focuses without a scroll jump');
+  input('#event-title','Protected inline draft');
+  const originalConfirm = window.confirm;
+  window.confirm = () => false;
+  click('Edit Inline second');
+  check(host.querySelector('#event-title').value==='Protected inline draft' && firstRow.contains(host.querySelector('.events-form')),
+    'declining event switch retains the original inline draft');
+  window.confirm = () => true;
+  click('Edit Inline second');
+  check(host.querySelector('#event-title').value==='Inline second' && host.querySelectorAll('.events-form').length===1
+    && button('Edit Inline second').closest('.events-item').contains(host.querySelector('.events-form')),
+    'confirmed event switch opens exactly one editor under the new row');
+  click('Cancel'); await new Promise(resolve=>requestAnimationFrame(resolve));
+  check(!host.querySelector('.events-form') && document.activeElement===button('Edit Inline second'),
+    'cancel closes the saved editor and returns focus to its originating Edit button');
+  click('Edit Inline first'); input('#event-date','2026-10-03'); submit(); await settle();
+  check(!host.querySelector('.events-form') && [...host.querySelectorAll('.events-item-copy strong')].map(n=>n.textContent).join(',')==='Inline second,Inline first'
+    && [...host.querySelectorAll('.events-notice')].some(n=>n.textContent==='Event saved.'),
+    'successful inline edit re-sorts saved rows and shows a visible confirmation');
+  click('Edit Inline first'); input('#event-title','Retained failed draft');
+  nextFailure=Object.assign(Error('Synthetic rejected edit'),{status:403}); submit(); await settle();
+  check(host.querySelector('#event-title').value==='Retained failed draft'
+    && button('Edit Inline first').closest('.events-item').contains(host.querySelector('.events-form')),
+    'rejected save keeps edited values inside the correct event row');
+  if (serverManagedAuth) {
+    const savedInlineRecords=structuredClone(records.get(YEAR_A));
+    for (const outcome of ['success','failure']) {
+      let releaseSessionSave;
+      mutationGate=new Promise(resolve=>{releaseSessionSave=resolve;});
+      const beforeSaveCalls=calls.filter(call=>call.action==='update').length;
+      submit(); await settle();
+      adoptSession();
+      if(outcome==='failure')nextFailure=Object.assign(Error('Synthetic old-session failure'),{status:503});
+      mutationGate=null; releaseSessionSave();
+      for(let i=0;button('Save event')?.disabled && i<80;i++)await tick();
+      check(button('Save event') && !button('Save event').disabled
+        && calls.filter(call=>call.action==='update').length===beforeSaveCalls+1
+        && host.querySelector('#event-title').value==='Retained failed draft'
+        && button('Edit Inline first') && !host.textContent.includes('Event saved.') && !host.querySelector('.events-error'),
+        `old-session ${outcome} settles once without applying row, confirmation or recovery error after replacement`);
+      click('Cancel'); await settle();
+      records.set(YEAR_A,structuredClone(savedInlineRecords));
+      flushSync(()=>yearSetter(YEAR_B)); await settle();
+      flushSync(()=>yearSetter(YEAR_A)); await settle();
+      click('Edit Inline first'); input('#event-title','Retained failed draft');
+    }
+  }
+  let releaseInlineSave;
+  mutationGate=new Promise(resolve=>{releaseInlineSave=resolve;});
+  submit(); await settle();
+  const updateCount=calls.filter(call=>call.action==='update').length;
+  submit(); click('Cancel'); click('Edit Inline second');
+  check(calls.filter(call=>call.action==='update').length===updateCount && button('Save event').disabled
+    && host.querySelector('#event-title').value==='Retained failed draft',
+    'pending inline save blocks duplicate submission, cancellation and event switching');
+  flushSync(()=>window.switchEventsUser(USER_B)); await settle();
+  mutationGate=null; releaseInlineSave(); await settle();
+  check(!host.querySelector('.events-form') && !host.querySelector('.events-item') && !host.textContent.includes('Event saved.'),
+    'account change removes the inline draft and ignores the previous account save result');
+  records.set(YEAR_A,originalYearARecords);
+  window.confirm=originalConfirm;
+  flushSync(()=>window.switchEventsUser(USER_A));
+  flushSync(()=>yearSetter(YEAR_B)); await settle();
   document.body.dataset.testResult = 'passed';
   document.body.append(Object.assign(document.createElement('pre'), { textContent: `${results.length} Events browser assertions passed` }));
 }

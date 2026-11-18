@@ -45,7 +45,7 @@ export function confirmedDraftUnchanged(confirmation, version, editor) {
 
 export function sortPersonalEvents(events) {
   return [...events].sort((a, b) => a.date.localeCompare(b.date)
-    || (a.startTime === null ? -1 : b.startTime === null ? 1 : a.startTime.localeCompare(b.startTime))
+    || (a.startTime === b.startTime ? 0 : a.startTime === null ? -1 : b.startTime === null ? 1 : a.startTime.localeCompare(b.startTime))
     || a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
 }
 

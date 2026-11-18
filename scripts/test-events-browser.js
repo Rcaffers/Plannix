@@ -101,8 +101,17 @@ try {
   await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
   const edited = await send('Runtime.evaluate', { expression: `new Promise(resolve=>requestAnimationFrame(()=>resolve(document.activeElement.id==='event-title')))`, awaitPromise: true, returnByValue: true }, sessionId);
   assert.equal(edited.result.value, true, 'Native Enter opens Edit event');
+  for (const width of [320,375,390,430,768,820,1024,1366]) {
+    await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false},sessionId);
+    const layout=await send('Runtime.evaluate',{expression:`(()=>{const form=document.querySelector('.events-form');const row=form?.closest('.events-item');const rect=node=>node.getBoundingClientRect();return {inline:!!row&&row.lastElementChild===form,overflow:document.documentElement.scrollWidth>innerWidth+1,controlsFit:!!form&&[...form.querySelectorAll('input,textarea,button')].every(node=>rect(node).left>=0&&rect(node).right<=innerWidth+1),formBelowActions:!!row&&rect(form).top>=rect(row.querySelector('.events-item-actions')).bottom}})()`,returnByValue:true},sessionId);
+    assert.deepEqual(layout.result.value,{inline:true,overflow:false,controlsFit:true,formBelowActions:true},`${width}px open inline editor layout`);
+  }
+  await send('Emulation.setDeviceMetricsOverride',{width:430,height:900,deviceScaleFactor:1,mobile:false},sessionId);
+
   await send('Runtime.evaluate', { expression: `([...document.querySelectorAll('button')].find(button=>button.textContent==='Cancel')).focus()` }, sessionId);
   await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
+  const editCancelled = await send('Runtime.evaluate', { expression: `new Promise(resolve=>requestAnimationFrame(()=>resolve(!document.querySelector('.events-form') && document.activeElement===document.querySelector('button[aria-label="Edit Keyboard event"]'))))`, awaitPromise:true, returnByValue:true }, sessionId);
+  assert.equal(editCancelled.result.value,true,'Native keyboard Cancel restores the edited row focus');
   await send('Runtime.evaluate', { expression: `document.querySelector('button[aria-label="Delete Keyboard event"]').focus()` }, sessionId);
   await key('keyDown', 'Enter', 'Enter', '\r'); await key('keyUp', 'Enter', 'Enter');
   const deleted = await send('Runtime.evaluate', { expression: `new Promise(resolve=>setTimeout(()=>resolve(!document.querySelector('button[aria-label="Delete Keyboard event"]')),50))`, awaitPromise: true, returnByValue: true }, sessionId);

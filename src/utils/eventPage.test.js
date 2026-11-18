@@ -64,3 +64,10 @@ test('Events navigation is registered behind the existing private-route authenti
   assert.match(app, /path="\/settings\/events" element=\{privateRoute\(<Events userId=\{user\?\.id\} \/>\)\}/);
   assert.match(nav, /to: '\/settings\/events', label: 'Events'/);
 });
+
+test('all-day events on the same date sort by title and stable ID after an edit', () => {
+  const base = { date:'2026-10-01', startTime:null };
+  const records = [{...base,id:'c',title:'Zulu'}, {...base,id:'b',title:'Alpha'}, {...base,id:'a',title:'Alpha'}];
+  assert.deepEqual(sortPersonalEvents(records).map(item=>item.id), ['a','b','c']);
+  assert.deepEqual(sortPersonalEvents([...records].reverse()).map(item=>item.id), ['a','b','c']);
+});
