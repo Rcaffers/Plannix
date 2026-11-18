@@ -81,3 +81,25 @@ test('save and reload preserves category and holiday IDs through the API boundar
   stored.holidays[0].holidayType = 'other';
   await assert.rejects(api.load(org, year), /category/);
 });
+
+
+test('load rejects missing holiday inventory and a different returned academic year', async () => {
+  for (const plan of [
+    { id:year, label:'Year',startDate:'2026-09-01',endDate:'2027-08-31' },
+    { id:org, label:'Year',startDate:'2026-09-01',endDate:'2027-08-31',holidays:[] },
+  ]) {
+    const api=createAcademicYearApi({getSession:async()=>({access_token:'synthetic'}),fetchImpl:async()=>response({plan})});
+    await assert.rejects(api.load(org,year),/Could not read/);
+  }
+});
+
+test('load forwards cancellation and keeps operation metadata out of fetch options', async () => {
+  const controller=new AbortController();
+  const operationContext=Object.freeze({sessionName:'synthetic'});
+  const api=createAcademicYearApi({getSession:async()=>({access_token:'synthetic'}),fetchImpl:async(_url,options)=>{
+    assert.equal(options.signal,controller.signal);
+    assert.equal(Object.hasOwn(options,'operationContext'),false);
+    return response({plan:{id:year,label:'Year',startDate:'2026-09-01',endDate:'2027-08-31',holidays:[]}});
+  }});
+  await api.load(org,year,{signal:controller.signal,operationContext});
+});

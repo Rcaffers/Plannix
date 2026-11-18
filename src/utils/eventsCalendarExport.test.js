@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildEventsCalendar, eventsCalendarFileName } from './eventsCalendarExport.js';
+import { buildEventsCalendar, downloadEventsCalendar, eventsCalendarFileName } from './eventsCalendarExport.js';
 
 const yearId = '10000000-0000-4000-8000-000000000001';
 const event = (id, fields = {}) => ({ id, academicYearId:yearId, revision:1,
@@ -64,4 +64,79 @@ test('export rejects absent, duplicate, malformed and wrong-year saved records i
   assert.throws(()=>buildEventsCalendar([event(id,{academicYearId:'10000000-0000-4000-8000-000000000002'})],yearId),/invalid/);
   assert.throws(()=>buildEventsCalendar([event(id,{date:'2027-02-30'})],yearId),/invalid/);
   assert.throws(()=>buildEventsCalendar([event(id,{startTime:'09:00',endTime:null})],yearId),/paired/);
+});
+
+test('a multi-event calendar declares the publication method required by Exchange import', () => {
+  const events = Array.from({ length: 249 }, (_, index) => event(
+    `20000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    { date: '2026-12-31', title: `Synthetic event ${index + 1}` }));
+  const calendar = buildEventsCalendar(events, yearId, { now: stamp });
+  assert.match(calendar, /^BEGIN:VCALENDAR\r\nVERSION:2\.0\r\nPRODID:[^\r\n]+\r\nMETHOD:PUBLISH\r\n/);
+  assert.equal((calendar.match(/\r\nMETHOD:/g) || []).length, 1);
+  assert.equal((calendar.match(/BEGIN:VEVENT\r\n/g) || []).length, events.length);
+  assert.ok(calendar.endsWith('END:VCALENDAR\r\n'));
+});
+
+test('download supplies matching publication media type without changing event bytes', async () => {
+  let blob;
+  let filename;
+  let revoked = false;
+  const browser = {
+    Blob,
+    URL: { createObjectURL(value) { blob = value; return 'blob:synthetic-calendar'; },
+      revokeObjectURL() { revoked = true; } },
+    document: { body: { append() {} }, createElement() {
+      return { click() { filename = this.download; }, remove() {} };
+    } },
+    setTimeout(callback) { callback(); },
+  };
+  const calendar = buildEventsCalendar([event(id)], yearId, { now: stamp });
+  downloadEventsCalendar(calendar, 'plannix-events-2026-27.ics', browser);
+  assert.equal(blob.type, 'text/calendar;charset=utf-8;method=publish');
+  assert.equal(await blob.text(), calendar);
+  assert.equal(filename, 'plannix-events-2026-27.ics');
+  assert.equal(revoked, true);
+});
+
+const closureId = '50000000-0000-4000-8000-000000000001';
+const closure = (fields = {}) => ({ id:closureId, label:'Winter holiday', holidayType:'school',
+  startDate:'2026-12-19', endDate:'2027-01-03', ...fields });
+const plan = holidays => ({ id:yearId, label:'2026/27', startDate:'2026-09-01', endDate:'2027-08-31', holidays });
+
+test('saved holiday ranges remain one entry with inclusive-to-exclusive year and leap-day ends', () => {
+  const calendar = buildEventsCalendar([],yearId,{ now:stamp, academicYear:plan([closure()]) });
+  assert.equal((calendar.match(/BEGIN:VEVENT/g)||[]).length,1);
+  assert.match(calendar,/DTSTART;VALUE=DATE:20261219\r\nDTEND;VALUE=DATE:20270104/);
+  assert.match(calendar,/SUMMARY:Winter holiday/);
+  const leapPlan = { ...plan([]), startDate:'2027-09-01', endDate:'2028-08-31', holidays:[closure({startDate:'2028-02-28',endDate:'2028-02-29'})] };
+  assert.match(buildEventsCalendar([],yearId,{academicYear:leapPlan}),/DTSTART;VALUE=DATE:20280228\r\nDTEND;VALUE=DATE:20280301/);
+});
+
+test('single-day INSET and public holidays retain labels and stable IDs distinct from event IDs', () => {
+  const academicYear=plan([closure({id, label:'INSET training', startDate:'2026-09-01',endDate:'2026-09-01'}),
+    closure({holidayType:'public',label:'Public holiday',startDate:'2026-12-25',endDate:'2026-12-25'})]);
+  const calendar=buildEventsCalendar([event(id)],yearId,{academicYear,now:stamp});
+  assert.equal((calendar.match(/BEGIN:VEVENT/g)||[]).length,3);
+  assert.match(calendar,/UID:holiday-20000000-0000-4000-8000-000000000001@plannix.co.uk/);
+  assert.match(calendar,/UID:20000000-0000-4000-8000-000000000001@plannix.co.uk/);
+  assert.match(calendar,/DTSTART;VALUE=DATE:20260901\r\nDTEND;VALUE=DATE:20260902\r\nSUMMARY:INSET training/);
+  assert.match(calendar,/SUMMARY:Public holiday/);
+  const later=buildEventsCalendar([event(id)],yearId,{academicYear,now:new Date('2026-11-19T00:00:00Z')});
+  assert.deepEqual(calendar.match(/UID:[^\r]+/g),later.match(/UID:[^\r]+/g));
+});
+
+test('incomplete, wrong-year, duplicate or out-of-range closure data blocks the whole calendar', () => {
+  for(const academicYear of [
+    {...plan([]),id:'10000000-0000-4000-8000-000000000002'},
+    {...plan([]),holidays:undefined},
+    plan([closure({id:null})]), plan([closure(),closure()]),
+    plan([closure({endDate:'2027-02-30'})]), plan([closure({startDate:'2026-08-31'})]),
+    plan([closure({startDate:'2027-01-04'})]),
+  ]) assert.throws(()=>buildEventsCalendar([event(id)],yearId,{academicYear}),/invalid/);
+});
+
+test('holiday labels retain the wider saved-name contract and escape calendar text', () => {
+  const academicYear=plan([closure({label:'Training <all staff>, briefing; room \\ A\nSecond line'})]);
+  const calendar=buildEventsCalendar([],yearId,{academicYear}).replace(/\r\n /g,'');
+  assert.ok(calendar.includes('SUMMARY:Training <all staff>\\, briefing\\; room \\\\ A\\nSecond line\r\n'));
 });

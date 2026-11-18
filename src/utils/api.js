@@ -371,7 +371,8 @@ function publicYear(value, withHolidays = false) {
     endDate: DATE.test(String(value?.endDate || '')) ? value.endDate : '',
   };
   if (withHolidays) {
-    year.holidays = (Array.isArray(value?.holidays) ? value.holidays : []).map((holiday) => ({
+    if (!Array.isArray(value?.holidays)) throw new ApiError('Could not read saved holidays.');
+    year.holidays = value.holidays.map((holiday) => ({
       id: canonicalUuid(holiday?.id, 'Holiday'),
       holidayType: publicHolidayType(holiday?.holidayType),
       label: String(holiday?.label || ''),
@@ -396,13 +397,14 @@ export function createAcademicYearApi({
   },
 } = {}) {
   async function request(path, options, fallback) {
-    const operationContext = serverManagedAuth ? captureServerOperationContext() : null;
+    const { operationContext: suppliedContext, ...requestOptions } = options;
+    const operationContext = serverManagedAuth ? suppliedContext || captureServerOperationContext() : null;
     let response;
     try {
       const session = serverManagedAuth ? null : await getSession();
       if (!serverManagedAuth && !session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
       const init = {
-        ...options,
+        ...requestOptions,
         credentials: 'omit',
         headers: { ...options?.headers, ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.access_token}` }) },
       };
@@ -427,12 +429,14 @@ export function createAcademicYearApi({
       const { payload, requestId } = await request(`/api/academic-years?${query}`, { method: 'GET' }, 'Could not load academic years.');
       return { academicYears: (Array.isArray(payload?.academicYears) ? payload.academicYears : []).map((year) => publicYear(year)), requestId };
     },
-    async load(organisationId, academicYearId) {
+    async load(organisationId, academicYearId, { signal, operationContext } = {}) {
       canonicalUuid(organisationId, 'Organisation');
       canonicalUuid(academicYearId, 'Academic year');
       const query = new URLSearchParams({ organisationId, academicYearId });
-      const { payload, requestId } = await request(`/api/academic-year?${query}`, { method: 'GET' }, 'Could not load the academic year.');
-      return { plan: publicYear(payload?.plan, true), requestId };
+      const { payload, requestId } = await request(`/api/academic-year?${query}`, { method: 'GET', signal, operationContext }, 'Could not load the academic year.');
+      const plan = publicYear(payload?.plan, true);
+      if (plan.id !== academicYearId) throw new ApiError('Could not read the academic year.');
+      return { plan, requestId };
     },
     async save(organisationId, plan) {
       canonicalUuid(organisationId, 'Organisation');
@@ -447,5 +451,5 @@ export function createAcademicYearApi({
 
 const academicYearApi = createAcademicYearApi();
 export const fetchAcademicYears = (organisationId) => academicYearApi.list(organisationId);
-export const fetchAcademicYearPlan = (organisationId, academicYearId) => academicYearApi.load(organisationId, academicYearId);
+export const fetchAcademicYearPlan = (...args) => academicYearApi.load(...args);
 export const saveAcademicYearPlan = (organisationId, plan) => academicYearApi.save(organisationId, plan);

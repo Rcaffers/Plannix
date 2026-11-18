@@ -71,13 +71,15 @@ export function AcademicYearProvider({ children }) {
 const YearContext = React.createContext(null);
 export function useAcademicYear() {
   const { year } = React.useContext(YearContext);
-  return { selectedAcademicYearId: year,
+  return { organisationId:mockUser.organisationId, selectedAcademicYearId: year,
     academicYear: { id: year, label: '2026/27', startDate: '2026-09-01', endDate: '2027-08-31' },
     isLoading: false, registerAcademicYearChangeGuard: guard => { yearGuard = guard; return () => { yearGuard = () => true; }; } };
 }
 export function TimetableLayoutProvider({ children }) { return children; }
 export function ClassProvider({ children }) { return children; }
 export function TimetableSessionProvider({ children }) { return children; }
+
+export async function fetchAcademicYearPlan(_organisationId, id) { return { plan:{ id, label:'2026/27', startDate:'2026-09-01', endDate:'2027-08-31', holidays:[] } }; }
 
 export const eventApi = {
   async list() { return { events: [] }; },

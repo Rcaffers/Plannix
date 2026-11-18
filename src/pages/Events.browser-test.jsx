@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import Events from './Events.jsx';
+import { serverManagedAuth, setServerSessionContext } from '../utils/serverAuthTransport.js';
 import '../styles/base.css';
 import '../styles/accessibility.css';
 export { importSourceError } from '../utils/importPreviewApi.js';
@@ -18,8 +19,16 @@ export const extractImportPreview = async () => ({ destination: 'events', entrie
 const YEAR_A = '10000000-0000-4000-8000-000000000001';
 const YEAR_B = '10000000-0000-4000-8000-000000000002';
 const USER_A = '30000000-0000-4000-8000-000000000001';
+const ORG = '40000000-0000-4000-8000-000000000001';
+const savedHolidays = new Map([[YEAR_A, []], [YEAR_B, []]]);
+let holidayFailure = false;
+let holidayGate = null;
+let holidayTerminal = 0;
 const USER_B = '30000000-0000-4000-8000-000000000002';
 let currentUser = USER_A;
+let sessionVersion = 1;
+const adoptSession = () => setServerSessionContext(`__Host-plannix-s-${++sessionVersion}`, 'a'.repeat(43), currentUser);
+if (serverManagedAuth) adoptSession();
 let downloaded = null;
 const originalAnchorClick = HTMLAnchorElement.prototype.click;
 URL.createObjectURL = blob => { downloaded = { blob, filename:null }; return 'blob:plannix-events-test'; };
@@ -47,11 +56,24 @@ const register = fn => { guard = fn; return () => { guard = () => true; }; };
 export function useAcademicYear() {
   const [id, setId] = useState(selectedYear);
   React.useEffect(() => { yearListeners.add(setId); return () => yearListeners.delete(setId); }, []);
-  return { academicYears: [{ id: YEAR_A }, { id: YEAR_B }], selectedAcademicYearId: id,
+  return { organisationId:ORG, academicYears: [{ id: YEAR_A }, { id: YEAR_B }], selectedAcademicYearId: id,
     academicYear: { id, label: id === YEAR_A ? '2026/27' : '2027/28',
       startDate: missingBoundary && id === YEAR_A ? '' : id === YEAR_A ? '2026-09-01' : '2027-09-01',
-      endDate: id === YEAR_A ? '2027-08-31' : '2028-08-31' },
+      endDate: id === YEAR_A ? '2027-08-31' : '2028-08-31',
+      holidays: currentUser === USER_A ? savedHolidays.get(id) : [] },
     isLoading: false, registerAcademicYearChangeGuard: register };
+}
+export async function fetchAcademicYearPlan(organisationId, id, options = {}) {
+  const user = currentUser;
+  calls.push({ action:'year', id, user, signal:options.signal });
+  try {
+    if (holidayGate) await holidayGate;
+    if (holidayFailure) throw Error('Synthetic holiday read failure');
+    return { plan: { id, label:id === YEAR_A ? '2026/27' : '2027/28',
+      startDate:id === YEAR_A ? '2026-09-01' : '2027-09-01',
+      endDate:id === YEAR_A ? '2027-08-31' : '2028-08-31',
+      holidays:structuredClone(user === USER_A ? savedHolidays.get(id) : []) } };
+  } finally { holidayTerminal += 1; }
 }
 function fail() { const failure = nextFailure; nextFailure = null; if (failure) throw failure; }
 export const eventApi = {
@@ -72,7 +94,7 @@ const host = document.createElement('div'); document.body.append(host);
 const root = createRoot(host);
 function EventsFixture() {
   const [userId, setUserId] = useState(USER_A);
-  window.switchEventsUser = next => { currentUser = next; setUserId(next); };
+  window.switchEventsUser = next => { currentUser = next; if (serverManagedAuth) adoptSession(); setUserId(next); };
   return <Events userId={userId} />;
 }
 const router = createMemoryRouter([
@@ -629,6 +651,54 @@ async function run() {
   records.set(YEAR_B, savedBeforePreviewExport);
   click('Discard preview'); await settle();
   click('Hide events');
+  const originalYearBRecords = records.get(YEAR_B);
+  records.set(YEAR_B, []);
+  savedHolidays.set(YEAR_B, [
+    {id:'50000000-0000-4000-8000-000000000001',label:'Synthetic winter closure',holidayType:'school',startDate:'2027-12-20',endDate:'2028-01-03'},
+    {id:'50000000-0000-4000-8000-000000000002',label:'Synthetic INSET',holidayType:'school',startDate:'2027-09-01',endDate:'2027-09-01'},
+  ]);
+  flushSync(() => yearSetter(YEAR_A)); await settle();
+  flushSync(() => yearSetter(YEAR_B)); await settle();
+  check(!button('Export events').disabled && host.textContent.includes('0 of 500 events'),
+    'saved holidays and INSET enable export without personal events');
+  click('Export events'); await settle();
+  const closureCalendar = await downloaded.blob.text();
+  check((closureCalendar.match(/BEGIN:VEVENT/g)||[]).length === 2
+    && closureCalendar.includes('SUMMARY:Synthetic INSET')
+    && closureCalendar.includes('DTEND;VALUE=DATE:20280104'),
+    'holiday-only export includes each saved closure once with exclusive range ends');
+  const beforeFailedHoliday = downloaded;
+  holidayFailure = true;
+  click('Export events'); await settle();
+  check(downloaded === beforeFailedHoliday && host.querySelector('.events-export + .events-error'),
+    'a failed holiday read blocks the whole export even when the events read succeeds');
+  holidayFailure = false;
+  if (serverManagedAuth) {
+    let releaseReplacement;
+    holidayGate = new Promise(resolve => { releaseReplacement = resolve; });
+    const terminalBeforeReplacement = holidayTerminal;
+    click('Export events'); await settle();
+    adoptSession();
+    holidayGate = null; releaseReplacement();
+    for(let i=0;(holidayTerminal <= terminalBeforeReplacement || button('Preparing export…')) && i<80;i++) await tick();
+    check(holidayTerminal > terminalBeforeReplacement && !button('Preparing export…')
+      && downloaded === beforeFailedHoliday && !host.querySelector('.events-export + .events-error'),
+      'same-account session replacement rejects the held export using the production context guard');
+  }
+  let releaseHoliday;
+  holidayGate = new Promise(resolve => { releaseHoliday = resolve; });
+  const previousTerminal = holidayTerminal;
+  click('Export events'); await settle();
+  flushSync(() => window.switchEventsUser(USER_B)); await settle();
+  holidayGate = null; releaseHoliday();
+  for(let i=0;holidayTerminal <= previousTerminal && i<80;i++) await tick();
+  await settle();
+  check(holidayTerminal > previousTerminal && downloaded === beforeFailedHoliday
+    && button('Export events').disabled,
+    'held holiday read reaches its terminal handler without downloading old-account closures');
+  savedHolidays.set(YEAR_B, []);
+  records.set(YEAR_B, originalYearBRecords);
+  flushSync(() => window.switchEventsUser(USER_A)); await settle();
   const priorDownload = downloaded;
   let releaseExport;
   listGate = new Promise(resolve => { releaseExport = resolve; });

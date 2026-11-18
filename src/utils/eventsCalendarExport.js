@@ -53,11 +53,18 @@ export function eventsCalendarFileName(year) {
   return `plannix-events-${label}.ics`;
 }
 
-export function buildEventsCalendar(events, academicYearId, { now = new Date() } = {}) {
-  if (!CANONICAL_EVENT_UUID.test(academicYearId) || !Array.isArray(events) || !events.length
+export function buildEventsCalendar(events, academicYearId, { now = new Date(), academicYear } = {}) {
+  const holidays = academicYear?.holidays ?? [];
+  if (!CANONICAL_EVENT_UUID.test(academicYearId) || !Array.isArray(events) || !Array.isArray(holidays)
+    || (!events.length && !holidays.length)
     || !Number.isFinite(now?.getTime?.())) throw new Error('Saved events are unavailable for export.');
+  if (academicYear && (academicYear.id !== academicYearId || !Array.isArray(academicYear.holidays)
+    || !realEventDate(academicYear.startDate) || !realEventDate(academicYear.endDate)
+    || academicYear.startDate > academicYear.endDate)) throw new Error('Saved academic year is invalid.');
   const stamp = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  // Exchange import requires METHOD even for a one-off calendar file.
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Plannix//Events Export//EN',
+    'METHOD:PUBLISH',
     'CALSCALE:GREGORIAN', ...LONDON_ZONE];
   const ids = new Set();
   for (const event of events) {
@@ -83,12 +90,29 @@ export function buildEventsCalendar(events, academicYearId, { now = new Date() }
     if (fields.notes) lines.push(`DESCRIPTION:${escapeText(fields.notes)}`);
     lines.push('END:VEVENT');
   }
+  const holidayIds = new Set();
+  for (const holiday of holidays) {
+    if (!CANONICAL_EVENT_UUID.test(holiday?.id) || holidayIds.has(holiday.id)
+      || !['school', 'public'].includes(holiday.holidayType)
+      || !realEventDate(holiday.startDate) || !realEventDate(holiday.endDate)
+      || holiday.startDate > holiday.endDate || holiday.startDate < academicYear.startDate
+      || holiday.endDate > academicYear.endDate || typeof holiday.label !== 'string'
+      || !holiday.label.trim() || holiday.label.trim().length > 200
+      || /[\p{Cc}]/u.test(holiday.label.replace(/[\r\n\t]/g, ''))) throw new Error('Saved holiday data is invalid.');
+    holidayIds.add(holiday.id);
+    // INSET and other closures are saved as holidays with permanent row IDs.
+    lines.push('BEGIN:VEVENT', `UID:holiday-${holiday.id}@plannix.co.uk`, `DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${compactDate(holiday.startDate)}`);
+    if (holiday.endDate !== '9999-12-31') lines.push(`DTEND;VALUE=DATE:${nextDate(holiday.endDate)}`);
+    else if (holiday.startDate !== holiday.endDate) throw new Error('Holiday end is outside the calendar date range.');
+    lines.push(`SUMMARY:${escapeText(holiday.label)}`, 'END:VEVENT');
+  }
   lines.push('END:VCALENDAR');
   return `${lines.map(fold).join('\r\n')}\r\n`;
 }
 
 export function downloadEventsCalendar(contents, filename, browser = globalThis) {
-  const url = browser.URL.createObjectURL(new browser.Blob([contents], { type:'text/calendar;charset=utf-8' }));
+  const url = browser.URL.createObjectURL(new browser.Blob([contents], { type:'text/calendar;charset=utf-8;method=PUBLISH' }));
   try {
     const link = browser.document.createElement('a');
     link.href = url;

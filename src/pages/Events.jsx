@@ -3,6 +3,7 @@ import { Link, useBlocker } from 'react-router-dom';
 import SettingsSubnav from '../components/SettingsSubnav';
 import ImportPreviewPanel from '../components/ImportPreviewPanel.jsx';
 import { useAcademicYear } from '../context/AcademicYearContext';
+import { fetchAcademicYearPlan } from '../utils/api.js';
 import { eventApi } from '../utils/eventApi.js';
 import { serverManagedAuth, captureServerOperationContext, assertServerOperationContext } from '../utils/serverAuthTransport.js';
 import { safeRequestReference } from '../utils/requestReference.js';
@@ -21,7 +22,7 @@ const uncertainResult = error => ![400, 401, 403, 404, 409, 413, 422, 429].inclu
 export default function Events({ userId }) {
   const [showWeekendEvents, setShowWeekendEvents] = useWeekendEventsPreference(userId);
   const [preferenceError, setPreferenceError] = useState('');
-  const { selectedAcademicYearId, academicYear, isLoading: yearLoading,
+  const { organisationId, selectedAcademicYearId, academicYear, isLoading: yearLoading,
     error: yearError, requestReference: yearReference, registerAcademicYearChangeGuard } = useAcademicYear();
   const [events, setEvents] = useState([]);
   const [listStatus, setListStatus] = useState('idle');
@@ -37,7 +38,7 @@ export default function Events({ userId }) {
   const [loadedScope, setLoadedScope] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
-  const scopeKey = `${userId || ''}:${scopeOf(selectedAcademicYearId, academicYear)}`;
+  const scopeKey = `${userId || ''}:${organisationId || ''}:${scopeOf(selectedAcademicYearId, academicYear)}`;
   const scopeRef = useRef(scopeKey);
   scopeRef.current = scopeKey;
   const listGeneration = useRef(0);
@@ -158,29 +159,31 @@ export default function Events({ userId }) {
   }, [scopeKey, ready, load]);
 
   async function exportSavedEvents() {
-    if (!ready || !listReady || loadedScope !== scopeKey || !events.length
+    if (!ready || yearError || !listReady || loadedScope !== scopeKey || (!events.length && !academicYear.holidays?.length)
       || pendingRef.current || destructiveReloadRef.current || exportController.current) return;
     const key = scopeKey;
     const yearId = selectedAcademicYearId;
-    const year = academicYear;
     const controller = new AbortController();
     exportController.current = controller;
     setExporting(true); setExportError('');
     let context = null;
     try {
       context = serverManagedAuth ? captureServerOperationContext(userId) : null;
-      const result = await eventApi.list(yearId, { signal:controller.signal, operationContext:context });
+      const [result, savedYear] = await Promise.all([
+        eventApi.list(yearId, { signal:controller.signal, operationContext:context }),
+        fetchAcademicYearPlan(organisationId, yearId, { signal:controller.signal, operationContext:context }),
+      ]);
       if (controller.signal.aborted || scopeRef.current !== key) return;
       if (context) assertServerOperationContext(context);
-      if (!result.events.length) {
+      if (!result.events.length && !savedYear.plan.holidays.length) {
         setEvents([]);
-        setExportError('There are no saved events to export for this academic year.');
+        setExportError('There are no saved events, holidays or INSET days to export for this academic year.');
         return;
       }
-      const calendar = buildEventsCalendar(result.events, yearId);
+      const calendar = buildEventsCalendar(result.events, yearId, { academicYear: savedYear.plan });
       if (controller.signal.aborted || scopeRef.current !== key) return;
       if (context) assertServerOperationContext(context);
-      downloadEventsCalendar(calendar, eventsCalendarFileName(year));
+      downloadEventsCalendar(calendar, eventsCalendarFileName(savedYear.plan));
       setAnnouncement('Saved events calendar downloaded.');
     } catch {
       let currentSession = true;
@@ -471,10 +474,10 @@ export default function Events({ userId }) {
         </button> : null}</div>
       <div className="events-export">
         <button type="button" className="settings-reset" onClick={exportSavedEvents}
-          disabled={!listReady || loadedScope !== scopeKey || !events.length || pending || destructiveReloading || exporting}>
+          disabled={!!yearError || !listReady || loadedScope !== scopeKey || (!events.length && !academicYear.holidays?.length) || pending || destructiveReloading || exporting}>
           {exporting ? 'Preparing export…' : 'Export events'}
         </button>
-        <p className="settings-hint">Download a one-off copy to import into your calendar. Later changes in Plannix won’t update the exported copy.</p>
+        <p className="settings-hint">Download a one-off copy of saved events, holidays and INSET days to import into your calendar. Later changes in Plannix won’t update the exported copy.</p>
       </div>
       {exportError ? <p className="events-error" role="alert">{exportError}</p> : null}
       <button ref={addRef} type="button" className="add-row-button" onClick={() => openEditor()} disabled={pending || destructiveReloading || !listReady || conflict || recovery || !canAddEvent(events)}>Add event</button>

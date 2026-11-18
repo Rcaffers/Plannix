@@ -8,9 +8,9 @@ import { spawn } from 'node:child_process';
 const directory = await mkdtemp(path.join(tmpdir(), 'plannix-events-browser-'));
 let chrome; let socket;
 try {
-  await build({ configFile: false, logLevel: 'error', define: { 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
+  await build({ configFile: false, logLevel: 'error', define: { 'process.env.NODE_ENV': '"production"', 'import.meta.env.VITE_PLANNIX_AUTH_MODE': JSON.stringify(process.env.EVENTS_TEST_AUTH_MODE || 'bearer') }, esbuild: { jsx: 'automatic' },
     plugins: [{ name: 'events-test-mocks', enforce: 'pre', resolveId(source, importer) {
-      if (importer?.endsWith('/Events.jsx') && ['../context/AcademicYearContext', '../utils/eventApi.js'].includes(source)) return path.resolve('src/pages/Events.browser-test.jsx');
+      if (importer?.endsWith('/Events.jsx') && ['../context/AcademicYearContext', '../utils/eventApi.js', '../utils/api.js'].includes(source)) return path.resolve('src/pages/Events.browser-test.jsx');
       if (importer?.endsWith('/ImportPreviewPanel.jsx') && ['../context/AcademicYearContext.jsx', '../utils/aiConnectionApi.js', '../utils/importPreviewApi.js'].includes(source)) return path.resolve('src/pages/Events.browser-test.jsx');
     } }], build: { outDir: directory, emptyOutDir: false, lib: {
       entry: 'src/pages/Events.browser-test.jsx', formats: ['iife'], name: 'EventsTest', fileName: () => 'test.js', cssFileName: 'test',

@@ -16,7 +16,7 @@ try {
           || source === './utils/serverAuthController' || source === './utils/serverAuthTransport') return null;
         return path.resolve('src/pages/Events.history-browser-test.jsx');
       }
-      if (importer?.endsWith('/Events.jsx') && ['../context/AcademicYearContext', '../utils/eventApi.js'].includes(source)) {
+      if (importer?.endsWith('/Events.jsx') && ['../context/AcademicYearContext', '../utils/eventApi.js', '../utils/api.js'].includes(source)) {
         return path.resolve('src/pages/Events.history-browser-test.jsx');
       }
       if (importer?.endsWith('/ImportPreviewPanel.jsx') && ['../context/AcademicYearContext.jsx', '../utils/aiConnectionApi.js', '../utils/importPreviewApi.js'].includes(source)) {

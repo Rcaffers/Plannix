@@ -144,10 +144,10 @@ export function AcademicYearProvider({ children, user }) {
   }, [organisationId, loadYear, user?.id]);
 
   const value = useMemo(() => ({
-    academicYears, selectedAcademicYearId, academicYear, isLoading, isSaving, error, requestReference,
+    organisationId, academicYears, selectedAcademicYearId, academicYear, isLoading, isSaving, error, requestReference,
     selectAcademicYear, createAcademicYear, saveAcademicYear, clearUserAcademicYear,
     registerAcademicYearChangeGuard,
-  }), [academicYears, selectedAcademicYearId, academicYear, isLoading, isSaving, error, requestReference,
+  }), [organisationId, academicYears, selectedAcademicYearId, academicYear, isLoading, isSaving, error, requestReference,
     selectAcademicYear, createAcademicYear, saveAcademicYear, clearUserAcademicYear,
     registerAcademicYearChangeGuard]);
   return <AcademicYearContext.Provider value={value}>{children}</AcademicYearContext.Provider>;
