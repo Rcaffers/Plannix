@@ -42,11 +42,12 @@ try {
   const measurements = [];
   for (const width of [320, 375, 390, 430, 768, 820, 1024, 1366]) {
     await send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false }, sessionId);
-    const measured = await send('Runtime.evaluate', { expression: `(()=>{const page=document.querySelector('.events-page');const host=page.parentElement;host.style.width='';host.style.removeProperty('--container');host.querySelector('.classes-subnav').style.display='';const rect=node=>{const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom}};const card=page.querySelector('.events-settings-card');const sections=[...card.querySelectorAll(':scope > .events-card-section')].map(node=>({...rect(node),divider:getComputedStyle(node).borderTopWidth}));return {viewport:innerWidth,scroll:document.documentElement.scrollWidth,nav:getComputedStyle(host.querySelector('.classes-subnav')).display,card:rect(card),sections,nestedCards:card.querySelectorAll('.settings-timetable-form').length}})()`, returnByValue: true }, sessionId);
+    const measured = await send('Runtime.evaluate', { expression: `(()=>{const page=document.querySelector('.events-page');const host=page.parentElement;host.style.width='';host.style.removeProperty('--container');host.querySelector('.classes-subnav').style.display='';const rect=node=>{const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom}};const card=page.querySelector('.events-settings-card');const sections=[...card.querySelectorAll(':scope > .events-card-section')].map(node=>({...rect(node),divider:getComputedStyle(node).borderTopWidth}));return {viewport:innerWidth,scroll:document.documentElement.scrollWidth,nav:getComputedStyle(host.querySelector('.classes-subnav')).display,card:rect(card),sections,add:rect(page.querySelector('.events-list-section > .add-row-button')),exportBlock:rect(page.querySelector('.events-export')),directlyAfterAdd:page.querySelector('.events-list-section > .add-row-button').nextElementSibling===page.querySelector('.events-export'),nestedCards:card.querySelectorAll('.settings-timetable-form').length}})()`, returnByValue: true }, sessionId);
     assert.ok(measured.result?.value, JSON.stringify(measured.exceptionDetails || measured));
     measurements.push(measured.result.value);
     assert.ok(measured.result.value.scroll <= width + 1, `${width}px viewport overflows to ${measured.result.value.scroll}px`);
     const { card, sections, nestedCards } = measured.result.value;
+    assert.ok(measured.result.value.directlyAfterAdd && measured.result.value.exportBlock.top >= measured.result.value.add.bottom + 12, `${width}px export and explanation sit directly below Add event with existing spacing`);
     assert.ok(card.left >= -1 && card.right <= width + 1, `${width}px outer card fits viewport`);
     assert.equal(nestedCards, 0, `${width}px has no nested settings cards`);
     assert.equal(sections.length, 3, `${width}px renders display, Events and AI sections inside one card`);
@@ -57,6 +58,11 @@ try {
   console.log(JSON.stringify(measurements));
   const exportReady = await send('Runtime.evaluate', { expression: `new Promise((resolve,reject)=>{window.switchEventsUser('30000000-0000-4000-8000-000000000001');window.selectEventsYear('10000000-0000-4000-8000-000000000001');let n=0;const timer=setInterval(()=>{const button=[...document.querySelectorAll('button')].find(item=>item.textContent==='Export events');if(button&&!button.disabled){clearInterval(timer);button.focus();resolve(true)}else if(++n>80){clearInterval(timer);reject(Error('Saved export was not ready'))}},25)})`, awaitPromise: true, returnByValue: true }, sessionId);
   assert.equal(exportReady.result.value,true);
+  await send('Runtime.evaluate', {expression:`document.querySelector('.events-list-section > .add-row-button').focus()`},sessionId);
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9},sessionId);
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9},sessionId);
+  const exportTab=await send('Runtime.evaluate',{expression:`document.activeElement===document.querySelector('.events-export button')`,returnByValue:true},sessionId);
+  assert.equal(exportTab.result.value,true,'Tab moves from Add event directly to Export events');
   const beforeExport = await send('Runtime.evaluate', { expression: 'window.eventsExportCount || 0', returnByValue:true }, sessionId);
   const exportKey = async type => send('Input.dispatchKeyEvent', { type, key:'Enter', code:'Enter', windowsVirtualKeyCode:13, ...(type==='keyDown'?{text:'\r'}:{}) }, sessionId);
   await exportKey('keyDown'); await exportKey('keyUp');
