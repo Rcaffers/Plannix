@@ -54,6 +54,22 @@ try {
     if (width <= 390) assert.equal(measured.result.value.stacked,true,`${width}px update actions stack`);
     if (width >= 768) assert.equal(measured.result.value.stacked,false,`${width}px update actions sit side by side`);
   }
+  const recoveryAvailable = await send('Runtime.evaluate', {expression:'typeof window.prepareDeviceRecoveryLayout === "function"',returnByValue:true},sessionId);
+  if(recoveryAvailable.result.value) {
+    const prepared=await send('Runtime.evaluate',{expression:'window.prepareDeviceRecoveryLayout().then(()=>true)',awaitPromise:true,returnByValue:true},sessionId);
+    assert.equal(prepared.result.value,true,'device recovery fixture ready');
+    for(const width of widths) {
+      await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false},sessionId);
+      const result=await send('Runtime.evaluate',{expression:`(()=>{
+        const button=[...document.querySelectorAll('button')].find(node=>node.textContent==='Enable details on this device');
+        button.focus();const r=button.getBoundingClientRect();
+        return {focused:document.activeElement===button,left:r.left,right:r.right,height:r.height,scroll:document.documentElement.scrollWidth};
+      })()`,returnByValue:true},sessionId);
+      const value=result.result.value;
+      assert.ok(value.focused && value.left>=0 && value.right<=width && value.height>=44 && value.scroll<=width+1,
+        `${width}px recovery action fits viewport and accepts keyboard focus`);
+    }
+  }
   console.log('Notifications rendered flow and update notice at 8 responsive widths passed.');
 } finally {
   socket?.close();

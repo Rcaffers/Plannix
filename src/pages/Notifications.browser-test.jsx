@@ -16,6 +16,9 @@ let configEnabled = true;
 let failStatus = false;
 let policyEnabled = reloadDetail;
 let policyNumber = 1;
+let detailGate = true;
+const macPolicy = {enabled:true, version:'synthetic-mac-policy'};
+const policyRequests = [];
 let selectorEpoch = 0;
 let selector = null;
 window.staleDetailBinding = false;
@@ -87,9 +90,9 @@ export const currentPushSubscription = async () => {
 export const disableCurrentDevice = async () => { calls.push('remove'); subscribed = false; };
 export const pushRequest = async (path, body) => {
   calls.push(path);
-  if (['status', 'register', 'test'].includes(path) && !lockDepth) throw Error('Device operation occurred outside Web Lock');
+  if (['status', 'register', 'test', 'detail-policy/status', 'detail-policy/set'].includes(path) && !lockDepth) throw Error('Device operation occurred outside Web Lock');
   if (path === 'config') return { configured: configEnabled, publicKey: configEnabled ? 'synthetic-public-key' : null,
-    detailDisplayAvailable:serverManagedAuth };
+    detailDisplayAvailable:serverManagedAuth && detailGate };
   if (path === 'status') { if (failStatus) throw Error('Synthetic status failure');
     if (window.holdNextPushStatus) {
       window.holdNextPushStatus=false; window.pushStatusHeld=true;
@@ -110,14 +113,27 @@ export const pushRequest = async (path, body) => {
         policyVersion:`ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}`,
       }); });
     }
-    return {enabled:policyEnabled,policyVersion:`ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}`};
+    const observed = {enabled:policyEnabled,policyVersion:`ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}`};
+    if (window.rotateAfterPolicyObservation) {window.rotateAfterPolicyObservation=false;policyNumber++;}
+    if (window.invalidateBindingAfterObservation) {window.invalidateBindingAfterObservation=false;window.staleDetailBinding=true;}
+    return observed;
   }
   if (path === 'detail-policy/set') {
+    policyRequests.push({...body});
+    if (body.endpoint !== subscription.endpoint) throw Error('Wrong device selected');
+    if (window.rotateNextPolicy) { window.rotateNextPolicy=false; policyNumber++; }
+
     if (window.failNextDetailPolicy) {window.failNextDetailPolicy=false;throw Error('Synthetic policy failure');}
     if (body.policyVersion !== `ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}`)
       throw Error('Synthetic stale policy version');
     policyEnabled=body.enabled; policyNumber++;
-    return {enabled:policyEnabled,policyVersion:`ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}`};
+    const committed = {enabled:policyEnabled,policyVersion:`ca000000-0000-4000-8000-${String(policyNumber).padStart(12,'0')}`};
+    if (window.holdNextPolicyResponse) {
+      window.holdNextPolicyResponse=false; window.policyResponseHeld=true;
+      await new Promise(resolve => {window.releasePolicyResponse=resolve;});
+    }
+    if (window.loseNextPolicyResponse) {window.loseNextPolicyResponse=false;throw Error('Synthetic lost policy response');}
+    return committed;
   }
   if (path === 'observe') return { state:'absent', version:null };
   if (path === 'register') {
@@ -153,6 +169,12 @@ const waitFor = async (condition, label) => {
   throw Error(`${label} did not settle`);
 };
 const button = label => [...document.querySelectorAll('button')].find(node => node.textContent === label);
+if (serverManagedAuth) window.prepareDeviceRecoveryLayout = async () => {
+  policyEnabled=false; selector=null;
+  await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+  await waitFor(() => Boolean(button('Enable details on this device')
+    && !button('Enable details on this device').disabled), 'recovery layout ready');
+};
 const clickButton = label => {
   const target = button(label);
   if (!target) throw Error(`Missing button: ${label}`);
@@ -294,6 +316,7 @@ const chooseTime = value => {
     && !document.querySelector('.morning-preview-content')?.textContent.includes('Late event'),
   'late successful events cannot replace a newer date');
   check(document.body.textContent.includes('Not subscribed'), 'initial device state');
+  check(!button('Enable details on this device'), 'no device recovery without saved consent and binding');
   button('Enable notifications').click(); await tick(); await tick();
   check(calls.filter(item => item === 'permission').length === 1, 'explicit click requests permission once');
   check(calls.includes('register') && document.body.textContent.includes('Subscribed'), 'registration reaches server');
@@ -325,6 +348,88 @@ const chooseTime = value => {
       'schedule save completion');
     clickButton('Enable lesson details');
     await waitFor(() => document.body.textContent.includes('Lesson details and event titles enabled'),'both-detail readback');
+    // Recover an existing device without rewriting consent or changing subscriptions.
+    const recoverLabel = 'Enable details on this device';
+    const reloadDevice = async () => {
+      await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications');
+      await waitFor(() => Boolean(document.querySelector('.morning-notification-details'))
+        && !document.body.textContent.includes('Checking…')
+        && !document.body.textContent.includes('Checking details…'), 'device readiness load');
+    };
+    const preferenceCount = window.summaryPreferenceSaves.length;
+    const savedAccount = JSON.stringify(window.summaryPreferenceSaves.at(-1));
+    const subscriptionsBefore = calls.filter(item => ['register','remove','unsubscribe'].includes(item)).length;
+    const macBefore = JSON.stringify(macPolicy);
+    policyEnabled=false; selector=null; await reloadDevice();
+    await waitFor(() => Boolean(button(recoverLabel) && !button(recoverLabel).disabled), 'disabled-policy recovery available');
+    check(button('Disable lesson details') && button('Disable event titles'), 'recovery preserves both saved account consents');
+    const recoverWrites = policyRequests.length;
+    // Even an explicit status retry may only read a disabled policy.
+    failStatus=true; await reloadDevice(); failStatus=false;
+    await waitFor(() => Boolean(button('Retry notification status')), 'failed status offers retry');
+    clickButton('Retry notification status');
+    await waitFor(() => Boolean(button(recoverLabel) && !button(recoverLabel).disabled), 'read-only status retry completed');
+    check(!policyEnabled && policyRequests.length === recoverWrites, 'Retry notification status never enables a disabled policy');
+    chooseTime('08:55'); await tick();
+    window.holdNextPolicyResponse=true; window.policyResponseHeld=false;
+    clickButton(recoverLabel); clickButton(recoverLabel);
+    await waitFor(() => window.policyResponseHeld, 'admitted policy write response held');
+    check(document.body.textContent.includes('Updating details…')
+      && !document.body.textContent.includes('Details are enabled and ready on this device.'), 'pending write cannot claim verified readiness');
+    window.releasePolicyResponse();
+    await waitFor(() => document.body.textContent.includes('Details are enabled and ready on this device.'), 'recovery confirms policy and worker readback');
+    check(policyRequests.length === recoverWrites+1 && policyEnabled && selector
+      && !button(recoverLabel), 'duplicate clicks make one write and confirmed recovery removes action');
+    check(window.summaryPreferenceSaves.length === preferenceCount
+      && JSON.stringify(window.summaryPreferenceSaves.at(-1)) === savedAccount
+      && calls.filter(item => ['register','remove','unsubscribe'].includes(item)).length === subscriptionsBefore
+      && JSON.stringify(macPolicy) === macBefore
+      && document.querySelector('#morning-delivery-time').value === '08:55', 'device-only recovery excludes consent, preferences, subscriptions and Mac policy writes and preserves the scheduling draft');
+    chooseTime('08:50'); await tick();
+
+    policyEnabled=false; selector=null; await reloadDevice();
+    window.rotateAfterPolicyObservation=true;
+    const observedWrites=policyRequests.length;
+    clickButton(recoverLabel);
+    await waitFor(() => document.body.textContent.includes('No request was retried.'), 'observed policy version changed before write');
+    check(!policyEnabled && policyRequests.length === observedWrites, 'recovery cannot adopt a newer policy version between observation and set');
+    await reloadDevice();
+    window.rotateNextPolicy=true;
+    const staleWrites=policyRequests.length;
+    clickButton(recoverLabel);
+    await waitFor(() => document.body.textContent.includes('No request was retried.'), 'stale policy version settles without retry');
+    check(!policyEnabled && policyRequests.length === staleWrites+1, 'stale version cannot enable and is not replayed with a newer version');
+    await reloadDevice();
+    window.invalidateBindingAfterObservation=true;
+    const oldBindingWrites=policyRequests.length;
+    clickButton(recoverLabel);
+    await waitFor(() => document.body.textContent.includes('No request was retried.'), 'installation became stale during recovery');
+    check(policyRequests.length === oldBindingWrites && !button(recoverLabel), 'stale installation cannot enable details or automatically reconnect');
+    window.staleDetailBinding=false; await reloadDevice();
+    window.loseNextPolicyResponse=true;
+    clickButton(recoverLabel);
+    await waitFor(() => document.body.textContent.includes('request was uncertain, but readback confirms'), 'lost policy acknowledgement resolved by readback');
+    check(policyEnabled && selector && policyRequests.length === staleWrites+2, 'uncertain write is read back without a second mutation');
+
+    policyEnabled=false; selector=null; await reloadDevice();
+    window.failSelectorCommit=true;
+    const partialWrites=policyRequests.length;
+    clickButton(recoverLabel);
+    await waitFor(() => document.body.textContent.includes('account settings were not changed. No request was retried.'), 'selector failure settles conservatively');
+    check(policyEnabled && !selector && policyRequests.length === partialWrites+1
+      && !document.body.textContent.includes('Details are enabled and ready on this device.'), 'partial enablement cannot claim worker readiness');
+    window.failSelectorCommit=false;
+    await waitFor(() => Boolean(button('Retry notification status')), 'partial recovery offers retry');
+    clickButton('Retry notification status');
+    await waitFor(() => selector && !button('Retry notification status'), 'status-only repair after partial recovery');
+    check(policyRequests.length === partialWrites+1, 'partial recovery retry does not repeat policy mutation');
+    detailGate=false; policyEnabled=false; selector=null; await reloadDevice();
+    check(!button(recoverLabel), 'server gate off hides device recovery');
+    detailGate=true; window.staleDetailBinding=true; await reloadDevice();
+    check(!button(recoverLabel), 'stale session binding hides device recovery');
+    window.staleDetailBinding=false; policyEnabled=true; await reloadDevice();
+    check(window.summaryPreferenceSaves.length === preferenceCount
+      && JSON.stringify(macPolicy) === macBefore, 'failed and uncertain recovery preserve account consent and the other device');
     clickButton('Disable event titles');
     await waitFor(() => document.body.textContent.includes('Lesson details enabled'),'event withdrawal');
     check(window.summaryPreferenceSaves.at(-1).lessonDetailConsent === true

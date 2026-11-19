@@ -230,14 +230,17 @@ export default function Notifications({ userId, organisationId }) {
       setDetailPolicyEnabled(detail.policyEnabled);
       setDetailSelectorCurrent(detail.selectorCurrent);
       setDetailEnabled(enabled);
-      return { subscribed:true, bound:true, enabled, serverEnabled:detail.policyEnabled === true };
+      return { subscribed:true, bound:true, enabled, serverEnabled:detail.policyEnabled,
+        installationVersion:status.version, policyVersion:policy.policyVersion };
     });
   }
 
-  async function changeDetailPolicy(enabled, context, ticket) {
+  async function changeDetailPolicy(enabled, context, ticket, expected = null) {
     const version = bindingVersion.current;
     if (!detailAvailable || !UUID.test(version || ''))
       throw new Error('Reconnect notifications on this device before enabling details.');
+    if (expected && (expected.installationVersion !== version || !UUID.test(expected.policyVersion || '')))
+      throw new DOMException('Device policy changed.', 'AbortError');
     return withPushDeviceLock(async () => {
       assertDetailAction(context,ticket);
       if (version !== bindingVersion.current) throw new DOMException('Device binding changed.', 'AbortError');
@@ -251,6 +254,8 @@ export default function Notifications({ userId, organisationId }) {
       }, { expectedUserId:userId, operationContext:context });
       assertDetailAction(context,ticket);
       if (version !== bindingVersion.current) throw new DOMException('Device binding changed.', 'AbortError');
+      if (expected && policy.policyVersion !== expected.policyVersion)
+        throw new DOMException('Device policy changed.', 'AbortError');
       const saved = await pushRequest('detail-policy/set', {
         endpoint:subscription.endpoint, installationVersion:version,
         policyVersion:policy.policyVersion, enabled,

@@ -239,7 +239,7 @@ export default function MorningSummaryPanel({ userId, organisationId, detailDevi
         if (!actual.bound) {
           setDetailMessage(`${choice} consent ${desired ? 'enabled' : 'withdrawn'} for this account, but this device binding is stale. Use Disable on this device, then Enable notifications to reconnect.`);
         } else if (actual.enabled !== Boolean(latest.lessonDetailConsent || latest.eventTitleConsent)) {
-          setDetailMessage(`${choice} consent ${desired ? 'enabled' : 'withdrawn'} for this account, but this device is not displaying details. Reconnect notifications, or turn an enabled detail choice off and back on to retry device enablement.`);
+          setDetailMessage(`${choice} consent ${desired ? 'enabled' : 'withdrawn'} for this account, but this device is not displaying details. If its policy is off, use “Enable details on this device”. If the binding is stale, use the reconnect steps above.`);
         } else {
           setDetailMessage(policyError
             ? 'The device request was uncertain, but readback confirms the current consent and display state.'
@@ -256,7 +256,76 @@ export default function MorningSummaryPanel({ userId, organisationId, detailDevi
     }
   }
 
+  async function enableDeviceDetails() {
+    if (!canRecoverDeviceDetails || savingRef.current || reloadingRef.current || conflict
+      || detailDevice.loading || detailDevice.busy) return;
+    let context;
+    try { context = captureServerOperationContext(userId); }
+    catch { setDetailUnknown(true); setDetailMessage('Your session changed. Reload Notifications before trying again.'); return; }
+    const ticket = preferenceGeneration.current;
+    const stillCurrent = () => {
+      assertServerOperationContext(context);
+      if (ticket !== preferenceGeneration.current) throw new DOMException('Account changed.', 'AbortError');
+    };
+    savingRef.current = true; setSaving(true); setDetailMessage('Enabling details on this device…');
+    try {
+      await detailDevice.perform(context, async deviceTicket => {
+        // Read saved consent; never save preferences or register a subscription here.
+        const latest = savedPreferences(await preferenceApi.load(userId, {operationContext:context}));
+        stillCurrent();
+        setPreferences({userId, status:'ready', value:latest, error:'', reference:''});
+        const before = await detailDevice.read(context,deviceTicket);
+        stillCurrent();
+        if (!latest.enabled || !latest.academicYearId || !(latest.lessonDetailConsent || latest.eventTitleConsent)) {
+          setDetailMessage('Saved notification preferences no longer allow details. No device policy was enabled.');
+          return;
+        }
+        if (!before.subscribed || !before.bound) {
+          setDetailMessage('This device binding changed. No device policy was enabled. Reload Notifications to check its status.');
+          return;
+        }
+        if (typeof before.serverEnabled !== 'boolean') {
+          setDetailUnknown(true);
+          setDetailMessage('This device policy could not be verified. Reload Notifications before trying again. No policy request was sent.');
+          return;
+        }
+        let uncertain = false;
+        // An already enabled policy needs only readiness verification, never a new write.
+        if (!before.serverEnabled) {
+          try { await detailDevice.setPolicy(true,context,deviceTicket, {
+            installationVersion:before.installationVersion, policyVersion:before.policyVersion }); }
+          catch { uncertain = true; }
+        }
+        stillCurrent();
+        const actual = await detailDevice.read(context,deviceTicket);
+        stillCurrent();
+        if (actual.bound && actual.serverEnabled && actual.enabled) {
+          setDetailMessage(uncertain
+            ? 'The request was uncertain, but readback confirms details are enabled and ready on this device. Account settings were not changed.'
+            : 'Details are enabled and ready on this device. Account settings were not changed.');
+        } else {
+          setDetailMessage(actual.serverEnabled
+            ? 'This device policy is enabled, but worker readiness could not be confirmed. Retry notification status; account settings were not changed.'
+            : 'Details were not confirmed ready on this device. Current device status is shown; account settings were not changed. No request was retried.');
+        }
+      });
+    } catch {
+      if (ticket === preferenceGeneration.current) {
+        setDetailUnknown(true);
+        setDetailMessage('This device change could not be confirmed. Reload Notifications to check before trying again. Account settings were not changed.');
+      }
+    } finally {
+      if (ticket === preferenceGeneration.current) { savingRef.current = false; setSaving(false); }
+    }
+  }
+
   const detailPreferences = currentPreferences.value || DEFAULT_PREFERENCES;
+  const canRecoverDeviceDetails = serverManagedAuth && currentPreferences.status === 'ready'
+    && detailPreferences.enabled && Boolean(detailPreferences.academicYearId)
+    && (detailPreferences.lessonDetailConsent || detailPreferences.eventTitleConsent)
+    && detailDevice?.available && detailDevice.registered === true && detailDevice.bound
+    && detailDevice.policyEnabled === false && !detailUnknown;
+
   const accountDetails = detailPreferences.lessonDetailConsent && detailPreferences.eventTitleConsent
     ? 'Lesson details and event titles enabled'
     : detailPreferences.lessonDetailConsent ? 'Lesson details enabled'
@@ -398,7 +467,13 @@ export default function MorningSummaryPanel({ userId, organisationId, detailDevi
       </p> : null}
       {currentPreferences.status === 'ready' && accountDetails !== 'Details disabled'
         && detailDevice.bound && !detailDevice.enabled && !detailUnknown && !detailDevice.loading
-        && detailDevice.available ? <p className="settings-hint">Your account consent is saved, but this device is not ready to display details. Use “Retry notification status” above to check this device again. If its subscription or session binding needs reconnecting, use the device controls above.</p> : null}
+        && detailDevice.available ? <p className="settings-hint">Your account consent is saved, but this device is not ready to display details. If its detail policy is off, use “Enable details on this device” below. Otherwise use “Retry notification status” above to check readiness. If its session binding needs reconnecting, use the device controls above.</p> : null}
+      {canRecoverDeviceDetails ? <div className="morning-detail-actions">
+        <button type="button" className="settings-save"
+          disabled={saving || reloading || conflict || detailDevice.loading || detailDevice.busy}
+          onClick={enableDeviceDetails}>Enable details on this device</button>
+        <p className="settings-hint">Uses your saved account consents. This enables only this device; other devices and saved preferences stay unchanged.</p>
+      </div> : null}
       <div className="morning-detail-actions">
         {['lesson','event'].map(kind => {
           const field = kind === 'lesson' ? 'lessonDetailConsent' : 'eventTitleConsent';
