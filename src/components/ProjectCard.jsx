@@ -22,6 +22,8 @@ import {
   mapsFromPlannedClasses,
   resolveSessionClassDisplay,
 } from '../utils/timetablePlannedClasses';
+import TimetableWeekPicker from './TimetableWeekPicker.jsx';
+import { pickerDate } from '../utils/timetableWeekPicker.js';
 import ClassPlacementPalette from './ClassPlacementPalette';
 import PlacedLessonCard from './PlacedLessonCard';
 import TimetableEvents from './TimetableEvents';
@@ -159,7 +161,7 @@ export default function ProjectCard({
   weekendEventsUserId = null,
 }) {
   const { layout, dayLabels, rowSegments, isLoading: layoutLoading, isSaving: layoutSaving, error: layoutError } = useTimetableLayout();
-  const { academicYear, selectedAcademicYearId } = useAcademicYear();
+  const { academicYear, selectedAcademicYearId, isLoading: academicYearLoading } = useAcademicYear();
   const {
     authoritativeEntries: classEntries,
     isLoading: classesLoading,
@@ -177,6 +179,16 @@ export default function ProjectCard({
   }, [dayLabels, isTwoWeekCycle]);
   const dayCount = displayDayLabels.length;
   const [weekStartDate, setWeekStartDate] = useState(() => startOfWeek(new Date()));
+  const [weekPickerScope, setWeekPickerScope] = useState(null);
+  const weekPickerKey = `${sessionState.userId || ''}:${selectedAcademicYearId || ''}:${academicYear?.startDate || ''}:${academicYear?.endDate || ''}`;
+  const canChooseWeek = Boolean(!academicYearLoading && selectedAcademicYearId && academicYear?.id === selectedAcademicYearId
+    && pickerDate(academicYear?.startDate) && pickerDate(academicYear?.endDate)
+    && academicYear.startDate <= academicYear.endDate);
+  const timetableOptionsRef = useRef(null);
+  useEffect(() => {
+    setWeekPickerScope(null);
+    if (timetableOptionsRef.current) timetableOptionsRef.current.open = false;
+  }, [weekPickerKey]);
 
   useEffect(() => {
     if (weekMode !== 'date') {
@@ -228,6 +240,8 @@ export default function ProjectCard({
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
   }, []);
+
+  useEffect(() => { setWeekPickerScope(null); }, [isCompactTimetable, weekMode]);
 
   const isSingleDayTimetable = isCompactTimetable && (weekMode === 'date' || enableFixedPhoneSingleDay);
   const [showWeekendEvents] = useWeekendEventsPreference(weekendEventsUserId);
@@ -336,6 +350,8 @@ export default function ProjectCard({
   const target = weekMode === 'date'
     ? { type: 'date', weekStartDate: formatDateKeyPart(weekStartDate) }
     : activeCollection ? { type: 'recurring', weekId: activeCollection.weekId } : null;
+  const canRestoreDisplayedWeek = weekMode === 'date' && !sessionState.isLoading && !sessionState.isSaving
+    && activeCollection?.weekStartDate === target?.weekStartDate;
   const sessions = useMemo(() => (activeCollection?.sessions || []).map((session, index) =>
     sessionToDisplay(session, periodIndexById, classNameById, `temporary-${index}`)).filter(Boolean),
   [activeCollection?.sessions, periodIndexById, classNameById]);
@@ -498,6 +514,21 @@ export default function ProjectCard({
     }
     updateSessions([]);
     closeLessonModal();
+  }
+
+  function chooseWeek(value) {
+    if (!canChooseWeek || weekPickerScope !== weekPickerKey || value < academicYear.startDate
+      || value > academicYear.endDate || !pickerDate(value)) return;
+    if (window.__plannixConfirmSessionDiscard?.() === false) return;
+    setWeekStartDate(clampWeekStartForDateMode(startOfWeek(pickerDate(value)), timetableMondayBounds));
+    setWeekPickerScope(null);
+  }
+
+  function restoreRepeatingWeek() {
+    if (!canRestoreDisplayedWeek || window.__plannixConfirmSessionDiscard?.() === false) return;
+    void sessionState.removeOverride();
+    if (timetableOptionsRef.current) timetableOptionsRef.current.open = false;
+    timetableOptionsRef.current?.querySelector('summary')?.focus();
   }
 
   function moveWeek(offset) {
@@ -1011,12 +1042,27 @@ export default function ProjectCard({
               <span className="schedule-week-label">{weekCommencingLabel}</span>
             </div>
           )}
-          {target && (enableEditing || sessionState.error || (weekMode === 'date' && sessionState.dated?.overrideExists)) ? (
+          {target && (enableEditing || sessionState.error || (weekMode === 'date' && (!isSingleDayTimetable || sessionState.dated?.overrideExists))) ? (
             <div className="schedule-titlebar-actions">
-              {weekMode === 'date' && sessionState.dated?.overrideExists ? (
-                <button type="button" className="schedule-edit-toggle" disabled={sessionState.isSaving}
-                  onClick={() => sessionState.removeOverride()}>Restore repeating timetable</button>
-              ) : null}
+              {weekMode === 'date' && !isSingleDayTimetable ? <button type="button" className="schedule-edit-toggle schedule-choose-week"
+                aria-haspopup="dialog" aria-expanded={weekPickerScope === weekPickerKey} disabled={!canChooseWeek}
+                onClick={event => { event.currentTarget.focus(); setWeekPickerScope(weekPickerKey); }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg>
+                Choose week
+              </button> : null}
+              {weekMode === 'date' && sessionState.dated?.overrideExists ? (isSingleDayTimetable ?
+                <button type="button" className="schedule-edit-toggle" disabled={!canRestoreDisplayedWeek}
+                  onClick={restoreRepeatingWeek}>Restore repeating timetable</button>
+                : <details ref={timetableOptionsRef} className="schedule-timetable-options" onKeyDown={event => {
+                    if (event.key === 'Escape') { event.preventDefault(); event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); }
+                  }}>
+                  <summary className="schedule-edit-toggle">Timetable options</summary>
+                  <div className="schedule-timetable-options-panel">
+                    <p>Restore this week to its repeating lessons by removing this week’s changes, including an intentionally cleared week.</p>
+                    <button type="button" className="settings-reset" disabled={!canRestoreDisplayedWeek}
+                      onClick={restoreRepeatingWeek}>Restore repeating timetable</button>
+                  </div>
+                </details>) : null}
               {sessionState.error ? (
                 <><button type="button" className="schedule-edit-toggle" onClick={sessionState.retry}>Retry save</button>
                 <button type="button" className="schedule-edit-toggle" onClick={sessionState.reload}>Reload</button></>
@@ -1205,6 +1251,9 @@ export default function ProjectCard({
         </div>
       </div>
 
+      {weekMode === 'date' && !isSingleDayTimetable && canChooseWeek && weekPickerScope === weekPickerKey
+        ? <TimetableWeekPicker displayedWeek={formatDateKeyPart(weekStartDate)} min={academicYear.startDate} max={academicYear.endDate}
+            onChoose={chooseWeek} onClose={() => setWeekPickerScope(null)} /> : null}
       {modalSlot && typeof document !== 'undefined'
         ? createPortal(
             <div className="lesson-modal-backdrop" onClick={closeLessonModal}>

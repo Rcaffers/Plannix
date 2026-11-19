@@ -1067,3 +1067,25 @@
     touch-action: pan-x pan-y;
   }
 }
+
+.schedule-choose-week { display: inline-flex; align-items: center; gap: 6px; }
+.schedule-card:has(.schedule-timetable-options[open]) { overflow: visible; }
+.schedule-timetable-options { position: relative; }
+.schedule-timetable-options > summary { cursor: pointer; }
+.schedule-timetable-options-panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; width: 280px; max-width: calc(100vw - 48px); padding: 16px; border: 1px solid var(--stroke); border-radius: 10px; background: #fcfaf6; box-shadow: var(--shadow); color: var(--text); font-size: .85rem; }
+.schedule-timetable-options-panel p { margin: 0 0 12px; }
+.timetable-week-picker { position: fixed; inset: 0; height: fit-content; margin: auto; width: min(430px, calc(100vw - 32px)); color: var(--text); }
+.timetable-week-picker::backdrop { background: rgba(15, 25, 22, .55); }
+.timetable-week-picker > p { font-size: .9rem; line-height: 1.5; }
+.timetable-calendar-month { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 16px 0; }
+.timetable-calendar-grid [role='row'] { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.timetable-calendar-grid [role='columnheader'] { text-align: center; font-size: .8rem; padding: 8px 0; }
+.timetable-calendar-grid [role='gridcell'] { min-width: 0; }
+.timetable-calendar-grid .is-displayed-week { background: #d6e9df; }
+.timetable-calendar-grid button { width: 100%; min-height: 40px; padding: 4px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.timetable-calendar-grid button:hover:not(:disabled) { background: #c4dfd1; }
+.timetable-calendar-grid button:disabled { opacity: .35; cursor: default; }
+.timetable-week-picker :is(button, [tabindex]):focus-visible { outline: 3px solid #22564e; outline-offset: 2px; }
+.timetable-week-picker > button:last-child { margin-top: 16px; }
+
+.schedule-timetable-options summary:focus-visible { outline: 3px solid #f5f1ea; outline-offset: 2px; }

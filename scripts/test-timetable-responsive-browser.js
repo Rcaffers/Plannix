@@ -55,7 +55,46 @@ try {
   await send('Page.reload', {}, sessionId);
   await evaluate(`new Promise((resolve,reject)=>{let n=0;const id=setInterval(()=>{if(document.body.dataset.testResult){clearInterval(id);resolve(document.body.dataset.testResult)}else if(++n>500){clearInterval(id);reject(Error('Fixture did not load'))}},50)})`);
   assert.equal(await evaluate('document.body.dataset.testResult'), 'passed', await evaluate('document.querySelector("pre")?.textContent'));
+  // Native browser key events exercise dialog trapping and Escape, beyond React handler tests.
+  await evaluate('document.querySelector("iframe").contentWindow.prepareWeekPickerKeyboard()');
+  const pickerState = () => evaluate(`(()=>{const d=document.querySelector('iframe').contentDocument;return {
+    open:!!d.querySelector('.timetable-week-picker')?.open,
+    focusedDate:d.activeElement?.dataset.date,
+    inside:!!d.activeElement?.closest('.timetable-week-picker'),
+    trigger:d.activeElement===d.querySelector('.schedule-choose-week')
+  }})()`);
+  const press = async (key, code, extra={}) => {
+    const windowsVirtualKeyCode = {Tab:9, Enter:13, Escape:27, ArrowRight:39, ArrowDown:40}[key];
+    await send('Input.dispatchKeyEvent', {type:'keyDown',key,code,windowsVirtualKeyCode,...(key === 'Enter' ? {text:'\r'} : {}),...extra}, sessionId);
+    await send('Input.dispatchKeyEvent', {type:'keyUp',key,code,windowsVirtualKeyCode,...extra}, sessionId);
+  };
+  const initialPicker = await pickerState();
+  assert.ok(initialPicker.open && initialPicker.focusedDate, 'Native dialog focuses a date');
+  await press('ArrowRight','ArrowRight');
+  assert.notEqual((await pickerState()).focusedDate, initialPicker.focusedDate, 'Native arrow key moves calendar focus');
+  for (let n=0;n<7;n++) {
+    await press('Tab','Tab');
+    assert.ok((await pickerState()).inside, 'Native Tab remains inside modal');
+  }
+  await press('Tab','Tab',{modifiers:8});
+  assert.ok((await pickerState()).inside, 'Native Shift+Tab remains inside modal');
+  const waitPickerClosed = () => evaluate(`new Promise((resolve,reject)=>{
+    const d=document.querySelector('iframe').contentDocument;
+    if(!d.querySelector('.timetable-week-picker'))return resolve();
+    const observer=new MutationObserver(()=>{if(!d.querySelector('.timetable-week-picker')){clearTimeout(timer);observer.disconnect();resolve()}});
+    const timer=setTimeout(()=>{observer.disconnect();reject(Error('Calendar did not close'))},2000);
+    observer.observe(d.body,{childList:true,subtree:true});
+  })`);
+  await press('Escape','Escape');
+  await waitPickerClosed();
+  assert.deepEqual(await pickerState(), {open:false,inside:false,trigger:true}, 'Native Escape closes picker and restores trigger focus');
+  await evaluate('document.querySelector("iframe").contentWindow.prepareWeekPickerKeyboard()');
+  await press('ArrowDown','ArrowDown');
+  await press('Enter','Enter');
+  await waitPickerClosed();
+  assert.deepEqual(await pickerState(), {open:false,inside:false,trigger:true}, 'Native Enter selects a date and returns focus');
   console.log(await evaluate('document.querySelector("pre").textContent'));
+  console.log('Native calendar keyboard, modal focus trapping and Escape checks passed');
 } finally {
   socket?.close();
   if (chrome && chrome.exitCode === null) { const exited = once(chrome, 'exit'); chrome.kill(); await exited; }

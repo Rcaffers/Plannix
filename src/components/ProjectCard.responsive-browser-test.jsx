@@ -27,14 +27,15 @@ export const useTimetableSessions = () => state;
 const initial = { id: 'lesson', day: 0, periodId: 'p1', classId: '7a', title: 'Fractions', notes: 'Rulers' };
 let calls = [];
 let allowEditing = true, testPageSpacing = false, fixtureUserId = null, fixtureSetupUserId = null;
-let feedbackUpdate, observeSave = false, retryCalls = 0, reloadCalls = 0;
+let feedbackUpdate, observeSave = false, retryCalls = 0, reloadCalls = 0, restoreCalls = 0;
 const scope = {}; const loadedDates = []; let mode = 'date';
 function Harness() {
   const [feedback, setFeedback] = useState({}); feedbackUpdate = setFeedback;
   const [sessions, setSessions] = useState([initial]);
   const [weekB, setWeekB] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState('A');
-  state = { ...feedback, userId: fixtureSetupUserId, retry() { retryCalls++; }, reload() { reloadCalls++; }, scope, revision: 1, periods, recurringReady: true, dated: { sessions, overrideExists: feedback.overrideExists }, loadDate(date) { loadedDates.push(date); }, recurring: [{ code: 'A', weekId: 'A', sessions }, { code: 'B', weekId: 'B', sessions: weekB }],
+  const [loadedWeek, setLoadedWeek] = useState(null);
+  state = { ...feedback, userId: fixtureSetupUserId, removeOverride() { restoreCalls++; return true; }, retry() { retryCalls++; }, reload() { reloadCalls++; }, scope, revision: 1, periods, recurringReady: true, dated: { sessions, overrideExists: feedback.overrideExists, weekStartDate:feedback.datedWeekStart || loadedWeek }, loadDate(date) { loadedDates.push(date); setLoadedWeek(date); }, recurring: [{ code: 'A', weekId: 'A', sessions }, { code: 'B', weekId: 'B', sessions: weekB }],
     edit(target, next) { if (observeSave) setFeedback({ isSaving: true }); calls.push({ target, sessions: next }); if (target.weekId === 'B') setWeekB(next); else setSessions(next); return true; } };
   if (testPageSpacing) return <>
     <header id="site-header-fixture" style={{ height: 64 }}>Site navigation</header>
@@ -270,7 +271,35 @@ async function run() {
     check(document.querySelector('.timetable-save-status').textContent.trim() === 'Saved', `${view}: successful save announces Saved`);
     noRoutineStrip();
     check(!document.body.textContent.includes('Support reference:'), 'No support reference without an error');
-    if (view === 'date') check(Boolean(getButton('Restore repeating timetable')), 'Dated override restore control retained without banner');
+    if (view === 'date') {
+      const menu = document.querySelector('.schedule-timetable-options');
+      check(menu && !menu.open && getButton('Restore repeating timetable'), 'Dated override restore retained in closed secondary menu');
+      click(menu.querySelector('summary'));
+      check(menu.open && getButton('Restore repeating timetable').getBoundingClientRect().height > 0, 'Restore menu opens visibly');
+      const restores = restoreCalls;
+      window.__plannixConfirmSessionDiscard = () => false;
+      click(getButton('Restore repeating timetable'));
+      check(restoreCalls === restores && menu.open, 'Restore respects unsaved edit cancellation');
+      window.__plannixConfirmSessionDiscard = () => true;
+      click(getButton('Restore repeating timetable'));
+      check(restoreCalls === restores + 1 && !menu.open && document.activeElement === menu.querySelector('summary'), 'Secondary restore calls existing action once and returns focus');
+      delete window.__plannixConfirmSessionDiscard;
+      const previousLoadedWeek = state.dated.weekStartDate;
+      flushSync(() => feedbackUpdate({overrideExists:true, isLoading:true, datedWeekStart:previousLoadedWeek}));
+      click(document.querySelector('[aria-label="Go to next week"]')); await tick();
+      menu.open = true;
+      const restoresBeforeLoad = restoreCalls;
+      click(getButton('Restore repeating timetable'));
+      check(getButton('Restore repeating timetable').disabled && restoreCalls === restoresBeforeLoad,
+        'Restore cannot remove the previous week override while the displayed week loads');
+      flushSync(() => feedbackUpdate({overrideExists:true, datedWeekStart:previousLoadedWeek}));
+      check(getButton('Restore repeating timetable').disabled,
+        'Restore remains unavailable if a failed load leaves a different week in the provider');
+      flushSync(() => feedbackUpdate({overrideExists:true}));
+      check(!getButton('Restore repeating timetable').disabled, 'Restore becomes available for the confirmed displayed week');
+      flushSync(() => feedbackUpdate({overrideExists:true, isSaving:true}));
+      check(getButton('Restore repeating timetable').disabled, 'Restore prevents duplicate work while saving');
+    }
     flushSync(() => feedbackUpdate({ error: 'Save failed', conflict: true, unsaved: true, requestReference: 'test-reference' }));
     check(document.body.textContent.includes('Save failed') && document.body.textContent.includes('The timetable changed elsewhere.'), `${view}: save error and conflict remain visible`);
     check([...document.querySelectorAll('.classes-hint--error')].every(el => el.getBoundingClientRect().height > 1 && getComputedStyle(el).position !== 'absolute'), `${view}: actionable errors occupy visible layout`);
@@ -300,7 +329,8 @@ async function run() {
   }
   mode = 'date'; allowEditing = false; mount(); await tick();
   noRestoreControls();
-  check(!document.querySelector('.schedule-titlebar-actions') && !document.body.textContent.includes('Clear this week'), 'Main read-only toolbar has no empty action gap or Clear this week');
+  check(document.querySelector('.schedule-choose-week') && !document.body.textContent.includes('Clear this week'), 'Main read-only toolbar offers Choose week without Clear this week');
+  check(document.querySelector('.schedule-choose-week').disabled, 'Choose week is unavailable until a valid academic year is loaded');
 
 
   testPageSpacing = true;
@@ -595,6 +625,58 @@ async function run() {
   check(document.querySelector('.schedule-date-input').value === '2027-10-30'
     && document.querySelector('.schedule-events-weekend-only').textContent.includes('Museum trip'),
   'Autumn DST Saturday stays distinct from Sunday');
+  // Exercise the real ProjectCard navigation with an academic year spanning New Year.
+  fixtureAcademicYear = { id:'picker-year', startDate:'2026-12-30', endDate:'2027-04-04', holidays:[] };
+  await width(1366); mount(); await tick();
+  const openPicker = () => click(document.querySelector('.schedule-choose-week'));
+  openPicker();
+  let picker = document.querySelector('.timetable-week-picker');
+  check(picker?.open && document.activeElement.dataset.date === '2026-12-30', 'Calendar opens modally at first selectable academic-year date');
+  const pickerRect = picker.getBoundingClientRect();
+  check(pickerRect.left >= 0 && pickerRect.right <= innerWidth && pickerRect.top >= 0 && pickerRect.bottom <= innerHeight
+    && picker.querySelectorAll('[role="gridcell"]').length === 42,
+    'Desktop calendar fits viewport and presents six full calendar rows');
+  click(picker.querySelector('[aria-label="Next month"]'));
+  check(document.activeElement.dataset.date === '2027-01-30', 'Next month control moves calendar across New Year');
+  click(picker.querySelector('[aria-label="Previous month"]'));
+  check(document.activeElement.dataset.date === '2026-12-30' && picker.querySelector('[aria-label="Previous month"]').disabled,
+    'Previous month control returns to bounded first month');
+  check(picker.querySelectorAll('[aria-selected="true"]').length === 7 && picker.querySelector('[data-date="2026-12-29"]').disabled,
+    'Calendar highlights displayed Monday week and disables dates before academic year');
+  const key = value => flushSync(() => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key:value, bubbles:true})));
+  key('ArrowRight');
+  check(document.activeElement.dataset.date === '2026-12-31', 'Calendar arrow key moves focus one day');
+  key('End');
+  check(document.activeElement.dataset.date === '2027-01-03', 'Calendar End moves to Sunday across year boundary');
+  window.__plannixConfirmSessionDiscard = () => false;
+  const loadsBeforeCancel = loadedDates.length;
+  click(document.activeElement); await tick();
+  check(document.querySelector('.timetable-week-picker') && loadedDates.length === loadsBeforeCancel, 'Cancelled unsaved-edit guard prevents calendar navigation');
+  window.__plannixConfirmSessionDiscard = () => true;
+  click(document.activeElement); await tick();
+  check(!document.querySelector('.timetable-week-picker') && loadedDates.at(-1) === '2026-12-28'
+    && document.activeElement === document.querySelector('.schedule-choose-week'), 'Sunday selection uses existing Monday week and returns focus');
+  delete window.__plannixConfirmSessionDiscard;
+  openPicker(); key('ArrowDown'); click(document.activeElement); await tick();
+  check(loadedDates.at(-1) === '2027-01-04', 'Calendar selection crosses into next year using Monday rule');
+  openPicker(); key('PageDown'); key('PageDown'); key('PageDown'); key('PageDown');
+  check(document.activeElement.dataset.date === '2027-04-04'
+    && document.querySelector('[data-date="2027-04-05"]').disabled
+    && document.querySelector('[aria-label="Next month"]').disabled, 'Keyboard month navigation clamps at final academic-year day');
+  document.querySelector('.timetable-week-picker').dispatchEvent(new Event('cancel', {cancelable:true})); await tick();
+  check(!document.querySelector('.timetable-week-picker') && document.activeElement === document.querySelector('.schedule-choose-week'), 'Escape cancellation closes dialog and restores trigger focus');
+  openPicker();
+  const originalYear = fixtureAcademicYear;
+  fixtureAcademicYear = { ...originalYear, id:'replacement-year', startDate:'2027-09-01', endDate:'2028-07-31' };
+  flushSync(() => feedbackUpdate({})); await tick();
+  check(!document.querySelector('.timetable-week-picker') && loadedDates.at(-1) === '2027-08-30', 'Academic-year replacement closes picker and loads new year');
+  fixtureAcademicYear = originalYear; flushSync(() => feedbackUpdate({})); await tick();
+  check(!document.querySelector('.timetable-week-picker'), 'Returning to previous year cannot reopen abandoned picker');
+  openPicker(); fixtureSetupUserId = 'another-user'; flushSync(() => feedbackUpdate({})); await tick();
+  check(!document.querySelector('.timetable-week-picker'), 'Account change closes old account picker');
+  fixtureSetupUserId = null;
+  await width(430);
+  check(!document.querySelector('.schedule-choose-week') && document.querySelector('.schedule-date-input'), 'Mobile keeps existing day/date controls instead of desktop picker');
   fixtureAcademicYear = null;
 
   mode = 'fixed'; allowEditing = true;
@@ -695,6 +777,12 @@ async function run() {
   'a reset that clears pending flags without a successful save keeps guidance and edits');
 
 }
+window.prepareWeekPickerKeyboard = async () => {
+  mode = 'date'; allowEditing = false; fixtureSetupUserId = null;
+  fixtureAcademicYear = { id:'keyboard-year', startDate:'2026-09-01', endDate:'2027-07-31', holidays:[] };
+  await width(1366); mount(); await tick();
+  const button = document.querySelector('.schedule-choose-week'); button.focus(); click(button);
+};
 run().then(() => { parent.document.body.dataset.testResult='passed'; }, error => { parent.document.body.dataset.testResult='failed'; results.push(error.stack); }).finally(() => {
   const report=parent.document.createElement('pre'); report.textContent=JSON.stringify(results,null,2); parent.document.body.append(report);
 });
