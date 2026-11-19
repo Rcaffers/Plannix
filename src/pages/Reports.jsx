@@ -43,7 +43,7 @@ export default function Reports({ user, clock = systemClock }) {
   const [selection, setSelection] = useState({ yearId: null, classId: '' });
   const [dates, setDates] = useState({ yearId: null, from: '', to: '' });
   const [retry, setRetry] = useState(0);
-  const [lessonDisplay, setLessonDisplay] = useState({ scope:'', hidePast:false });
+  const [lessonDisplay, setLessonDisplay] = useState({ scope:'', hidePast:true });
   const [result, setResult] = useState({ scope: '', status: 'idle', rows: [], error: null });
   const [exportError, setExportError] = useState({ scope: '', message: '' });
   const [today, setToday] = useState(() => londonCalendarToday(clock()));
@@ -61,8 +61,8 @@ export default function Reports({ user, clock = systemClock }) {
     ? `${user.id}:${user.organisationId}:${yearId}:${layout.timetableId}:${layout.revision}:${sessions.revision}:${classes.revision}:${classId}:${from}:${to}:${JSON.stringify(academicYear.holidays)}` : '';
   const active = result.scope === scope ? result : { scope, status: scope ? 'loading' : 'idle', rows: [], error: null };
   const displayScope = `${user?.id || ''}:${user?.organisationId || ''}:${yearId || ''}:${classId}`;
-  const hidePast = lessonDisplay.scope === displayScope && lessonDisplay.hidePast;
-  const displayedRows = hidePast ? active.rows.filter(row => row.type !== 'lesson' || !isPastClassMonitorRow(row, today)) : active.rows;
+  const hidePast = lessonDisplay.scope !== displayScope || lessonDisplay.hidePast;
+  const displayedRows = hidePast ? active.rows.filter(row => !isPastClassMonitorRow(row, today)) : active.rows;
   const selectedClass = savedClasses.find(entry => entry.id === classId);
   const canUseReport = Boolean(scope && selectedClass && active.status === 'ready' && !dateError
     && !yearError && !classes.error && !layout.error && !classes.isLoading && !layout.isLoading);
@@ -70,7 +70,7 @@ export default function Reports({ user, clock = systemClock }) {
     timetableId: layout.timetableId }), [user?.organisationId, yearId, layout.timetableId]);
 
   useEffect(() => {
-    setLessonDisplay({ scope:displayScope, hidePast:false });
+    setLessonDisplay({ scope:displayScope, hidePast:true });
   }, [displayScope]);
 
   useEffect(() => {

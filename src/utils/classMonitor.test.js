@@ -36,7 +36,7 @@ test('past styling uses the London calendar day, not elapsed hours or UTC day', 
   assert.equal(isPastClassMonitorRow({ type: 'lesson', date: '2027-03-30' }, today), false);
   assert.equal(isPastClassMonitorRow({ type: 'holiday', visibleStart: '2027-03-27', visibleEnd: today }, today), false);
   assert.equal(isPastClassMonitorRow({ type: 'school-unknown', visibleStart: '2027-03-27', visibleEnd: '2027-03-28' }, today), true);
-  assert.equal(isPastClassMonitorRow({ type: 'holiday', visibleStart: '2027-03-27', visibleEnd: '2027-03-28', endDate: '2027-04-04' }, today), true);
+  assert.equal(isPastClassMonitorRow({ type: 'holiday', visibleStart: '2027-03-27', visibleEnd: '2027-03-28', endDate: '2027-04-04' }, today), false);
 });
 
 test('the report preflight permits exactly 60 calendar weeks and rejects 61 before enumeration', () => {
@@ -157,4 +157,19 @@ test('explicit multi-day closures use each affected recurring slot and overlappi
     ['closure', '2026-09-08', 'tuesday', 'Training'], ['closure', '2026-09-09', 'wednesday', 'Training'],
   ]);
   assert.deepEqual(reportMondays('2026-09-07', '2026-09-11', { ...year, holidays }), ['2026-09-07']);
+});
+
+
+test('past filtering uses inclusive saved range ends for all holiday and closure row types', () => {
+  const today=londonCalendarToday(new Date('2027-03-28T23:00:00Z'));
+  assert.equal(today,'2027-03-29');
+  for (const type of ['lesson','closure']) {
+    assert.equal(isPastClassMonitorRow({type,date:'2027-03-28'},today),true);
+    assert.equal(isPastClassMonitorRow({type,date:today},today),false);
+  }
+  for (const type of ['holiday','school-unknown']) {
+    assert.equal(isPastClassMonitorRow({type,visibleEnd:'2027-03-28',endDate:'2027-03-28'},today),true);
+    assert.equal(isPastClassMonitorRow({type,visibleEnd:'2027-03-28',endDate:today},today),false);
+    assert.equal(isPastClassMonitorRow({type,visibleEnd:'2027-03-28',endDate:'2027-04-02'},today),false);
+  }
 });

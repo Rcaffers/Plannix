@@ -17,7 +17,6 @@ const PERIOD = '60000000-0000-4000-8000-000000000001';
 const PERIOD_TWO = '60000000-0000-4000-8000-000000000002';
 const WEEK = '70000000-0000-4000-8000-000000000001';
 const LONG_TITLE = 'A detailed lesson title covering several concepts and an exceptionallylongunbrokentopicnameforwrapping';
-const reportClock = () => new Date('2026-11-02T12:00:00Z');
 let setYear, gate, failNext = false, revisionMismatch = false;
 const requests = [];
 window.reportDownloads = [];
@@ -89,7 +88,14 @@ export async function fetchDatedTimetableSessions(scope, { signal }) {
 }
 
 const host = document.createElement('div'); host.id = 'root'; document.body.append(host);
-const router = createMemoryRouter([{ path: '/reports', element: <Reports user={{ id: USER, organisationId: ORGANISATION }} clock={reportClock} /> },
+function ReportsFixture() {
+  const [userId,setUserId]=useState(USER);
+  const [now,setNow]=useState('2026-11-02T12:00:00Z');
+  const clock=React.useMemo(()=>()=>new Date(now),[now]);
+  window.switchReportUser=setUserId; window.setReportNow=setNow;
+  return <Reports user={{id:userId,organisationId:ORGANISATION}} clock={clock} />;
+}
+const router = createMemoryRouter([{ path: '/reports', element: <ReportsFixture /> },
   { path: '/', element: <p>Home</p> }], { initialEntries: ['/reports'] });
 const root = createRoot(host); flushSync(() => root.render(<RouterProvider router={router} />));
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
@@ -120,6 +126,7 @@ async function run() {
     && host.querySelector('#report-from').value === '2026-09-01'
     && host.querySelector('#report-to').value === '2027-08-31', 'selected report and year-wide defaults');
   const exportButton = () => [...host.querySelectorAll('.reports-actions button')].find(node => node.textContent === 'Export Excel');
+  const hideButton = () => host.querySelector('.reports-actions button[aria-controls="class-monitor-results"]');
   const printButton = () => [...host.querySelectorAll('.reports-actions button')].find(node => node.textContent === 'Print');
   check(exportButton()?.disabled && printButton()?.disabled, 'export and print require a successfully loaded current report');
   input('#report-class', CLASS_A); await settle();
@@ -132,6 +139,22 @@ async function run() {
     && window.reportDownloads[0].filename === 'class-monitor-7A-2026-09-01-to-2027-08-31.xlsx'
     && window.reportPrintCalls === 1 && requests.length === beforeExportRequests,
   'ready report exports XLSX and prints without requesting or writing another dataset');
+  check(hideButton().textContent.trim()==='Show all lessons' && hideButton().getAttribute('aria-pressed')==='true'
+    && !host.querySelector('.reports-results').textContent.includes('Past dated lesson')
+    && !host.querySelector('.reports-results').textContent.includes('INSET Day')
+    && !host.querySelector('.reports-results').textContent.includes('Half term')
+    && host.querySelector('.reports-results').textContent.includes('Dated title')
+    && host.querySelector('.reports-results').textContent.includes('Training day'),
+    'opening a class defaults to current/future entries, excluding past lessons, INSET and holiday annotations');
+  for (const day of ['2026-10-28','2026-10-30']) {
+    flushSync(()=>window.setReportNow(day+'T12:00:00Z')); await settle();
+    check(host.querySelector('.reports-results').textContent.includes('Half term'),
+      `holiday range remains visible while ongoing or ending today (${day})`);
+  }
+  flushSync(()=>window.setReportNow('2026-10-31T12:00:00Z')); await settle();
+  check(!host.querySelector('.reports-results').textContent.includes('Half term'),'holiday range disappears only after its inclusive end');
+  flushSync(()=>window.setReportNow('2026-11-02T12:00:00Z')); await settle();
+  flushSync(()=>hideButton().click()); await settle();
   check(host.textContent.includes('Lesson not held — INSET Day')
     && host.textContent.includes('School holiday or closure — Half term')
     && host.textContent.includes('Public day') && !host.textContent.includes('Lesson not held — Public day')
@@ -172,11 +195,10 @@ async function run() {
     && training.textContent.includes('Lesson not held — Training day')
     && halfTerm.textContent.includes('School holiday or closure — Half term'),
   'past lesson tiles retain orange; closures and school/public ranges use solid gold report borders and original labels');
-  const hideButton = () => host.querySelector('.reports-actions button[aria-controls="class-monitor-results"]');
   const fullTitles = [...host.querySelectorAll('.reports-results .session-lesson-title')].map(node=>node.textContent);
   const beforeToggleRequests=requests.length;
   check(hideButton().textContent.trim()==='Hide past lessons' && hideButton().getAttribute('aria-pressed')==='false'
-    && printButton().nextElementSibling===hideButton(), 'full list starts visible with accessible Hide past lessons next to Print');
+    && printButton().nextElementSibling===hideButton(), 'Show all reveals the full list with accessible Hide past lessons next to Print');
   flushSync(()=>hideButton().click()); await settle();
   check(hideButton().textContent.trim()==='Show all lessons' && hideButton().getAttribute('aria-pressed')==='true'
     && !host.querySelector('.reports-results').textContent.includes('Past dated lesson')
@@ -191,16 +213,15 @@ async function run() {
     'Show all restores the original complete order');
   flushSync(()=>hideButton().click());
   input('#report-class',CLASS_B); await settle();
-  check(hideButton().getAttribute('aria-pressed')==='false' && hideButton().textContent.trim()==='Hide past lessons',
+  check(hideButton().getAttribute('aria-pressed')==='true' && hideButton().textContent.trim()==='Show all lessons',
     'changing class resets the display toggle without retaining previous class rows');
   input('#report-class',CLASS_A); await settle();
   flushSync(()=>hideButton().click());
   flushSync(()=>setYear(YEAR_B)); await settle();
-  check(hideButton().getAttribute('aria-pressed')==='false' && hideButton().disabled && !host.querySelector('.reports-results'),
+  check(hideButton().getAttribute('aria-pressed')==='true' && hideButton().disabled && !host.querySelector('.reports-results'),
     'changing year resets the toggle and disables it until a class report loads');
   flushSync(()=>setYear(YEAR_A)); await settle(); input('#report-class',CLASS_A); await settle();
   input('#report-from','2026-09-14'); input('#report-to','2026-09-14'); await settle();
-  flushSync(()=>hideButton().click()); await settle();
   check(host.querySelector('.reports-results [role="status"]')?.textContent.includes('No current or future lessons')
     && !host.querySelector('.reports-lesson'), 'all-past report shows a clear current/future empty state');
   flushSync(()=>hideButton().click()); await settle();
@@ -228,7 +249,7 @@ async function run() {
   const oldSignal = requests.at(-1).signal;
   gate = null; input('#report-class', CLASS_B); await settle(); release(); await settle();
   check(oldSignal.aborted && !host.textContent.includes('Lesson not held — INSET Day')
-    && host.querySelector('.reports-results')?.textContent.includes('No scheduled lessons'),
+    && host.querySelector('.reports-results')?.textContent.includes('No current or future lessons'),
   'class change aborts and rejects a non-cooperative old success');
   let rejectLate; gate = new Promise((_, reject) => { rejectLate = reject; });
   input('#report-class', CLASS_A); await settle();
@@ -273,6 +294,13 @@ async function run() {
     && host.querySelector('.reports-results'), 'retry rechecks the bounded range and loads complete weeks');
   flushSync(() => setYear(YEAR_A)); await settle();
   input('#report-class', CLASS_A); await settle();
+  check(hideButton().getAttribute('aria-pressed')==='true','returning to the academic year defaults to filtered entries');
+  flushSync(()=>hideButton().click()); await settle();
+  flushSync(()=>window.switchReportUser('30000000-0000-4000-8000-000000000002')); await settle();
+  check(hideButton().getAttribute('aria-pressed')==='true' && !host.querySelector('.reports-lesson--past'),
+    'account change resets a full-list choice to the filtered default');
+  flushSync(()=>window.switchReportUser(USER)); await settle();
+  flushSync(()=>hideButton().click()); await settle(); // Full list for existing desktop/print layout checks.
   document.body.dataset.testResult = 'passed'; document.body.append(Object.assign(document.createElement('pre'), { textContent: `${checks.length} Reports browser assertions passed` }));
 }
 run().catch(error => { document.body.dataset.testResult = 'failed'; document.body.append(Object.assign(document.createElement('pre'), { textContent: error.stack })); });

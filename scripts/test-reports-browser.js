@@ -146,7 +146,7 @@ try {
   await filteredTask.destroy();
   assert.match(filteredText,/Dated title/);
   assert.match(filteredText,/Future dated lesson/);
-  assert.doesNotMatch(filteredText,/Past dated lesson|Hide past lessons|Show all lessons/);
+  assert.doesNotMatch(filteredText,/Past dated lesson|INSET Day|Half term|Hide past lessons|Show all lessons/);
   await send('Emulation.setEmulatedMedia',{media:'screen'},sessionId);
   await send('Runtime.evaluate',{expression:`document.querySelector('.reports-actions button[aria-pressed]').click()`},sessionId);
   await send('Runtime.evaluate',{expression:`new Promise(resolve=>requestAnimationFrame(resolve))`,awaitPromise:true},sessionId);
@@ -194,6 +194,8 @@ try {
   const allPrintedText = printedText.join(' ');
   assert.match(allPrintedText, /Class Monitor/);
   assert.match(allPrintedText, /Past dated lesson/);
+  assert.match(allPrintedText, /INSET Day/);
+  assert.match(allPrintedText, /Half term/);
   assert.match(allPrintedText, /7A/);
   assert.match(allPrintedText, /2026\/27/);
   assert.match(allPrintedText, /earlier versions of the layout and pattern are not archived/);

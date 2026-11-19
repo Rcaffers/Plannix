@@ -13,7 +13,7 @@ export function londonCalendarToday(now = new Date()) {
 
 export function isPastClassMonitorRow(row, today) {
   const finalDate = row.type === 'holiday' || row.type === 'school-unknown'
-    ? row.visibleEnd : row.date;
+    ? row.endDate || row.visibleEnd : row.date;
   return finalDate < today;
 }
 
