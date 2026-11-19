@@ -112,8 +112,8 @@ export function createPrivateSessionRepository({ rpc, cipher, generateSecret = (
     return rpcName === 'plannix_auth_select_application'
       ? { ...result, ...selection } : { state: 'selected', ...selection };
   }
-  async function resolve(header) {
-    return selectCookies(header, 'plannix_auth_select');
+  async function resolve(header, { bootstrap = false } = {}) {
+    return selectCookies(header, bootstrap ? 'plannix_auth_select_bootstrap' : 'plannix_auth_select');
   }
   async function resolveForApplication(header) {
     const result = await selectCookies(header, 'plannix_auth_select_application');

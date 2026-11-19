@@ -200,6 +200,10 @@ export async function bootstrapServerSession(fetchImpl = fetch, { signal } = {})
   const response = await fetchImpl(sameOriginUrl('/__stage3/auth/bootstrap'), {
     method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal,
   });
+  if (signal?.aborted || generation !== accountGeneration)
+    throw new DOMException('Account changed.', 'AbortError');
+  if (response.status === 409 && response.headers.get('X-Plannix-Bootstrap-Outcome') === 'expired-context')
+    throw new Error('Your sign-in context expired. Please try signing in again.');
   if (!response.ok) throw new Error('Authentication is unavailable.');
   const result = await readSmallJson(response);
   if (signal?.aborted || generation !== accountGeneration)

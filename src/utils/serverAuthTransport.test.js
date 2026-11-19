@@ -460,3 +460,33 @@ test('same-account session replacement rejects an old in-flight result',async()=
     await cleanup();
   }
 });
+
+test('terminal bootstrap asks for an explicit retry without adopting CSRF or replaying login',async()=>{
+  const previousLocation=globalThis.location, previousChannel=globalThis.BroadcastChannel;
+  globalThis.location={origin:'https://app.plannix.test'};globalThis.BroadcastChannel=undefined;
+  const {module,cleanup}=await loadServerMode();const requests=[];
+  try {
+    const expired=async(input,init)=>{requests.push({path:new URL(input).pathname,method:init.method});
+      return Response.json({message:'Not used by the client'},{status:409,headers:{'X-Plannix-Bootstrap-Outcome':'expired-context'}});};
+    await assert.rejects(module.bootstrapServerSession(expired),/sign-in context expired/);
+    assert.deepEqual(requests,[{path:'/__stage3/auth/bootstrap',method:'GET'}]);
+    const fresh=async(input,init)=>{requests.push({path:new URL(input).pathname,method:init.method});
+      return Response.json({ready:true,csrfToken:csrf});};
+    await module.bootstrapServerSession(fresh);
+    assert.equal(requests.length,2,'only an explicit later call starts another bootstrap');
+    assert.ok(requests.every(item=>item.method==='GET'),'no credential mutation is replayed');
+  } finally {await cleanup();globalThis.location=previousLocation;globalThis.BroadcastChannel=previousChannel;}
+});
+
+test('late terminal bootstrap cannot replace a newer session or its failure presentation',async()=>{
+  const previousLocation=globalThis.location, previousChannel=globalThis.BroadcastChannel;
+  globalThis.location={origin:'https://app.plannix.test'};globalThis.BroadcastChannel=undefined;
+  const {module,cleanup}=await loadServerMode();let release;
+  try {
+    const waiting=module.bootstrapServerSession(()=>new Promise(resolve=>{release=resolve;}));
+    module.invalidateServerSessionContext();module.setServerSessionContext(session,csrf,owner);
+    release(Response.json({},{status:409,headers:{'X-Plannix-Bootstrap-Outcome':'expired-context'}}));
+    await assert.rejects(waiting,{name:'AbortError'});
+    assert.equal(module.captureServerOperationContext(owner).sessionName,session);
+  } finally {await cleanup();globalThis.location=previousLocation;globalThis.BroadcastChannel=previousChannel;}
+});

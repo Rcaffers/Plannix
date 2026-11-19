@@ -178,6 +178,7 @@ async function fixture({identity=fakeIdentity(),repository=fakeRepository(),prov
       cookies:response.headers.getSetCookie(),location:response.headers.get('location'),
       cache:response.headers.get('cache-control'),
       recoveryOutcome:response.headers.get('x-plannix-recovery-outcome'),
+      bootstrapOutcome:response.headers.get('x-plannix-bootstrap-outcome'),
       diagnosticId:response.headers.get('x-plannix-callback-diagnostic-id'),
       recoveryDiagnosticId:response.headers.get('x-plannix-recovery-diagnostic-id')};
   }
@@ -846,4 +847,68 @@ test('failed signed-in replacement preserves the previous ordinary session',asyn
     assert.equal((await ctx.request('/status',{cookie:`${marker}; ${currentCookie}`})).body.userId,ownerA);
     assert.equal(ctx.repository.current().ownerId,ownerA);
   } finally { await ctx.close(); }
+});
+
+test('verified terminal cleanup requires a separate explicit bootstrap before login', async () => {
+  const repository=fakeRepository();
+  const original=repository.resolve;
+  repository.resolve=async(header,options)=>header===session(90)
+    ? options?.bootstrap ? {state:'terminal',cleanup:['__Host-plannix-s-90']} : {state:'invalid'}
+    : original(header);
+  const ctx=await fixture({repository});
+  try {
+    assert.equal((await ctx.request('/status',{cookie:session(90)})).status,401);
+    assert.equal((await ctx.request('/bootstrap',{cookie:session(90),originHeader:'https://wrong.example.test'})).status,403);
+    assert.equal((await ctx.request('/bootstrap?unexpected=1',{cookie:session(90)})).status,400);
+    const terminal=await ctx.request('/bootstrap',{cookie:session(90)});
+    assert.equal(terminal.status,409);
+    assert.equal(terminal.bootstrapOutcome,'expired-context');
+    assert.equal(terminal.body.csrfToken,undefined);
+    assert.equal(terminal.cookies.length,1);
+    assert.match(terminal.cookies[0],/Max-Age=0/);
+    assert.equal(ctx.identity.calls.length,0,'bootstrap never exchanges credentials or grants a user');
+    const boot=await ctx.request('/bootstrap');
+    assert.equal(boot.status,200);
+    assert.equal((await ctx.request('/login',{method:'POST',cookie:marker,
+      csrf:'x'.repeat(43),body:{email:'a@example.test',password:'synthetic'}})).status,403);
+    assert.equal((await ctx.request('/login',{method:'POST',cookie:marker,csrf:boot.body.csrfToken,
+      originHeader:'https://wrong.example.test',body:{email:'a@example.test',password:'synthetic'}})).status,403);
+    const login=await ctx.request('/login',{method:'POST',cookie:marker,csrf:boot.body.csrfToken,
+      body:{email:'a@example.test',password:'synthetic'}});
+    assert.equal(login.status,200,'explicit login uses the new anonymous context');
+    const rejected=await ctx.request('/bootstrap',{cookie:'malformed'});
+    assert.equal(rejected.status,401);
+    assert.equal(rejected.cookies.length,0,'unverified inputs are never cleared or adopted');
+  } finally {await ctx.close();}
+});
+
+test('late terminal cleanup cannot issue an anonymous marker over a concurrent newer login', async () => {
+  const repository=fakeRepository(), original=repository.resolve;
+  const terminal=deferred(), admitted=deferred(); let bindings=0;
+  const issue=repository.issueBinding;
+  repository.issueBinding=async()=>{bindings++;return issue();};
+  repository.resolve=async(header,options)=>{
+    if(header!==session(90))return original(header);
+    if(!options?.bootstrap)return {state:'invalid'};
+    admitted.resolve(); await terminal.promise;
+    return {state:'terminal',cleanup:['__Host-plannix-s-90']};
+  };
+  const ctx=await fixture({repository});
+  try {
+    const pending=ctx.request('/bootstrap',{cookie:session(90)}); await admitted.promise;
+    const fresh=await ctx.request('/bootstrap');
+    const login=await ctx.request('/login',{method:'POST',cookie:marker,csrf:fresh.body.csrfToken,
+      body:{email:'b@example.test',password:'synthetic'}});
+    assert.equal(login.status,200);
+    const currentCookie=login.cookies[0].split(';')[0];
+    terminal.resolve(); const old=await pending;
+    assert.equal(old.status,409);
+    assert.equal(old.bootstrapOutcome,'expired-context');
+    assert.equal(old.body.csrfToken,undefined);
+    assert.equal(bindings,1,'old completion must not issue another anonymous marker');
+    assert.equal(old.cookies.length,1);
+    assert.match(old.cookies[0],/^__Host-plannix-s-90=; Max-Age=0/);
+    assert.equal((await ctx.request('/status',{cookie:`${marker}; ${currentCookie}`})).body.userId,ownerB);
+    assert.equal(ctx.identity.calls.filter(call=>call[0]==='login').length,1,'no login replay');
+  } finally {terminal.resolve(); await ctx.close();}
 });

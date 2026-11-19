@@ -78,3 +78,15 @@ test('refresh claim binds decrypted tokens to session/version and encrypts the n
   assert.equal(calls[1][1].target_session,sessionId);
   assert.deepEqual(calls[1][1].refresh_cipher,{purpose:'refresh',version:3,token:'new-refresh'});
 });
+
+test('only bootstrap uses terminal-context recovery; application selection remains strict', async () => {
+  const calls=[];
+  const repository=createPrivateSessionRepository({cipher,rpc:async(name)=>{
+    calls.push(name);
+    return {data:name==='plannix_auth_select_bootstrap'
+      ? {state:'terminal',cleanup:['__Host-plannix-s-3']} : {state:'invalid'}};
+  }});
+  assert.deepEqual(await repository.resolve(old),{state:'invalid',cleanup:[]});
+  assert.deepEqual(await repository.resolve(old,{bootstrap:true}),{state:'terminal',cleanup:['__Host-plannix-s-3']});
+  assert.deepEqual(calls,['plannix_auth_select','plannix_auth_select_bootstrap']);
+});

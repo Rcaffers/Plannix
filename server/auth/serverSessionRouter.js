@@ -141,10 +141,14 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     }
   }
 
-  async function resolve(req,res,{ allowMissing=false }={}) {
+  async function resolve(req,res,{ allowMissing=false, bootstrap=false }={}) {
     const header = guard(req);
-    const result = await repository.resolve(header);
+    const result = await repository.resolve(header,{bootstrap});
     cleanup(res,result.cleanup);
+    if (bootstrap && result.state==='terminal') {
+      res.set('X-Plannix-Bootstrap-Outcome','expired-context');
+      throw fail(409,'Your sign-in context expired. Please try signing in again.');
+    }
     if (result.state==='missing' && allowMissing) return result;
     if (result.state!=='selected') throw fail(401,'Authentication is required.');
     return result;
@@ -217,7 +221,7 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
   router.get('/bootstrap',wrap(async(req,res) => {
     if (Object.keys(req.query).length) throw fail(400,'Authentication request is invalid.');
     await rate(req,'bootstrap');
-    const chosen = await resolve(req,res,{allowMissing:true});
+    const chosen = await resolve(req,res,{allowMissing:true,bootstrap:true});
     if (chosen.state==='selected') return res.json({ ready:true, csrfToken:csrf(chosen.header) });
     const issued = await repository.issueBinding();
     if (issued.state!=='issued') throw fail(503,'Authentication service is temporarily unavailable.');

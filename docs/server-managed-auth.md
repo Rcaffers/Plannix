@@ -149,3 +149,69 @@ The backslash escapes the literal query delimiter: Supabase's glob matcher other
 For a short, controlled callback investigation, set the encrypted **runtime-only** web-service variable `PLANNIX_AUTH_CALLBACK_DIAGNOSTICS_ENABLED=true` and restart the server-mode replicas. It defaults off; bearer mode does not mount this router. On a rejected callback, the response carries a server-generated `X-Plannix-Callback-Diagnostic-ID`, and one JSON server-log record contains only `correlationId`, `outcome` (`query_invalid`, `claim_rejected`, or `exchange_kind_mismatch`) and a fixed `reason`. Query reasons are `missing_key`, `unexpected_key`, `duplicate_key`, or `invalid_format`; no query names or values are logged. Claim reasons are limited to the repository's existing safe outcomes (`invalid`, `ambiguous`, `expired`, `unavailable`, or `other`). The current claim RPC usually returns `invalid` for several distinct causes, including missing/mismatched callback state, supersession, readiness, binding/session mismatch and a failed final deadline check. This diagnostic cannot distinguish those causes and must not be interpreted as proof of one. Client error bodies remain generic; logger failures do not affect callback handling. Correlate only the response header and fixed log record, never copy the callback URL or credentials into a report. After the controlled attempt, remove the variable (or set it to `false`) and restart all replicas; no migration, build change or additional logging sink is required.
 
 For a controlled recovery-password failure investigation, the separate encrypted **runtime-only** variable `PLANNIX_AUTH_RECOVERY_DIAGNOSTICS_ENABLED=true` enables fixed stage records for that route only. It defaults off and has no effect in bearer mode. Each attempt receives a fresh `X-Plannix-Recovery-Diagnostic-ID`; server-log records contain only that ID, `stage` (`preflight`, `provider`, `revoke`, or `response`) and a fixed `outcome`. Nested provider records add only `substage` (`user_validation`, `session_setup_or_refresh`, or `password_update`); failed substages add `category` (`same_password`, `weak_password`, or `generic`). These categories come only from allowlisted installed-SDK error codes; all other errors are generic. The installed SDK's `setSession` validates a current access token or refreshes an expired one, so `session_setup_or_refresh` does not distinguish those internal branches. The SDK's `updateUser` also saves the request-local session after the provider password request; `password_update:failed` cannot establish whether the mutation was accepted or the password stayed unchanged. Do not automatically retry it. `revoke:revoked` means the private-session logout RPC confirmed revocation; `revoke:not_revoked` means it returned another state, not that the password stayed unchanged. The response records are `attempted` immediately before calling `end()`, followed by exactly one terminal record: `finished` on Node's response `finish` event, or `closed_before_finish` on `close` before `finish`. `finished` means server-side response completion, not receipt by DigitalOcean or the browser. No request data, provider error or database result is logged. A missing diagnostic record can mean the request failed before this route or before logging; it is not proof of any stage. Capture only the response status and diagnostic ID and match fixed log records. Remove the variable (or set it to `false`) and restart all replicas after the controlled attempt. This diagnostic neither replays the password mutation nor changes revocation or error handling.
+
+
+### Expired browser context during sign-in
+
+Migration `20261119120000_recover_expired_bootstrap_context.sql` must precede the matching server code. It adds a service-role-only bootstrap selector; ordinary/application selection, origin validation, rate limiting, CSRF and expected-session checks remain unchanged. A failed database call remains unavailable, not signed out.
+
+A marker expires 30 days after issuance. A session issued later can therefore remain in the browser after its marker disappears. Bootstrap alone can clean these orphan names after the database verifies every supplied session secret and locks its terminal browser binding, then the session rows, in generation order. All orphan cookies must belong to one binding family; even a mixture of terminal families is rejected without cleanup. Observed expiry is persisted under the binding lock, so clock correction cannot revive a retired context. The selector has a two-second lock timeout; timeout or database failure remains unavailable, never anonymous fallback. A single verified expired/revoked marker family can also be cleaned completely. The verified-terminal response is cleanup-only: HTTP 409 with the fixed `X-Plannix-Bootstrap-Outcome: expired-context` header and a safe retry message. It must not issue a replacement marker or CSRF token. A delayed cleanup response therefore cannot introduce a higher-generation anonymous marker over a concurrent newer login. Cleanup uses exact old names; response completion does not prove browser receipt. A later explicit attempt uses the latest browser cookies and ordinary bootstrap rules to obtain an anonymous binding/CSRF context if needed. Login still requires a separately protected credential submission. This response triggers no automatic bootstrap retry or credential/password mutation replay; normal App lifecycle checks remain unchanged. Older browser bundles show the existing generic error for the first cleanup response; their next explicit attempt can bootstrap normally.
+
+Forged, unknown, duplicate, malformed and live orphan credentials remain rejected without cleanup. Mixed marker families retain strict selection behavior; this correction does not reset arbitrary rejected browser state. Name-specific cleanup cannot erase newer cookie generations. No existing migration is edited. Code rollback can leave the additive RPC installed; do not remove the existing auth fence or repair migration history.
+
+This corrects a locally reproduced expiry gap, not a proven attribution of production request `efda2e6c-782d-4998-b8aa-5148c5183270`. Its JSON 401/original 401 and absent origin logs do not identify a specific repository selection state. The router handles auth failures internally; general error logs need not contain that request. No production cookies or credentials were inspected.
+
+
+Review validation: `node scripts/test-bootstrap-expiry-concurrency.js <new-project> <temporary-workdir>` requires a new, unlinked, empty local stack named `plannix-bootstrap-review-*`. It verifies a local Unix Docker socket and exact container/workdir labels before creating synthetic rows. It observes actual database blocking before releasing the binding lock, awaits terminal outcomes for a changed binding and concurrent cleanup, and checks that lock timeout fails closed. It never targets a linked project. pgTAP cases are in `supabase/tests/server_auth_bootstrap_expiry.test.sql` and roll back their fixtures.
+
+Release sequence (operator actions only): verify a current encrypted backup/restore and off-device checksum under the backup runbook; use pinned CLI 2.114.0; link only to confirmed project `vioymfickxroxqjpdayl`; fail closed unless the saved `supabase/.temp/project-ref` equals that reference. Read live history AND schema, and require 40 matching installed migrations, no manual bootstrap RPC and exactly `20261119120000_recover_expired_bootstrap_context.sql` in `db push --linked --skip-vault --dry-run`. Apply that migration through the pinned CLI, then SELECT-only verify 41 matching versions, unchanged strict selector, privileged owner/empty search path/two-second lock timeout and no execution by browser roles/PUBLIC. Only then deploy the reviewed server and browser revision. Do not run production mutation fixtures or change notification flags. The three new states are: normal bootstrap ready, verified-terminal cleanup/retry, and fail-closed rejection/unavailability. On uncertain migration completion inspect history/schema before any retry, never automatically repair history. A server-code rollback must retain the additive RPC and existing auth fence; expiry recovery reverts to the older unavailable behaviour, while already-issued valid bindings remain usable. Do not reverse the migration or restore the old database over newer data.
+
+
+Proposed operator commands, after review, backup verification and separate migration approval (do not execute as part of a review):
+
+```sh
+cd /private/tmp/plannix-bootstrap-expired-binding
+test "$(./node_modules/.bin/supabase --version)" = '2.114.0' || {
+  echo 'Wrong migration CLI version; stop.' >&2
+  exit 1
+}
+# If this worktree is not linked, the operator must explicitly authorize/run:
+# ./node_modules/.bin/supabase link --project-ref vioymfickxroxqjpdayl
+check_plannix_target() {
+  python3 - <<'PY_TARGET'
+from pathlib import Path
+reference = Path('supabase/.temp/project-ref')
+if not reference.is_file() or reference.read_text() not in {'vioymfickxroxqjpdayl', 'vioymfickxroxqjpdayl\n'}:
+    raise SystemExit('Missing or mismatched linked target; stop.')
+PY_TARGET
+}
+check_plannix_target && ./node_modules/.bin/supabase migration list --linked
+check_plannix_target && ./node_modules/.bin/supabase db push --linked --skip-vault --dry-run
+# STOP for history/schema/backup approval; require exactly the one reviewed migration.
+# Only after that approval:
+check_plannix_target && ./node_modules/.bin/supabase db push --linked --skip-vault
+check_plannix_target && ./node_modules/.bin/supabase migration list --linked
+```
+
+SELECT-only catalog gates (also compare the complete installed history against repository filenames and the installed function bodies against the reviewed SQL, not count alone):
+
+```sql
+select count(*) = 41 as expected_count,
+  count(*) filter (where version = '20261119120000') = 1 as new_version_present
+from supabase_migrations.schema_migrations;
+select p.prosecdef as security_definer,
+  p.proconfig @> array['search_path=""','lock_timeout=2s'] as expected_settings,
+  p.proowner = (select proowner from pg_proc where oid = 'public.plannix_auth_select(jsonb)'::regprocedure) as auth_owner_matches,
+  has_function_privilege('service_role', p.oid, 'EXECUTE') as server_execute,
+  not has_function_privilege('anon', p.oid, 'EXECUTE') as anon_denied,
+  not has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_denied,
+  not exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+    where a.privilege_type = 'EXECUTE' and a.grantee not in (p.proowner, 'service_role'::regrole)) as no_unexpected_grants
+from pg_proc p where p.oid = to_regprocedure('public.plannix_auth_select_bootstrap(jsonb)');
+```
+
+Require one catalog row with every boolean true; a missing row fails verification. Do not call the recovery RPC or create users against production as a smoke test. After matching code deployment, operator-controlled ordinary sign-in can verify the public flow. Do not provide cookies, credentials or response tokens in review evidence.
+
+Pushing main triggers DigitalOcean deployment. Keep the reviewed code off main until migration postchecks pass; Git actions and deployment remain operator-controlled.
+
+The revised migration has been used only in disposable review stacks. If another project already recorded this version from an earlier draft, stop: compare its installed body and prepare a reviewed additive correction. Do not overwrite its recorded migration or repair history automatically.

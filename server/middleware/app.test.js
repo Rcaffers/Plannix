@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import vm from 'node:vm';
+import { EventEmitter } from 'node:events';
 
 const checkMigrationRemovalScript = `
   process.env.AUTO_RUN_MIGRATIONS = 'true';
@@ -353,7 +355,41 @@ test('app is authoritative, legacy infrastructure is absent, and server is the s
   assert.equal(fs.existsSync(new URL('../auth-server.js', import.meta.url)), false);
   assert.equal(fs.existsSync(new URL('../db.js', import.meta.url)), false);
   assert.equal(appSource.includes('.listen('), false);
-  assert.equal((serverSource.match(/\.listen\(/g) || []).length, 1);
+  // Execute the real startup body with inert dependencies: source occurrence
+  // counts cannot distinguish mutually exclusive production/development calls.
+  const startup = serverSource.replace(/^import .*;\n/gm, '');
+  function runStartup(nodeEnv, failure) {
+    const calls = [], listener = new EventEmitter();
+    const processStub = { on() {}, exitCode:0, env:{} };
+    vm.runInNewContext(startup, {
+      env:{nodeEnv,port:4000,distDirectory:'synthetic-dist',authMode:'server'},
+      app:{listen(...args) {calls.push(['listen',...args]);return listener;}},
+      validateProductionEnv() {calls.push(['validate']);if(failure==='configuration')throw Error('Synthetic configuration error');},
+      assertBuiltAuthMode(...args) {calls.push(['manifest',...args]);if(failure==='manifest')throw Error('Synthetic manifest error');},
+      logRouteError() {calls.push(['error']);},
+      pilotUserFromEnvironment() {return null;},
+      createMorningSummaryPolling() {throw Error('Disabled polling must not start');},
+      console:{log() {},error() {}},
+      process:processStub,
+    }, {timeout:1000});
+    // Include post-bind startup work, so another listener in a listening
+    // callback is detected rather than missed by an un-emitted fake server.
+    if(calls.some(call=>call[0]==='listen'))listener.emit('listening');
+    return {calls,processStub};
+  }
+  for(const mode of ['production','development','test']) {
+    const {calls,processStub}=runStartup(mode);
+    assert.deepEqual(calls, mode==='production'
+      ? [['validate'],['manifest','synthetic-dist','server'],['listen',4000]]
+      : [['validate'],['listen',4000,'localhost']], `${mode}: exactly one correctly bound listener after validation`);
+    assert.equal(processStub.exitCode,0);
+  }
+  for(const [mode,failure] of [['production','manifest'],['production','configuration'],['development','configuration']]) {
+    const {calls,processStub}=runStartup(mode,failure);
+    assert.equal(calls.some(call=>call[0]==='listen'),false,'failed startup never listens');
+    assert.equal(processStub.exitCode,1);
+    assert.equal(calls.filter(call=>call[0]==='error').length,1);
+  }
   for (const dependency of ['pg', 'bcryptjs', 'cookie-parser']) {
     assert.equal(appSource.includes(dependency), false);
     assert.equal(serverSource.includes(dependency), false);
