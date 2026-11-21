@@ -21,6 +21,7 @@ function clearRecoveryContext(expected = recoveryContext) {
   catch { /* A listener cannot change session verification. */ }
 }
 const responseGenerations = new WeakMap();
+const browserResetOffers = new WeakSet();
 if (serverManagedAuth && typeof BroadcastChannel !== 'undefined') {
   try {
     channel = new BroadcastChannel('plannix-server-session');
@@ -204,7 +205,22 @@ export async function bootstrapServerSession(fetchImpl = fetch, { signal } = {})
     throw new DOMException('Account changed.', 'AbortError');
   if (response.status === 409 && response.headers.get('X-Plannix-Bootstrap-Outcome') === 'expired-context')
     throw new Error('Your sign-in context expired. Please try signing in again.');
-  if (!response.ok) throw new Error('Authentication is unavailable.');
+  if (!response.ok) {
+    const error = new Error('Authentication is unavailable.');
+    if (serverManagedAuth && response.status === 401 && !displayedSessionName) {
+      let payload;
+      try { payload = await readSmallJson(response); } catch { /* Generic rejection. */ }
+      if (signal?.aborted || generation !== accountGeneration)
+        throw new DOMException('Account changed.', 'AbortError');
+      if (typeof payload?.browserResetProof === 'string' && payload.browserResetProof.length <= 1024
+        && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(payload.browserResetProof)) {
+        const offer = Object.freeze({ proof:payload.browserResetProof, generation, issuedAt:Date.now() });
+        browserResetOffers.add(offer);
+        error.browserResetOffer = offer;
+      }
+    }
+    throw error;
+  }
   const result = await readSmallJson(response);
   if (signal?.aborted || generation !== accountGeneration)
     throw new DOMException('Account changed.', 'AbortError');
@@ -213,6 +229,26 @@ export async function bootstrapServerSession(fetchImpl = fetch, { signal } = {})
   }
   if (!displayedSessionName) csrfToken = result.csrfToken;
   return result;
+}
+
+// Dedicated reset-only transport: no bootstrap, CSRF/session issuance, credential
+// replay, notification coordination or session-change broadcast.
+export async function resetBrowserSignIn(offer, { fetchImpl = fetch, signal } = {}) {
+  const current = () => serverManagedAuth && offer?.generation === accountGeneration
+    && !displayedSessionName && !signal?.aborted;
+  if (!current() || !browserResetOffers.has(offer) || Date.now()-offer.issuedAt >= 60000)
+    throw new Error('Please click Login again to check whether browser sign-in can be reset.');
+  browserResetOffers.delete(offer); // explicit single use locally, including failure
+  const generation = accountGeneration;
+  const response = await fetchImpl(sameOriginUrl('/__stage3/auth/browser-reset'), {
+    method:'POST', credentials:'same-origin', cache:'no-store', redirect:'error',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({proof:offer.proof}),
+    signal: signal || AbortSignal.timeout(10000),
+  });
+  if (!current() || generation !== accountGeneration)
+    throw new DOMException('Account changed.', 'AbortError');
+  if (response.status !== 204)
+    throw new Error('Browser sign-in reset was not confirmed. Click Login to check again; nothing will be retried automatically.');
 }
 
 export async function serverAuthFetch(input, options = {}, settings = {}) {

@@ -9,7 +9,7 @@ import {
   signupSuccessMessage,
 } from '../utils/authForms';
 import { supabaseRecovery } from '../utils/supabaseRecovery';
-import { serverManagedAuth } from '../utils/serverAuthTransport';
+import { serverManagedAuth, resetBrowserSignIn } from '../utils/serverAuthTransport';
 import { headerNavLinks } from '../utils/headerNav';
 import { SETTINGS_SUBNAV_ITEMS } from './SettingsSubnav';
 import { PLANNIX_OPEN_LOGIN_EVENT, PLANNIX_OPEN_SIGNUP_EVENT } from '../utils/plannixEvents';
@@ -38,6 +38,43 @@ export default function Header({
   const [isLoginSubmitting, setIsLoginSubmitting] = useState(false);
   const [isSignupSubmitting, setIsSignupSubmitting] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [browserResetOffer, setBrowserResetOffer] = useState(null);
+  const [isBrowserResetting, setIsBrowserResetting] = useState(false);
+  const [browserResetMessage, setBrowserResetMessage] = useState('');
+  const browserResetBusy = useRef(false);
+  const loginOperation = useRef(0);
+  const loginSubmitButton = useRef(null);
+  const resetFocusPending = useRef(null);
+  useEffect(() => {
+    if (!isBrowserResetting && resetFocusPending.current === loginOperation.current) {
+      resetFocusPending.current = null;
+      loginSubmitButton.current?.focus();
+    }
+  }, [isBrowserResetting, browserResetMessage, loginError]);
+
+  useEffect(() => {
+    const changed = () => {
+      loginOperation.current += 1;
+      browserResetBusy.current = false;
+      setBrowserResetOffer(null); setIsBrowserResetting(false); setBrowserResetMessage('');
+    };
+    window.addEventListener('plannix-server-session-change',changed);
+    window.addEventListener('plannix-server-session-mismatch',changed);
+    return () => {
+      loginOperation.current += 1;
+      window.removeEventListener('plannix-server-session-change',changed);
+      window.removeEventListener('plannix-server-session-mismatch',changed);
+    };
+  }, []);
+  useEffect(() => {
+    if (user?.id) {
+      loginOperation.current += 1;
+      browserResetBusy.current = false;
+      setBrowserResetOffer(null); setIsBrowserResetting(false); setBrowserResetMessage('');
+      setIsLoginOpen(false);
+      setLoginForm(current => ({...current,password:''}));
+    }
+  }, [user?.id]);
   const [signupError, setSignupError] = useState('');
   const [loginSuccess, setLoginSuccess] = useState('');
   const [signupSuccess, setSignupSuccess] = useState('');
@@ -113,6 +150,8 @@ export default function Header({
 
     const onKeyDown = (event) => {
       if (event.key === 'Escape') {
+        loginOperation.current += 1; browserResetBusy.current = false;
+        setBrowserResetOffer(null); setIsBrowserResetting(false); setBrowserResetMessage('');
         setIsLoginOpen(false);
         setIsSignupOpen(false);
         setIsUserMenuOpen(false);
@@ -146,6 +185,9 @@ export default function Header({
   }, [user]);
 
   const closeLogin = () => {
+    loginOperation.current += 1;
+    browserResetBusy.current = false;
+    setBrowserResetOffer(null); setIsBrowserResetting(false); setBrowserResetMessage('');
     setIsLoginOpen(false);
     setLoginError('');
     setLoginSuccess('');
@@ -170,6 +212,9 @@ export default function Header({
   };
 
   const openSignup = () => {
+    loginOperation.current += 1;
+    browserResetBusy.current = false;
+    setBrowserResetOffer(null); setIsBrowserResetting(false); setBrowserResetMessage('');
     setIsLoginOpen(false);
     setLoginError('');
     setLoginSuccess('');
@@ -221,6 +266,9 @@ export default function Header({
 
   const handleLoginSubmit = async (event) => {
     event.preventDefault();
+    if (isLoginSubmitting || browserResetBusy.current) return;
+    const operation = ++loginOperation.current;
+    setBrowserResetOffer(null); setBrowserResetMessage('');
     setLoginError('');
     setLoginSuccess('');
 
@@ -236,15 +284,39 @@ export default function Header({
     setIsLoginSubmitting(true);
     try {
       const loggedInUser = await onLogin({ email, password });
+      if (operation !== loginOperation.current) return;
       setLoginSuccess(loginSuccessMessage(loggedInUser));
       setLoginForm((current) => ({ ...current, password: '' }));
       setTimeout(() => {
-        closeLogin();
+        if (operation === loginOperation.current) closeLogin();
       }, 400);
     } catch (error) {
-      setLoginError(error.message || 'Login failed. Please try again.');
+      if (operation !== loginOperation.current) return;
+      if (serverManagedAuth && error?.browserResetOffer) setBrowserResetOffer(error.browserResetOffer);
+      if (error?.name !== 'AbortError') setLoginError(error.message || 'Login failed. Please try again.');
     } finally {
       setIsLoginSubmitting(false);
+    }
+  };
+
+  const handleBrowserReset = async () => {
+    if (!browserResetOffer || browserResetBusy.current || isLoginSubmitting) return;
+    const operation = ++loginOperation.current;
+    browserResetBusy.current = true;
+    setIsBrowserResetting(true); setBrowserResetMessage(''); setLoginError('');
+    const offer = browserResetOffer; setBrowserResetOffer(null);
+    try {
+      await resetBrowserSignIn(offer);
+      if (operation === loginOperation.current)
+        setBrowserResetMessage('Browser sign-in reset. Click Login to sign in normally.');
+    } catch (error) {
+      if (operation === loginOperation.current && error?.name !== 'AbortError')
+        setLoginError('Browser sign-in reset could not be confirmed. Click Login to check again.');
+    } finally {
+      if (operation === loginOperation.current) {
+        resetFocusPending.current = operation;
+        browserResetBusy.current = false; setIsBrowserResetting(false);
+      }
     }
   };
 
@@ -633,7 +705,7 @@ export default function Header({
                     onChange={(event) =>
                       setLoginForm((current) => ({ ...current, email: event.target.value }))
                     }
-                    disabled={isLoginSubmitting}
+                    disabled={isLoginSubmitting || isBrowserResetting}
                   />
 
                   <label htmlFor="login-password">Password</label>
@@ -647,7 +719,7 @@ export default function Header({
                     onChange={(event) =>
                       setLoginForm((current) => ({ ...current, password: event.target.value }))
                     }
-                    disabled={isLoginSubmitting}
+                    disabled={isLoginSubmitting || isBrowserResetting}
                   />
 
                   <div className="login-forgot-row">
@@ -659,17 +731,30 @@ export default function Header({
                         setForgotError('');
                         setLoginModalPane('forgot-email');
                       }}
-                      disabled={isLoginSubmitting}
+                      disabled={isLoginSubmitting || isBrowserResetting}
                     >
                       Forgot password?
                     </button>
                   </div>
 
                   <p className="visually-hidden" role="status">{isLoginSubmitting ? 'Logging in…' : ''}</p>
-                  {loginError ? <p className="login-message error">{loginError}</p> : null}
+                  {loginError ? <p className="login-message error" role="alert">{loginError}</p> : null}
                   {loginSuccess ? <p className="visually-hidden" role="status">{loginSuccess}</p> : null}
 
-                  <button type="submit" className="login-submit" disabled={isLoginSubmitting}>
+                  {serverManagedAuth && (browserResetOffer || isBrowserResetting) ? (
+                    <div className="login-message">
+                      <p>An unusable sign-in cookie is blocking this browser. Reset removes only that cookie; it does not sign you in or change notifications.</p>
+                      <button type="button" className="login-submit" onClick={handleBrowserReset}
+                        disabled={isBrowserResetting || isLoginSubmitting}>
+                        Reset sign-in on this browser
+                      </button>
+                    </div>
+                  ) : null}
+                  <p className="login-message" role="status" aria-live="polite">
+                    {isBrowserResetting ? 'Resetting browser sign-in…' : browserResetMessage}
+                  </p>
+
+                  <button ref={loginSubmitButton} type="submit" className="login-submit" disabled={isLoginSubmitting || isBrowserResetting}>
                     Login
                   </button>
 
@@ -679,7 +764,7 @@ export default function Header({
                       type="button"
                       className="login-switch-link"
                       onClick={openSignup}
-                      disabled={isLoginSubmitting}
+                      disabled={isLoginSubmitting || isBrowserResetting}
                     >
                       Create an account
                     </button>

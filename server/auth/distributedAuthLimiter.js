@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 
 const POLICY = Object.freeze({
   bootstrap:{ network:60, binding:90 },
+  browserReset:{ network:6 },
   status:{ network:180, binding:150 },
   me:{ network:180, binding:150 },
   login:{ network:20, binding:12, networkEmail:8 },

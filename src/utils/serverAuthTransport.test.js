@@ -490,3 +490,41 @@ test('late terminal bootstrap cannot replace a newer session or its failure pres
     assert.equal(module.captureServerOperationContext(owner).sessionName,session);
   } finally {await cleanup();globalThis.location=previousLocation;globalThis.BroadcastChannel=previousChannel;}
 });
+
+
+test('eligible bootstrap offer permits one explicit reset without bootstrap/login or notifications',async()=>{
+  const oldLocation=globalThis.location,oldChannel=globalThis.BroadcastChannel;
+  globalThis.location={origin:'https://app.plannix.test'};globalThis.BroadcastChannel=undefined;
+  const {module,cleanup}=await loadServerMode();
+  try {
+    let offer;const requests=[];const proof='a'.repeat(140)+'.'+'b'.repeat(43);
+    const fetchImpl=async(path,options)=>{requests.push({path:new URL(path).pathname,options});
+      return options.method==='GET'?Response.json({browserResetProof:proof},{status:401}):new Response(null,{status:204});};
+    await assert.rejects(module.bootstrapServerSession(fetchImpl),error=>{offer=error.browserResetOffer;return !!offer;});
+    await module.resetBrowserSignIn(offer,{fetchImpl});
+    assert.deepEqual(requests.map(r=>r.path),['/__stage3/auth/bootstrap','/__stage3/auth/browser-reset']);
+    assert.deepEqual(JSON.parse(requests[1].options.body),{proof});
+    assert.equal(requests[1].options.credentials,'same-origin');
+    assert.deepEqual(module.testTransitions,[]);
+    await assert.rejects(module.resetBrowserSignIn(offer,{fetchImpl}));
+    assert.equal(requests.length,2);
+  } finally {await cleanup();globalThis.location=oldLocation;globalThis.BroadcastChannel=oldChannel;}
+});
+
+test('generic rejection has no offer; uncertain reset is single-use and stale results are suppressed',async()=>{
+  const oldLocation=globalThis.location,oldChannel=globalThis.BroadcastChannel;
+  globalThis.location={origin:'https://app.plannix.test'};globalThis.BroadcastChannel=undefined;
+  const {module,cleanup}=await loadServerMode();
+  try {
+    await assert.rejects(module.bootstrapServerSession(async()=>Response.json({message:'rejected'},{status:401})),error=>!error.browserResetOffer);
+    const offer=async()=>{let result;await assert.rejects(module.bootstrapServerSession(async()=>Response.json({browserResetProof:'a'.repeat(140)+'.'+'b'.repeat(43)},{status:401})),e=>{result=e.browserResetOffer;return !!result;});return result;};
+    const first=await offer();let calls=0;
+    await assert.rejects(module.resetBrowserSignIn(first,{fetchImpl:async()=>{calls++;throw Error('uncertain');}}));
+    await assert.rejects(module.resetBrowserSignIn(first,{fetchImpl:async()=>{calls++;}}));assert.equal(calls,1);
+    const next=await offer();let finish;const pending=module.resetBrowserSignIn(next,{fetchImpl:()=>new Promise(r=>{finish=r;})});
+    module.invalidateServerSessionContext();finish(new Response(null,{status:204}));
+    await assert.rejects(pending,e=>e.name==='AbortError');
+    const previous=await offer();module.invalidateServerSessionContext();
+    await assert.rejects(module.resetBrowserSignIn(previous,{fetchImpl:async()=>{calls++;}}));assert.equal(calls,1);
+  } finally {await cleanup();globalThis.location=oldLocation;globalThis.BroadcastChannel=oldChannel;}
+});

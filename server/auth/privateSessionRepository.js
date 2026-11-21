@@ -65,6 +65,18 @@ export function createPrivateSessionRepository({ rpc, cipher, generateSecret = (
     }
     return { state: 'selected', marker: parsed.markers[0], session: parsed.sessions[0] };
   }
+  // Each call is one standalone PostgREST transaction. No transport retry.
+  async function checkOrphan(context) {
+    return call('plannix_auth_check_orphan_generation', { candidates: context });
+  }
+  async function resetOrphan(context, proof) {
+    return call('plannix_auth_reset_orphan_generation', { candidates: context,
+      proof_hash: proof.hash, proof_expires_at: proof.expiresAt });
+  }
+  async function confirmOrphanReset(context, proof) {
+    return call('plannix_auth_confirm_orphan_reset', { candidates: context,
+      proof_hash: proof.hash, proof_expires_at: proof.expiresAt });
+  }
   async function issueBinding() {
     const secret = newSecret();
     const result = await call('plannix_auth_issue_binding', { target_hash: digest(secret) });
@@ -274,7 +286,7 @@ export function createPrivateSessionRepository({ rpc, cipher, generateSecret = (
       session_hash: input.session.hash, confirmed_owner: confirmedOwnerId,
       expected_version: expectedVersion, access_cipher: access, refresh_cipher: refreshCipher });
   }
-  return Object.freeze({ issueBinding, resolve, resolveForApplication, begin, settle, inspect, readTokens,
+  return Object.freeze({ checkOrphan, resetOrphan, confirmOrphanReset, issueBinding, resolve, resolveForApplication, begin, settle, inspect, readTokens,
     reserveCallback, attachCallback, readyCallback, cancelCallback, claimCallback,
     claimRefresh, finishRefresh, releaseRefresh, logout, refresh });
 }

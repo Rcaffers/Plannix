@@ -1,5 +1,6 @@
 // Server-session boundary mounted only in explicit server auth mode.
 import express from 'express';
+import { orphanContext, createBrowserResetProofs } from './browserSignInReset.js';
 import { randomUUID } from 'node:crypto';
 import { createSessionRequestSecurity } from './sessionRequestSecurity.js';
 
@@ -85,6 +86,7 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
     throw new Error('Stage 3 boundary is not configured.');
   const router = express.Router();
   const security = createSessionRequestSecurity({ origin, csrfKey });
+  const resetProofs = createBrowserResetProofs({ key: csrfKey, origin });
   const guard = security.guard;
   const csrf = security.csrfFor;
   const verifyCsrf = security.verifyCsrf;
@@ -221,12 +223,47 @@ export function createServerSessionRouter({ repository, identity, origin, csrfKe
   router.get('/bootstrap',wrap(async(req,res) => {
     if (Object.keys(req.query).length) throw fail(400,'Authentication request is invalid.');
     await rate(req,'bootstrap');
-    const chosen = await resolve(req,res,{allowMissing:true,bootstrap:true});
+    let chosen;
+    try { chosen = await resolve(req,res,{allowMissing:true,bootstrap:true}); }
+    catch (error) {
+      // Only rejected bootstrap, never password failures or other generic 401s.
+      const context = orphanContext(guard(req));
+      if (error?.status === 401 && context && repository.checkOrphan) {
+        try {
+          const result = await deadline(repository.checkOrphan(context));
+          if (result.state === 'eligible' && !res.destroyed) return res.status(401).json({
+            message: 'Authentication was not accepted.', browserResetProof: resetProofs.issue(context),
+          });
+        } catch { /* Classifier uncertainty preserves the original rejection. */ }
+      }
+      throw error;
+    }
     if (chosen.state==='selected') return res.json({ ready:true, csrfToken:csrf(chosen.header) });
     const issued = await repository.issueBinding();
     if (issued.state!=='issued') throw fail(503,'Authentication service is temporarily unavailable.');
     res.append('Set-Cookie',issued.setCookie);
     return res.json({ ready:true, csrfToken:csrf(issued.setCookie.split(';')[0]) });
+  }));
+
+  router.post('/browser-reset',wrap(async(req,res) => {
+    if (Object.keys(req.query).length || !only(req.body,['proof']))
+      throw fail(400,'Authentication request is invalid.');
+    const header = guard(req); // exact Origin required for POST, including Host checks
+    const context = orphanContext(header);
+    const proof = resetProofs.verify(req.body.proof,context);
+    if (!proof) throw fail(403,'Browser reset verification failed.');
+    await rate(req,'browserReset');
+    // One mutation transaction; never retry it after any failure or uncertainty.
+    const result = await deadline(repository.resetOrphan(context,proof));
+    if (result.state !== 'retired') throw fail(409,'Browser reset was not completed. Please try signing in normally.');
+    if (res.destroyed) return;
+    // A successful RPC body alone is not commit evidence (rollback-mode gateways
+    // can return one). Observe this exact proof + context in a NEW transaction.
+    const confirmation = await deadline(repository.confirmOrphanReset(context,proof));
+    if (confirmation.state !== 'confirmed') throw fail(503,'Browser reset could not be confirmed.');
+    if (res.destroyed) return;
+    res.append('Set-Cookie',clearCookie(context.sessions[0].name));
+    res.status(204).end();
   }));
 
   router.get('/status',wrap(async(req,res) => {
