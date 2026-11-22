@@ -352,7 +352,7 @@ export default function Notifications({ userId, organisationId }) {
       <div className="settings-timetable-form">
         <h2 className="settings-section-title">This device</h2>
         <PushWorkerUpdateNotice />
-        <p className="settings-hint">Notifications are personal to this signed-in account and this device. A test contains no lesson details.</p>
+        <p className="settings-hint">A test contains no lesson details.</p>
         <div className="notification-state">
           <p><strong>Browser support:</strong> {supported ? 'Supported' : 'Unavailable in this browser or insecure context'}</p>
           <p><strong>Permission:</strong> {permission === 'granted' ? 'Allowed' : permission === 'denied' ? 'Blocked' : permission === 'default' ? 'Not requested' : 'Unavailable'}</p>
@@ -369,9 +369,14 @@ export default function Notifications({ userId, organisationId }) {
             && detailSelectorCurrent !== true && detailPolicyEnabled !== false))
           ? <button className="settings-reset" type="button" disabled={loading || busy} onClick={() => setReloadKey(value => value + 1)}>Retry notification status</button> : null}
         {notice ? <p role="status">{notice}</p> : null}
+        <p className="settings-hint">These controls only affect the device you’re using.</p>
         <div className="settings-actions notification-actions">
-          <button className="settings-save" type="button" disabled={!supported || !coordinated || !configured || loading || busy || registered === true || permission === 'denied' || (ios && !standalone)} onClick={enable}>Enable notifications</button>
-          <button className="settings-reset" type="button" disabled={!supported || !coordinated || loading || busy || !registered} onClick={disable}>Disable on this device</button>
+          <button className={registered === true ? 'settings-reset' : 'settings-save'} type="button"
+            disabled={!supported || !coordinated || loading || busy
+              || (registered !== true && (!configured || permission === 'denied' || (ios && !standalone)))}
+            onClick={registered === true ? disable : enable}>
+            {registered === true ? 'Disable notifications' : 'Enable notifications'}
+          </button>
           <button className="settings-reset" type="button" disabled={!supported || !coordinated || !configured || loading || busy || !registered || permission !== 'granted'} onClick={test}>Send test notification</button>
         </div>
         <p className="settings-hint">A successful test request means the push service accepted it; your device may still delay or suppress delivery.</p>

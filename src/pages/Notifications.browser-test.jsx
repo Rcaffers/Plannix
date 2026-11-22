@@ -87,7 +87,13 @@ export const currentPushSubscription = async () => {
   if (!lockDepth) throw Error('Device subscription read occurred outside Web Lock');
   return subscribed ? subscription : null;
 };
-export const disableCurrentDevice = async () => { calls.push('remove'); subscribed = false; };
+export const disableCurrentDevice = async () => {
+  calls.push('remove');
+  if (window.deferPushRemoval) await new Promise((resolve, reject) => {
+    window.releasePushRemoval = fail => fail ? reject(Error('Synthetic removal failed')) : resolve();
+  });
+  subscribed = false;
+};
 export const pushRequest = async (path, body) => {
   calls.push(path);
   if (['status', 'register', 'test', 'detail-policy/status', 'detail-policy/set'].includes(path) && !lockDepth) throw Error('Device operation occurred outside Web Lock');
@@ -139,6 +145,9 @@ export const pushRequest = async (path, body) => {
   if (path === 'register') {
     if (body.subscription.expirationTime !== undefined) throw Error('Unexpected expirationTime');
     if (serverManagedAuth && body.expectedVersion !== null) throw Error('First registration omitted the observed absent version');
+    if (window.deferPushRegistration) await new Promise((resolve, reject) => {
+      window.releasePushRegistration = fail => fail ? reject(Error('Synthetic registration failed')) : resolve();
+    });
     return serverManagedAuth ? { registered: true, version:'ca000000-0000-4000-8000-000000000099' }
       : { registered: true };
   }
@@ -208,6 +217,15 @@ const chooseTime = value => {
   }
   await tick(); await tick();
   check(!document.querySelector('.push-update-notice'), 'no update notice appears without a waiting worker');
+  const deviceActions = document.querySelector('.notification-actions');
+  const deviceCard = deviceActions.closest('.settings-timetable-form');
+  const deviceHint = 'These controls only affect the device you’re using.';
+  check(deviceActions.previousElementSibling?.textContent === deviceHint
+    && [...deviceCard.querySelectorAll('p')].filter(node => node.textContent === deviceHint).length === 1,
+    'device-only scope is explained once immediately above the device buttons');
+  check(deviceCard.textContent.includes('A test contains no lesson details.')
+    && !deviceCard.textContent.includes('Notifications are personal to this signed-in account and this device.'),
+    'generic-test privacy note remains without repeating device scope');
   check(calls.includes('config') && !calls.includes('permission'), 'permission is not requested on load');
   check(document.body.textContent.includes('Morning summaries are not active yet'), 'summary preference cannot imply scheduling');
   check(document.querySelector('#morning-academic-year')?.value === 'cb000000-0000-4000-8000-000000000010'
@@ -317,8 +335,37 @@ const chooseTime = value => {
   'late successful events cannot replace a newer date');
   check(document.body.textContent.includes('Not subscribed'), 'initial device state');
   check(!button('Enable details on this device'), 'no device recovery without saved consent and binding');
-  button('Enable notifications').click(); await tick(); await tick();
-  check(calls.filter(item => item === 'permission').length === 1, 'explicit click requests permission once');
+  window.deferPushRegistration = true;
+  check(button('Enable notifications') && !button('Disable notifications'),
+    'not subscribed shows exactly the enable device action');
+  button('Enable notifications').click();
+  await waitFor(() => typeof window.releasePushRegistration === 'function', 'registration response held');
+  check(button('Enable notifications')?.disabled
+    && !button('Disable notifications') && button('Send test notification').disabled,
+    'pending registration retains enable label and blocks actions before confirmation');
+  const permissionCalls = calls.filter(item => item === 'permission').length;
+  button('Enable notifications').click(); await tick();
+  check(calls.filter(item => item === 'permission').length === permissionCalls,
+    'pending device button prevents a duplicate enable');
+  window.releasePushRegistration(true);
+  await waitFor(() => document.body.textContent.includes('Synthetic registration failed')
+    && !button('Enable notifications')?.disabled, 'failed registration settles');
+  check(!button('Disable notifications') && button('Send test notification').disabled,
+    'failed registration cannot report a confirmed subscription or enable test sending');
+  const registrationCalls = calls.filter(item => item === 'register').length;
+  await tick();
+  check(calls.filter(item => item === 'register').length === registrationCalls,
+    'failed registration is not automatically retried');
+  window.releasePushRegistration = null;
+  button('Enable notifications').click();
+  await waitFor(() => typeof window.releasePushRegistration === 'function', 'explicit registration retry held');
+  window.deferPushRegistration = false;
+  window.releasePushRegistration(false);
+  await waitFor(() => Boolean(button('Disable notifications')
+    && !button('Disable notifications').disabled), 'registration confirmed');
+  check(!button('Enable notifications'), 'confirmed subscription replaces enable with disable');
+  check(calls.filter(item => item === 'permission').length === 2,
+    'only the two explicit enable clicks request permission');
   check(calls.includes('register') && document.body.textContent.includes('Subscribed'), 'registration reaches server');
   if (serverManagedAuth) check(calls.includes('observe')
     && calls.indexOf('observe') < calls.indexOf('register'),
@@ -578,8 +625,25 @@ const chooseTime = value => {
   }
   button('Send test notification').click(); await tick();
   check(calls.includes('test') && document.body.textContent.includes('not guaranteed'), 'server test path and truthful feedback');
-  button('Disable on this device').click(); await tick();
-  check(calls.includes('remove') && document.body.textContent.includes('Not subscribed'), 'disable removes current device');
+  window.deferPushRemoval = true;
+  button('Disable notifications').click();
+  await waitFor(() => typeof window.releasePushRemoval === 'function', 'device removal held');
+  check(button('Disable notifications')?.disabled
+    && !button('Enable notifications') && button('Send test notification').disabled,
+    'pending removal retains confirmed subscribed label and blocks other device actions');
+  window.releasePushRemoval(true);
+  await waitFor(() => document.body.textContent.includes('Synthetic removal failed')
+    && !button('Disable notifications')?.disabled, 'failed device removal settles');
+  check(!button('Enable notifications'), 'failed removal does not claim the device was disabled');
+  window.releasePushRemoval = null;
+  button('Disable notifications').click();
+  await waitFor(() => typeof window.releasePushRemoval === 'function', 'retried device removal held');
+  window.deferPushRemoval = false;
+  window.releasePushRemoval(false);
+  await waitFor(() => Boolean(button('Enable notifications')
+    && !button('Enable notifications').disabled), 'device removal confirmed');
+  check(!button('Disable notifications') && calls.includes('remove')
+    && document.body.textContent.includes('Not subscribed'), 'confirmed removal switches back to enable');
   if (serverManagedAuth) check(document.body.textContent.includes('notifications are off on this device'),
     'saved consent and a confirmed missing device subscription remain distinct');
   window.Notification.permission = 'denied';
@@ -603,7 +667,7 @@ const chooseTime = value => {
   const sharedLocks = navigator.locks;
   Object.defineProperty(navigator, 'locks', { configurable: true, value: undefined });
   await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications'); await tick(); await tick();
-  check(button('Enable notifications').disabled && button('Disable on this device').disabled
+  check(button('Enable notifications').disabled && !button('Disable notifications')
     && document.body.textContent.includes('cannot safely coordinate'), 'without Web Locks mutation controls are unavailable');
   Object.defineProperty(navigator, 'locks', { configurable: true, value: sharedLocks });
   await router.navigate('/settings'); await tick(); await router.navigate('/settings/notifications'); await tick(); await tick();
@@ -702,7 +766,7 @@ const chooseTime = value => {
   const notice = document.querySelector('.push-update-notice');
   check(notice?.parentElement?.classList.contains('settings-timetable-form')
     && notice.previousElementSibling?.textContent === 'This device'
-    && notice.nextElementSibling?.textContent.startsWith('Notifications are personal')
+    && notice.nextElementSibling?.textContent === 'A test contains no lesson details.'
     && getComputedStyle(notice).borderTopWidth === '0px'
     && getComputedStyle(notice).backgroundColor === 'rgba(0, 0, 0, 0)',
   'update notice sits inside the device card immediately after its heading without a separate banner');
