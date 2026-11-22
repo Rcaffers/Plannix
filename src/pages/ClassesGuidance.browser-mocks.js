@@ -21,3 +21,6 @@ export function saveClassCollection(_organisationId, _yearId, _revision, entries
     };
   });
 }
+
+export async function fetchRooms() { return {rooms:[],canManage:false}; }
+export async function saveRoom() { throw Error('Room mutation unavailable in guidance fixture'); }

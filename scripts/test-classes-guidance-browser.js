@@ -10,6 +10,7 @@ let chrome; let socket;
 try {
   await build({ configFile:false, logLevel:'error', define:{'process.env.NODE_ENV':'"production"'}, esbuild:{jsx:'automatic'},
     plugins:[{name:'classes-guidance-fixture',enforce:'pre',resolveId(source,importer) {
+      if (importer?.endsWith('/useRooms.js') && source === '../utils/roomApi') return path.resolve('src/pages/ClassesGuidance.browser-mocks.js');
       if (importer?.endsWith('/ClassContext.jsx')
         && (source === './AcademicYearContext' || source === '../utils/api'))
         return path.resolve('src/pages/ClassesGuidance.browser-mocks.js');

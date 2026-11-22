@@ -81,8 +81,8 @@ test('generation guards precede success and failure reference updates', async ()
       const body = source.slice(start, source.indexOf('\n  },', start));
       const success = body.split(/\btry\s*\{/)[1].split(/\}\s*catch/)[0];
       const failure = body.split(/\}\s*catch/)[1];
-      const contextGuard = context === 'TimetableSession' ? ' && contextIsCurrent\\(operationContext\\)' : '';
-      const staleContextGuard = context === 'TimetableSession' ? ' \\|\\| !contextIsCurrent\\(operationContext\\)' : '';
+      const contextGuard = context === 'TimetableSession' ? ' && contextIsCurrent\\(operationContext\\)' : context === 'Class' ? ' && expectedScope === currentScope\\.current' : '';
+      const staleContextGuard = context === 'TimetableSession' ? ' \\|\\| !contextIsCurrent\\(operationContext\\)' : context === 'Class' ? ' \\|\\| expectedScope !== currentScope\\.current' : '';
       assert.match(success, new RegExp(`if \\(${expected} !== ${loadGeneration}\\.current${staleContextGuard}\\) return [^;]+;[\\s\\S]*setRequestReference\\(''\\)`));
       assert.match(failure, new RegExp(`if \\(${expected} === ${loadGeneration}\\.current${contextGuard}\\) \\{[\\s\\S]*setRequestReference\\(safeRequestReference`));
     }

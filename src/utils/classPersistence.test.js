@@ -186,3 +186,14 @@ test('editor and ProjectCard share context and class removal never deletes sessi
   assert.match(editor, /beforeunload/);
   assert.match(persistence, /Remove or reassign/);
 });
+
+test('optional room IDs survive drafts and saves; omission differs from explicit clearing', () => {
+  const room = '91000000-0000-4000-8000-000000000001';
+  const base = {name:'Maths',frequency:2};
+  const draft = toDraftClasses([{...base,defaultRoomId:room}]);
+  assert.equal(toClassRequestEntries(draft)[0].defaultRoomId,room);
+  assert.equal(Object.hasOwn(toClassRequestEntries([base])[0],'defaultRoomId'),false);
+  assert.equal(toClassRequestEntries([{...base,defaultRoomId:null}])[0].defaultRoomId,null);
+  assert.equal(classEntriesEqual([{...base,defaultRoomId:room}],[{...base,defaultRoomId:null}]),false);
+  assert.match(validateClassDraft([{...base,defaultRoomId:'invalid'}]),/Default room/);
+});

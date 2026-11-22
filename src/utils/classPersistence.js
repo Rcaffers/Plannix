@@ -22,6 +22,7 @@ export function toDraftClass(entry = {}) {
     clientKey: String(entry.clientKey || (isCanonicalUuid(entry.id) ? entry.id : clientKey())),
     name: String(entry.name ?? ''),
     frequency: entry.frequency ?? 1,
+    ...(Object.hasOwn(entry, 'defaultRoomId') ? { defaultRoomId: entry.defaultRoomId } : {}),
   };
 }
 
@@ -44,6 +45,7 @@ export function validateClassDraft(entries) {
     if (entry.id != null && !isCanonicalUuid(entry.id)) return 'A saved class has an invalid ID.';
     if (entry.id && ids.has(entry.id)) return 'Class IDs must be unique.';
     if (entry.id) ids.add(entry.id);
+    if (Object.hasOwn(entry, 'defaultRoomId') && entry.defaultRoomId !== null && !isCanonicalUuid(entry.defaultRoomId)) return 'Default room must be a valid room or no default room.';
     const frequency = Number(entry.frequency);
     if (!Number.isInteger(frequency)
         || frequency < CLASS_LIMITS.frequencyMin
@@ -61,6 +63,7 @@ export function toClassRequestEntries(entries) {
     ...(isCanonicalUuid(entry.id) ? { id: entry.id } : {}),
     name: entry.name.trim(),
     frequency: Number(entry.frequency),
+    ...(Object.hasOwn(entry, 'defaultRoomId') ? { defaultRoomId: entry.defaultRoomId } : {}),
   }));
 }
 
@@ -69,6 +72,7 @@ export function classEntriesEqual(left, right) {
     id: isCanonicalUuid(entry.id) ? entry.id : null,
     name: String(entry.name ?? ''),
     frequency: Number(entry.frequency),
+    ...(Object.hasOwn(entry, 'defaultRoomId') ? { defaultRoomId: entry.defaultRoomId } : {}),
   }));
   return JSON.stringify(comparable(left)) === JSON.stringify(comparable(right));
 }

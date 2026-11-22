@@ -6,7 +6,7 @@ import express from 'express';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { createRequireSupabaseAuth } from '../middleware/requireSupabaseAuth.js';
 import { requestId } from '../middleware/requestId.js';
-import { registerClassRoutes } from './class-routes.js';
+import { registerClassRoutes, validateClassBody } from './class-routes.js';
 
 const requestIdValue = '8e6ddc18-d0d9-4fbc-a036-b02028e9f421';
 const organisationId = '10000000-0000-4000-8000-000000000001';
@@ -212,6 +212,7 @@ test('GET uses one race-free nested query and maps exact deterministic output', 
     assert.equal(harness.tableCalls.length, 1);
     assert.equal(harness.tableCalls[0].table, 'plannix_academic_years');
     assert.match(harness.tableCalls[0].calls[0][1], /classes_revision/);
+    assert.match(harness.tableCalls[0].calls[0][1], /default_room_id/);
     assert.match(harness.tableCalls[0].calls[0][1], /fk_plannix_classes_academic_year/);
     assert.deepEqual(harness.tableCalls[0].calls.slice(-5), [
       ['eq', 'organisation_id', organisationId],
@@ -452,4 +453,13 @@ test('production registers class routes exactly once and removes only legacy cla
   assert.equal(routes.includes('adminClient'), false);
   assert.equal(routes.includes('SUPABASE_SECRET_KEY'), false);
   assert.equal(routes.includes('cadence'), false);
+});
+
+test('class room fields validate omission, null and UUID without accepting extra fields', () => {
+  const base = validBody();
+  for (const value of [null, firstClassId]) {
+    const input = {...base,entries:base.entries.map(entry=>({...entry,defaultRoomId:value}))};
+    assert.equal(validateClassBody(input).entries[0].defaultRoomId,value);
+  }
+  assert.throws(()=>validateClassBody({...base,entries:base.entries.map(entry=>({...entry,defaultRoomId:'invalid'}))}));
 });

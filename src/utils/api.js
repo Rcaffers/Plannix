@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../lib/supabase.js';
 import { serverManagedAuth, serverAuthFetch, assertServerResponseCurrent,
-  captureServerOperationContext } from './serverAuthTransport.js';
+  captureServerOperationContext, assertServerOperationContext } from './serverAuthTransport.js';
 import { toClassRequestEntries } from './classPersistence.js';
 import { CANONICAL_UUID, editableLayout, publicLayout } from './timetableLayoutPersistence.js';
 
@@ -205,7 +205,8 @@ function publicClassEntry(value) {
   if (!name || !Number.isInteger(frequency) || frequency < 1 || frequency > 50) {
     throw new ApiError('The server returned invalid class data.');
   }
-  return { id, name, frequency };
+  if (Object.hasOwn(value, 'defaultRoomId') && value.defaultRoomId !== null) canonicalUuid(value.defaultRoomId, 'Default room');
+  return { id, name, frequency, ...(Object.hasOwn(value, 'defaultRoomId') ? { defaultRoomId: value.defaultRoomId } : {}) };
 }
 
 export function createClassApi({
@@ -234,6 +235,7 @@ export function createClassApi({
         credentials: 'omit',
         headers: { ...options?.headers, ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.access_token}` }) },
       };
+      if (operationContext) assertServerOperationContext(operationContext);
       response = serverManagedAuth
         ? await serverAuthFetch(`${API_BASE_URL}${path}`, init, { fetchImpl, operationContext })
         : await fetchImpl(`${API_BASE_URL}${path}`, init);
@@ -243,6 +245,7 @@ export function createClassApi({
       throw new ApiError(fallback);
     }
     const payload = await parseJsonSafe(response);
+    if (operationContext) assertServerOperationContext(operationContext);
     const requestId = response.headers?.get?.('x-request-id');
     if (!response.ok) {
       throw new ApiError(payload?.message || fallback, {

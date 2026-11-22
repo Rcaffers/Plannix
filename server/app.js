@@ -19,6 +19,7 @@ import { registerAiConnectionRoutes } from './routes/ai-connection-routes.js';
 import { registerAccountRoutes } from './routes/account-routes.js';
 import { registerAcademicYearRoutes } from './routes/academic-year-routes.js';
 import { registerEventRoutes } from './routes/event-routes.js';
+import { registerRoomRoutes } from './routes/room-routes.js';
 import { registerClassRoutes } from './routes/class-routes.js';
 import { registerContactRoutes } from './routes/contact-routes.js';
 import { registerCspReportRoutes } from './routes/csp-report-routes.js';
@@ -128,6 +129,7 @@ if (env.authMode !== 'server') registerAccountRoutes({ app });
 registerAcademicYearRoutes({ app });
 registerEventRoutes({ app });
 registerClassRoutes({ app });
+registerRoomRoutes({ app });
 if (env.authMode === 'server') registerServerAuthMembershipRoutes({ app,
   requireAuth: getServerAuthRuntime().requireAuth });
 registerTimetableLayoutRoutes({ app });

@@ -58,7 +58,7 @@ export function validateClassBody(body) {
   const ids = new Set();
   const names = new Set();
   const entries = body.entries.map((entry) => {
-    if (!hasOnlyKeys(entry, new Set(['id', 'name', 'frequency']))) {
+    if (!hasOnlyKeys(entry, new Set(['id', 'name', 'frequency', 'defaultRoomId']))) {
       throw publicError(400, 'A class contains unexpected fields.');
     }
     if (entry.id != null && !validUuid(entry.id)) {
@@ -80,12 +80,16 @@ export function validateClassBody(body) {
     if (!Number.isInteger(entry.frequency) || entry.frequency < 1 || entry.frequency > 50) {
       throw publicError(400, 'Class frequency must be an integer from 1 to 50.');
     }
+    if (Object.hasOwn(entry, 'defaultRoomId') && entry.defaultRoomId !== null && !validUuid(entry.defaultRoomId)) {
+      throw publicError(400, 'Default room must be a valid UUID or null.');
+    }
     if (entry.id) ids.add(entry.id);
     names.add(name);
     return {
       ...(entry.id ? { id: entry.id } : {}),
       name,
       frequency: entry.frequency,
+      ...(Object.hasOwn(entry, 'defaultRoomId') ? { defaultRoomId: entry.defaultRoomId } : {}),
     };
   });
 
@@ -102,13 +106,16 @@ function mapEntry(row) {
     id: row.id,
     name: row.name,
     frequency: row.frequency,
+    ...(Object.hasOwn(row, 'default_room_id') || Object.hasOwn(row, 'defaultRoomId')
+      ? { defaultRoomId: row.default_room_id ?? row.defaultRoomId ?? null } : {}),
   };
 }
 
 function validAuthoritativeEntry(row) {
   return validUuid(row?.id)
     && typeof row?.name === 'string'
-    && Number.isInteger(row?.frequency);
+    && Number.isInteger(row?.frequency)
+    && [row.default_room_id, row.defaultRoomId].every(value => value == null || validUuid(value));
 }
 
 function dataError(message, statusCode = 500) {
@@ -119,6 +126,8 @@ function mapRpcError(error) {
   if (error?.code === '40001') {
     return dataError('Classes changed since they were loaded. Reload and try again.', 409);
   }
+  if (error?.code === '23514') return dataError('This room is archived. Choose an active room or no default room.', 422);
+  if (error?.code === '23503' && /room/i.test(error.message || '')) return dataError('The selected room is unavailable. Reload rooms and choose again.', 422);
   if (error?.code === '23503') {
     return dataError('A class with timetable placements cannot be removed.', 409);
   }
@@ -152,7 +161,8 @@ export function registerClassRoutes({
             id,
             name,
             frequency,
-            sort_order
+            sort_order,
+            default_room_id
           )
         `)
         .eq('organisation_id', req.query.organisationId)

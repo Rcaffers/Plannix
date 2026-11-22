@@ -42,17 +42,20 @@ async function fixture() {
   await writeFile(path.join(root,'timetableSessionState.mjs'),await source('timetableSessionState.js'));
   await writeFile(path.join(root,'timetableOperationContext.mjs'),
     (await source('timetableOperationContext.js')).replace("'./serverAuthTransport.js'","'./transport.mjs'"));
-  for(const name of ['pushNotifications','morningSummaryApi','accountDeletion']) {
+  for(const name of ['pushNotifications','morningSummaryApi','accountDeletion','roomApi']) {
     await writeFile(path.join(root,`${name}.mjs`),(await source(`${name}.js`))
       .replace("'../lib/supabase.js'","'./supabase.mjs'")
       .replace("'./serverAuthTransport.js'","'./transport.mjs'")
       .replace("'./serverAuthTestObserver.js'","'./serverAuthTestObserver.mjs'")
       .replace("'./api.js'","'./api.mjs'")
+      .replace("'./classPersistence.js'","'./classPersistence.mjs'")
       .replace("'./pushDeviceLock.js'","'./pushDeviceLock.mjs'"));
   }
   const summaryPath=path.join(root,'morningSummaryApi.mjs');
   await writeFile(summaryPath,(await readFile(summaryPath,'utf8'))
     .replace("'./pushDetailSelector.js'","'./pushDetailSelector.mjs'"));
+  await writeFile(path.join(root,'classPersistence.mjs'),await source('classPersistence.js'));
+  const rooms=await import(`file://${root}/roomApi.mjs`);
   const transport=await import(`file://${root}/transport.mjs`);
   const push=await import(`file://${root}/pushNotifications.mjs`);
   const summary=await import(`file://${root}/morningSummaryApi.mjs`);
@@ -64,7 +67,7 @@ async function fixture() {
     transport.setServerSessionContext(SESSION_B,CSRF_B,B);};
   const replaceA=()=>{transport.invalidateServerSessionContext();
     transport.setServerSessionContext('__Host-plannix-s-4','c'.repeat(43),A);};
-  return {transport,push,summary,deletion,queue,preparation,selectA,selectB,replaceA,
+  return {transport,rooms,push,summary,deletion,queue,preparation,selectA,selectB,replaceA,
     async close(){globalThis.location=previous.location;globalThis.BroadcastChannel=previous.channel;
       await rm(root,{recursive:true,force:true});}};
 }
@@ -234,3 +237,19 @@ test('account deletion rejects a changed session after deferred initial verifica
     controller.dispose();
   } finally {await f.close();}
 });
+
+for (const replacement of ['different account','same-account replacement']) {
+  test(`room responses cannot cross ${replacement} during JSON parsing`,async()=>{
+    const f=await fixture();const body=deferred(),started=deferred();let calls=0;
+    try {
+      f.selectA();const api=f.rooms.createRoomApi({getSession:()=>{throw Error('No browser provider call');},fetchImpl:async(_url,init)=>{
+        calls++;assert.equal(init.credentials,'same-origin');assert.equal(init.headers.has('Authorization'),false);
+        assert.equal(init.headers.get('X-Plannix-Expected-Session'),SESSION_A);
+        return {ok:true,status:200,headers:new Headers(),json(){started.release();return body.promise;}};
+      }});
+      const work=api.load({organisationId:YEAR,userId:A});await started.promise;
+      replacement==='different account'?f.selectB():f.replaceA();
+      body.release({rooms:[],canManage:true});await assert.rejects(work,changed);assert.equal(calls,1);
+    } finally {await f.close();}
+  });
+}

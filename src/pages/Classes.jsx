@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import RoomsCard from '../components/RoomsCard';
+import { useRooms } from '../hooks/useRooms';
 import SettingsSubnav from '../components/SettingsSubnav';
 import ProjectCard from '../components/ProjectCard';
 import { timetableProject } from '../utils/projectsData';
@@ -13,6 +15,8 @@ export default function Classes() {
   const isInputPage = location.pathname === '/classes/input';
   const { layout } = useTimetableLayout();
   const {
+    roomScope,
+    authoritativeEntries,
     entries,
     isLoaded,
     isLoading,
@@ -27,6 +31,7 @@ export default function Classes() {
     save,
     reload,
   } = useClasses();
+  const rooms = useRooms(roomScope, !isInputPage && !!roomScope?.userId && !!roomScope?.organisationId);
   const [inputWeek, setInputWeek] = useState(1);
 
   useEffect(() => {
@@ -142,7 +147,8 @@ export default function Classes() {
                 : ' (one-week: counts are per calendar week).'}
             </p>
 
-            <form className="classes-form" onSubmit={handleSubmit}>
+            <RoomsCard key={roomScope?.key} collection={rooms} scopeKey={roomScope?.key} />
+            <form className="classes-form classes-collection-form" onSubmit={handleSubmit}>
               <p className="classes-hint classes-hint--standalone">
                 You can add up to 60 classes. Change weekly vs two-week cycle under Timetable settings.
               </p>
@@ -198,6 +204,18 @@ export default function Classes() {
                         disabled={isSaving}
                       />
                     </div>
+                    {!rooms.canManage && rooms.loaded && <p className="classes-hint">Default room: {entry.defaultRoomId ? `${rooms.rooms.find(room => room.id === entry.defaultRoomId)?.name || 'Unavailable room'}${rooms.rooms.some(room => room.id === entry.defaultRoomId && !room.isActive) ? ' (Archived)' : ''}` : 'No default room'}</p>}
+                    {rooms.canManage && <div className="classes-field classes-field--inline classes-field--room">
+                      <label htmlFor={`class-room-${index}`}>Default room (optional)</label>
+                      <select id={`class-room-${index}`} value={entry.defaultRoomId ?? ''}
+                        disabled={isSaving || rooms.loading || !rooms.loaded || rooms.saving || rooms.uncertain}
+                        onChange={event => updateEntry(index, { defaultRoomId:event.target.value || null })}>
+                        <option value="">No default room</option>
+                        {entry.defaultRoomId && !rooms.rooms.some(room => room.id === entry.defaultRoomId && room.isActive) && <option value={entry.defaultRoomId} disabled>{rooms.rooms.find(room => room.id === entry.defaultRoomId)?.name || 'Current room unavailable'} ({authoritativeEntries?.some(saved => saved.id && saved.id === entry.id && saved.defaultRoomId === entry.defaultRoomId) ? 'Archived or unavailable — retained' : 'Archived or unavailable — choose another room'})</option>}
+                        {rooms.rooms.filter(room => room.isActive).map(room => <option key={room.id} value={room.id}>{room.name}</option>)}
+                      </select>
+                      {entry.defaultRoomId && rooms.rooms.some(room => room.id === entry.defaultRoomId && !room.isActive) && <p className="classes-hint">Existing lesson assignments are kept. Choose an active room or clear the default for new placements.</p>}
+                    </div>}
                   </div>
                 </section>
               ))}

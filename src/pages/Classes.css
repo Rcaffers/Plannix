@@ -264,3 +264,15 @@
     display: none;
   }
 }
+
+.rooms-card { margin-bottom: 24px; }
+.rooms-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+.rooms-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.rooms-name { overflow-wrap: anywhere; min-width: 0; }
+.rooms-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.rooms-editor { display: grid; gap: 14px; }
+.rooms-actions button { min-height: 44px; }
+@media (max-width: 480px) { .rooms-list li { align-items: flex-start; flex-direction: column; } .rooms-actions { width: 100%; } }
+
+.classes-entry-grid > .classes-field { min-width: 0; }
+.classes-field--room { grid-column: 1 / -1; }

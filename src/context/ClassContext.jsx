@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { serverSessionGeneration } from '../utils/serverAuthTransport';
 import { safeRequestReference } from '../utils/requestReference';
 import { useAcademicYear } from './AcademicYearContext';
 import { fetchClassCollection, saveClassCollection } from '../utils/api';
@@ -15,9 +16,13 @@ import {
 const ClassContext = createContext(null);
 
 export function ClassProvider({ children, user }) {
+  const [sessionEpoch, setSessionEpoch] = useState(() => serverSessionGeneration());
   const organisationId = user?.organisationId || null;
   const { selectedAcademicYearId, registerAcademicYearChangeGuard } = useAcademicYear();
+  const scopeKey = `${user?.id || ''}:${organisationId || ''}:${selectedAcademicYearId || ''}:${sessionEpoch}`;
+  const [viewScopeKey, setViewScopeKey] = useState(scopeKey);
   const [authoritativeEntries, setAuthoritativeEntries] = useState(null);
+  const [loadedScopeKey, setLoadedScopeKey] = useState(null);
   const [loadedAcademicYearId, setLoadedAcademicYearId] = useState(null);
   const [entries, setEntriesState] = useState([]);
   const [revision, setRevision] = useState(null);
@@ -26,10 +31,17 @@ export function ClassProvider({ children, user }) {
   const [error, setError] = useState('');
   const [requestReference, setRequestReference] = useState('');
   const [saved, setSaved] = useState(false);
+  const currentScope = useRef(scopeKey); currentScope.current = scopeKey;
   const generation = useRef(0);
+  useEffect(() => {
+    const changed = () => { generation.current += 1; setSessionEpoch(value => value + 1); };
+    window.addEventListener('plannix-server-session-change', changed);
+    window.addEventListener('plannix-server-session-mismatch', changed);
+    return () => { window.removeEventListener('plannix-server-session-change', changed); window.removeEventListener('plannix-server-session-mismatch', changed); };
+  }, []);
   const saving = useRef(false);
 
-  const dirty = authoritativeEntries !== null
+  const dirty = viewScopeKey === scopeKey && authoritativeEntries !== null
     && !classEntriesEqual(entries, authoritativeEntries);
 
   useEffect(() => registerAcademicYearChangeGuard(() =>
@@ -43,8 +55,10 @@ export function ClassProvider({ children, user }) {
   }, [dirty]);
 
   const clear = useCallback(() => {
+    setViewScopeKey(currentScope.current);
     generation.current += 1;
     saving.current = false;
+    setLoadedScopeKey(null);
     setAuthoritativeEntries(null);
     setLoadedAcademicYearId(null);
     setEntriesState([]);
@@ -57,19 +71,22 @@ export function ClassProvider({ children, user }) {
   }, []);
 
   const load = useCallback(async ({ confirmDiscard = false } = {}) => {
-    if (!user?.id || !organisationId || !selectedAcademicYearId) return false;
+    if (scopeKey !== currentScope.current || !user?.id || !organisationId || !selectedAcademicYearId) return false;
     if (confirmDiscard && dirty
         && !window.confirm('Discard unsaved class changes and reload?')) return false;
     generation.current += 1;
     const expectedGeneration = generation.current;
+    const expectedScope = scopeKey;
+    setViewScopeKey(expectedScope);
     setIsLoading(true);
     setError('');
     setRequestReference('');
     setSaved(false);
     try {
       const result = await fetchClassCollection(organisationId, selectedAcademicYearId);
-      if (expectedGeneration !== generation.current) return false;
+      if (expectedGeneration !== generation.current || expectedScope !== currentScope.current) return false;
       const loaded = toDraftClasses(result.entries);
+      setLoadedScopeKey(expectedScope);
       setAuthoritativeEntries(loaded);
       setLoadedAcademicYearId(selectedAcademicYearId);
       setEntriesState(loaded);
@@ -77,7 +94,8 @@ export function ClassProvider({ children, user }) {
       setRequestReference('');
       return true;
     } catch (loadError) {
-      if (expectedGeneration === generation.current) {
+      if (expectedGeneration === generation.current && expectedScope === currentScope.current) {
+        setLoadedScopeKey(null);
         setAuthoritativeEntries(null);
         setEntriesState([]);
         setRevision(null);
@@ -86,36 +104,38 @@ export function ClassProvider({ children, user }) {
       }
       return false;
     } finally {
-      if (expectedGeneration === generation.current) setIsLoading(false);
+      if (expectedGeneration === generation.current && expectedScope === currentScope.current) setIsLoading(false);
     }
-  }, [dirty, organisationId, selectedAcademicYearId, user?.id]);
+  }, [dirty, organisationId, selectedAcademicYearId, user?.id, scopeKey]);
 
   useEffect(() => {
     clear();
     if (!user?.id || !organisationId || !selectedAcademicYearId) return undefined;
     load();
     return () => { generation.current += 1; };
-  }, [user?.id, organisationId, selectedAcademicYearId, clear]); // load intentionally scoped by IDs
+  }, [user?.id, organisationId, selectedAcademicYearId, sessionEpoch, clear]); // load intentionally scoped by IDs
 
   const updateEntries = useCallback((next) => {
+    if (currentScope.current !== scopeKey) return;
     setSaved(false);
     setError('');
     setRequestReference('');
     setEntriesState((current) => (typeof next === 'function' ? next(current) : next));
-  }, []);
+  }, [scopeKey]);
 
   const addClass = useCallback(() => updateEntries(addDraftClass), [updateEntries]);
   const removeClass = useCallback((index) => updateEntries((current) =>
     current.filter((_, entryIndex) => entryIndex !== index)), [updateEntries]);
 
   const save = useCallback(async () => {
-    if (saving.current || isLoading || revision === null
+    if (scopeKey !== currentScope.current || loadedScopeKey !== scopeKey || saving.current || isLoading || revision === null
         || !organisationId || !selectedAcademicYearId) return false;
     setRequestReference('');
     const validationError = validateClassDraft(entries);
     if (validationError) { setError(validationError); return false; }
     saving.current = true;
     const expectedGeneration = generation.current;
+    const expectedScope = scopeKey;
     const guidanceSave = beginSetupGuidanceSave(user?.id, 'classes');
     setIsSaving(true);
     setError('');
@@ -127,8 +147,9 @@ export function ClassProvider({ children, user }) {
         revision,
         toClassRequestEntries(entries),
       );
-      if (expectedGeneration !== generation.current) return false;
+      if (expectedGeneration !== generation.current || expectedScope !== currentScope.current) return false;
       const authoritative = toDraftClasses(result.entries);
+      setLoadedScopeKey(expectedScope);
       setAuthoritativeEntries(authoritative);
       setLoadedAcademicYearId(selectedAcademicYearId);
       setEntriesState(authoritative);
@@ -138,31 +159,32 @@ export function ClassProvider({ children, user }) {
       finishSetupGuidanceSave(guidanceSave);
       return true;
     } catch (saveError) {
-      if (expectedGeneration === generation.current) {
+      if (expectedGeneration === generation.current && expectedScope === currentScope.current) {
         setError(safeClassError(saveError, 'Could not save classes.'));
         setRequestReference(safeRequestReference(saveError));
       }
       return false;
     } finally {
-      if (expectedGeneration === generation.current) {
+      if (expectedGeneration === generation.current && expectedScope === currentScope.current) {
         saving.current = false;
         setIsSaving(false);
       }
     }
-  }, [entries, isLoading, organisationId, revision, selectedAcademicYearId, user?.id]);
+  }, [entries, isLoading, organisationId, revision, selectedAcademicYearId, user?.id, scopeKey, loadedScopeKey]);
 
   const value = useMemo(() => ({
-    authoritativeEntries,
-    loadedAcademicYearId,
-    entries,
-    revision,
-    isLoaded: authoritativeEntries !== null,
-    isLoading,
-    isSaving,
+    roomScope: { key:scopeKey, userId:user?.id, organisationId, academicYearId:selectedAcademicYearId },
+    authoritativeEntries: viewScopeKey === scopeKey ? authoritativeEntries : null,
+    loadedAcademicYearId: viewScopeKey === scopeKey ? loadedAcademicYearId : null,
+    entries: loadedScopeKey === scopeKey ? entries : [],
+    revision: viewScopeKey === scopeKey ? revision : null,
+    isLoaded: authoritativeEntries !== null && loadedScopeKey === scopeKey,
+    isLoading: viewScopeKey === scopeKey ? isLoading : !!(user?.id && organisationId && selectedAcademicYearId),
+    isSaving: viewScopeKey === scopeKey && isSaving,
     dirty,
-    error,
-    requestReference,
-    saved,
+    error: viewScopeKey === scopeKey ? error : '',
+    requestReference: viewScopeKey === scopeKey ? requestReference : '',
+    saved: viewScopeKey === scopeKey && saved,
     updateEntries,
     addClass,
     removeClass,
@@ -170,7 +192,7 @@ export function ClassProvider({ children, user }) {
     reload: () => load({ confirmDiscard: true }),
     clearClasses: clear,
   }), [authoritativeEntries, loadedAcademicYearId, entries, revision, isLoading, isSaving, dirty, error,
-    requestReference, saved, updateEntries, addClass, removeClass, save, load, clear]);
+    requestReference, saved, updateEntries, addClass, removeClass, save, load, clear, scopeKey, loadedScopeKey, viewScopeKey]);
 
   return <ClassContext.Provider value={value}>{children}</ClassContext.Provider>;
 }
