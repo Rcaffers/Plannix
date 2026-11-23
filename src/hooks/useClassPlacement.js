@@ -56,7 +56,9 @@ export function useClassPlacement({ enabled, safe, removalSafe = safe, weekId, s
     const next = result(destination, candidate);
     if (!next.ok) { setStatus(messages[next.reason] || 'This is not an available lesson destination.', true); return; }
     if (next.unchanged) return;
-    if (!save(next.sessions)) { setStatus(messages.UNSAFE, true); return; }
+    const saved=save(next.sessions);
+    if(saved==='choose-room'){setMoving(null);setSelected(null);setStatus('Choose an active room or No room, then save the placement.');return;}
+    if (!saved) { setStatus(messages.UNSAFE, true); return; }
     setMoving(null);
     const destinationLabel = destination.label || slots.find(slot => slot.day === destination.day
       && slot.periodId === destination.periodId)?.label || 'the selected slot';

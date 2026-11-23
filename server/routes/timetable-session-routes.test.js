@@ -1,3 +1,4 @@
+import { createClient } from '@supabase/supabase-js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -7,7 +8,7 @@ import { errorHandler } from '../middleware/errorHandler.js';
 import { notFound } from '../middleware/notFound.js';
 import { createRequireSupabaseAuth } from '../middleware/requireSupabaseAuth.js';
 import { requestId } from '../middleware/requestId.js';
-import { registerTimetableSessionRoutes } from './timetable-session-routes.js';
+import { registerTimetableSessionRoutes, attachRoomAssignments } from './timetable-session-routes.js';
 
 const requestIdValue = '8e6ddc18-d0d9-4fbc-a036-b02028e9f421';
 const organisationId = '10000000-0000-4000-8000-000000000001';
@@ -56,11 +57,9 @@ async function harness({ authUser = confirmedUser, authError = null, rpcResult }
     requireAuth,
     createRequestClient(auth) {
       clientCreations.push({ ...auth });
-      return { async rpc(name, input) {
-        rpcCalls.push({ name, input });
-        if (rpcResult instanceof Error) throw rpcResult;
-        if (typeof rpcResult === 'function') return rpcResult(name, input);
-        return rpcResult || defaultRpcResult(name);
+      return { rpc(name, input) {
+        const work=async()=>{rpcCalls.push({name,input});if(rpcResult instanceof Error)throw rpcResult;if(typeof rpcResult==='function')return rpcResult(name,input);return rpcResult || defaultRpcResult(name);};
+        return {then:(resolve,reject)=>work().then(resolve,reject),range:(from,to)=>work().then(result=>({...result,...(Array.isArray(result.data)?{data:result.data.slice(from,to+1),count:result.data.length}:{})}))};
       } };
     },
   });
@@ -340,4 +339,72 @@ test('new routes register once and legacy endpoint contracts and planner module 
       assert.equal(response.status, 404);
     }
   } finally { await instance.close(); }
+});
+
+const roomId='a0000000-0000-4000-8000-000000000001';
+const assignment=(overrides={})=>({session_id:sessionId,collection_id:collectionId,collection_type:'recurring',timetable_week_id:weekAId,week_start_date:null,day:0,period_id:periodId,room_id:roomId,...overrides});
+test('opt-in room loading uses the authenticated assignment RPC and preserves legacy responses',async()=>{
+  const h=await harness({rpcResult:name=>name==='plannix_get_timetable_room_assignments'?{data:[assignment()],error:null}:defaultRpcResult(name)});
+  try{
+    let r=await fetch(h.baseUrl+recurringPath,{headers:headers()});let data=await r.json();assert.equal(Object.hasOwn(data.weeks[0].sessions[0],'roomId'),false);assert.equal(h.rpcCalls.length,1);
+    r=await fetch(h.baseUrl+recurringPath+'&includeRooms=true',{headers:headers()});data=await r.json();assert.equal(r.status,200);assert.equal(data.roomAssignmentsLoaded,true);assert.equal(data.weeks[0].sessions[0].roomId,roomId);
+    assert.deepEqual(h.rpcCalls.at(-2).input,{target_organisation_id:organisationId,target_academic_year_id:academicYearId,target_timetable_id:timetableId});
+  }finally{await h.close();}
+});
+test('failed, incomplete or revision-raced assignment reads cannot become empty room values',async()=>{
+  for(const result of [{error:{status:503}}, {data:[],error:null}, {data:[assignment({room_id:undefined})],error:null}]){
+    const h=await harness({rpcResult:name=>name==='plannix_get_timetable_room_assignments'?result:defaultRpcResult(name)});
+    try{const r=await fetch(h.baseUrl+recurringPath+'&includeRooms=true',{headers:headers()});assert.equal(r.status,503);assert.equal(Object.hasOwn(await r.json(),'weeks'),false);}finally{await h.close();}
+  }
+  let reads=0;const h=await harness({rpcResult:name=>name==='plannix_get_timetable_room_assignments'?{data:[assignment()],error:null}:{data:[{...defaultRpcResult(name).data[0],revision:++reads}],error:null}});
+  try{assert.equal((await fetch(h.baseUrl+recurringPath+'&includeRooms=true',{headers:headers()})).status,503);}finally{await h.close();}
+});
+test('writes preserve omitted room fields and explicit null; archived-room errors remain actionable',async()=>{
+  const h=await harness();try{
+    for(const value of [undefined,null,roomId]){
+      const entry=validSession(value===undefined?{}:{roomId:value});
+      const r=await fetch(h.baseUrl+'/api/timetable/sessions/recurring',{method:'PUT',headers:headers(),body:JSON.stringify(recurringBody({sessions:[entry]}))});assert.equal(r.status,200);
+      const sent=h.rpcCalls.at(-1).input.target_sessions[0];assert.equal(Object.hasOwn(sent,'roomId'),value!==undefined);if(value!==undefined)assert.equal(sent.roomId,value);
+    }
+  }finally{await h.close();}
+  const archived=await harness({rpcResult:{error:{code:'23514',message:'Archived rooms cannot be newly assigned.'}}});try{assert.equal((await fetch(archived.baseUrl+'/api/timetable/sessions/recurring',{method:'PUT',headers:headers(),body:JSON.stringify(recurringBody({sessions:[validSession({roomId})]}))})).status,422);}finally{await archived.close();}
+});
+
+test('opt-in dated inheritance carries explicit null from the repeating placement',async()=>{
+ const h=await harness({rpcResult:name=>{
+  if(name==='plannix_get_timetable_room_assignments')return {data:[assignment({room_id:null})],error:null};
+  const result=defaultRpcResult(name);return {...result,data:result.data.map(row=>({...row,revision:3}))};
+ }});
+ try{const r=await fetch(h.baseUrl+datedPath+'&includeRooms=true',{headers:headers()});assert.equal(r.status,200);const data=await r.json();assert.equal(data.sessions[0].roomId,null);assert.equal(data.sessions[0].id,undefined);assert.equal(data.roomAssignmentsLoaded,true);}finally{await h.close();}
+});
+
+
+test('room assignment pagination confirms every page and rejects truncated or changing totals',async()=>{
+ const rows=Array.from({length:205},(_,i)=>assignment({session_id:`a0000000-0000-4000-8000-${String(i+10).padStart(12,'0')}`,collection_id:`b0000000-0000-4000-8000-${String(i+10).padStart(12,'0')}`}));
+ const pages=[];let truncate=false,changeTotal=false;
+ const client={rpc(name){if(name==='plannix_get_recurring_timetable_sessions')return Promise.resolve({data:[{revision:3}],error:null});return {range:async(start,end)=>{pages.push(start);return {data:truncate&&start?[]:rows.slice(start,end+1),count:changeTotal&&start?rows.length+1:rows.length,error:null};}};}};
+ const payload={revision:3,weeks:[]};
+ assert.equal((await attachRoomAssignments(client,{organisationId,academicYearId,timetableId},payload)).roomAssignmentsLoaded,true);assert.deepEqual(pages,[0,200]);
+ truncate=true;await assert.rejects(attachRoomAssignments(client,{organisationId,academicYearId,timetableId},payload),/incomplete/);
+ truncate=false;changeTotal=true;await assert.rejects(attachRoomAssignments(client,{organisationId,academicYearId,timetableId},payload),/completeness/);
+});
+
+
+test('the installed Supabase client supplies exact RPC counts and range pagination to room hydration',async()=>{
+  const calls=[];
+  const client=createClient('http://127.0.0.1:59999','synthetic-public-key',{
+    auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false},
+    global:{fetch:async(url,init)=>{
+      calls.push({url:new URL(url),init});
+      const assignments=new URL(url).pathname.endsWith('/plannix_get_timetable_room_assignments');
+      return new Response(JSON.stringify(assignments?[assignment()]:[{revision:3}]),{status:200,headers:{'Content-Type':'application/json',...(assignments?{'Content-Range':'0-0/1'}:{})}});
+    }},
+  });
+  const payload={revision:3,weeks:[{weekId:weekAId,code:'A',collectionId,sessions:[validSession()]}]};
+  const result=await attachRoomAssignments(client,{organisationId,academicYearId,timetableId},payload);
+  assert.equal(result.weeks[0].sessions[0].roomId,roomId);
+  assert.equal(calls[0].init.method,'POST');
+  assert.match(new Headers(calls[0].init.headers).get('Prefer'),/count=exact/);
+  assert.equal(calls[0].url.searchParams.get('offset'),'0');assert.equal(calls[0].url.searchParams.get('limit'),'200');
+  assert.deepEqual(JSON.parse(calls[0].init.body),{target_organisation_id:organisationId,target_academic_year_id:academicYearId,target_timetable_id:timetableId});
 });

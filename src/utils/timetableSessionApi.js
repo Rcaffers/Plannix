@@ -28,8 +28,8 @@ function revision(value) {
 
 function publicSession(value, inherited = false) {
   const allowed = inherited
-    ? ['day', 'periodId', 'classId', 'title', 'notes']
-    : ['id', 'day', 'periodId', 'classId', 'title', 'notes'];
+    ? ['day', 'periodId', 'classId', 'title', 'notes', 'roomId']
+    : ['id', 'day', 'periodId', 'classId', 'title', 'notes', 'roomId'];
   if (!value || typeof value !== 'object' || Array.isArray(value)
       || Object.keys(value).some((key) => !allowed.includes(key))
       || (!inherited && !CANONICAL_UUID.test(String(value.id || '')))
@@ -37,12 +37,14 @@ function publicSession(value, inherited = false) {
       || !CANONICAL_UUID.test(String(value.periodId || ''))
       || !CANONICAL_UUID.test(String(value.classId || ''))
       || typeof value.title !== 'string' || value.title.length > 200
+      || (Object.hasOwn(value,'roomId') && value.roomId !== null && !CANONICAL_UUID.test(String(value.roomId || '')))
       || typeof value.notes !== 'string' || value.notes.length > 5000) {
     throw new ApiError('The server returned invalid timetable session data.');
   }
   return {
     ...(!inherited ? { id: value.id } : {}), day: value.day, periodId: value.periodId,
     classId: value.classId, title: value.title, notes: value.notes,
+    ...(Object.hasOwn(value,'roomId') ? {roomId:value.roomId} : {}),
   };
 }
 
@@ -106,13 +108,16 @@ async function defaultSession() {
 }
 
 export function createTimetableSessionApi({ fetchImpl = fetch, getSession = defaultSession } = {}) {
-  async function request(path, options, fallback, mapper, operationContext) {
+  async function request(path, options, fallback, mapper, operationContext, isCurrent) {
     const context = serverManagedAuth
       ? operationContext || (['GET', 'HEAD'].includes(options.method) ? captureServerOperationContext() : null)
       : null;
+    const checkCurrent = () => { if (isCurrent && !isCurrent()) throw new DOMException('Timetable context changed.', 'AbortError'); };
+    checkCurrent();
     if (context) assertServerOperationContext(context);
     try {
       const session = serverManagedAuth ? null : await getSession();
+      checkCurrent();
       if (!serverManagedAuth && !session?.access_token) throw new ApiError('Authentication is required.', { status: 401 });
       const init = { ...options, credentials: 'omit', headers: { ...options?.headers,
         ...(serverManagedAuth ? {} : { Authorization: `Bearer ${session.access_token}` }) } };
@@ -124,7 +129,15 @@ export function createTimetableSessionApi({ fetchImpl = fetch, getSession = defa
       const requestId = REQUEST_ID.test(String(rawRequestId || '')) ? rawRequestId : null;
       if (!response.ok) throw new ApiError(payload?.message || fallback, { status: response.status, requestId });
       if (context) assertServerOperationContext(context);
-      return { ...mapper(payload), requestId };
+      checkCurrent();
+      const mapped=mapper(payload);
+      const roomsRequested=path.includes('includeRooms=true') || (options.body && JSON.parse(options.body).includeRooms === true);
+      if (roomsRequested) {
+        const collections=mapped.weeks || mapped.collections || [mapped];
+        if (payload.roomAssignmentsLoaded !== true || collections.some(c=>c.sessions.some(s=>!Object.hasOwn(s,'roomId')))) throw new ApiError('Room assignments could not be confirmed. Reload the timetable.');
+      }
+      if (payload.roomAssignmentsLoaded === true) mapped.roomAssignmentsLoaded=true;
+      return { ...mapped, requestId };
     } catch (error) {
       if (error?.name === 'AbortError') throw error;
       if (error instanceof ApiError) throw error;
@@ -135,18 +148,18 @@ export function createTimetableSessionApi({ fetchImpl = fetch, getSession = defa
     return { organisationId: uuid(value.organisationId, 'Organisation'),
       academicYearId: uuid(value.academicYearId, 'Academic year'), timetableId: uuid(value.timetableId, 'Timetable') };
   }
-  const query = (value, extras = {}) => new URLSearchParams({ ...scope(value), ...extras });
-  const body = (value, extras = {}) => ({ ...scope(value), ...extras });
+  const query = (value, extras = {}) => new URLSearchParams({ ...scope(value), ...(value.includeRooms ? {includeRooms:'true'} : {}), ...extras });
+  const body = (value, extras = {}) => ({ ...scope(value), ...(value.includeRooms ? {includeRooms:true} : {}), ...extras });
   return {
-    loadRecurring(value, { signal, operationContext } = {}) { return request(`/api/timetable/sessions/recurring?${query(value)}`, { method: 'GET', signal }, 'Could not load timetable sessions.', mapRecurring, operationContext); },
-    saveRecurring(value, { operationContext } = {}) { return request('/api/timetable/sessions/recurring', { method: 'PUT', headers: JSON_POST_HEADERS,
-      body: JSON.stringify(body(value, { weekId: uuid(value.weekId, 'Week'), expectedRevision: revision(value.expectedRevision), sessions: requestSessions(value.sessions) })) }, 'Could not save timetable sessions.', (payload) => mapSaved(payload), operationContext); },
-    loadDate(value, { signal, operationContext } = {}) { return request(`/api/timetable/sessions/date?${query(value, { weekStartDate: monday(value.weekStartDate) })}`, { method: 'GET', signal }, 'Could not load timetable sessions.', mapDated, operationContext); },
-    saveDate(value, { operationContext } = {}) { return request('/api/timetable/sessions/date', { method: 'PUT', headers: JSON_POST_HEADERS,
-      body: JSON.stringify(body(value, { weekStartDate: monday(value.weekStartDate), expectedRevision: revision(value.expectedRevision), sessions: requestSessions(value.sessions) })) }, 'Could not save timetable sessions.', (payload) => mapSaved(payload, true), operationContext); },
-    removeDate(value, { operationContext } = {}) { const q = query(value, { weekStartDate: monday(value.weekStartDate), expectedRevision: String(revision(value.expectedRevision)) });
-      return request(`/api/timetable/sessions/date?${q}`, { method: 'DELETE' }, 'Could not restore the repeating timetable.', mapDated, operationContext); },
-    saveBatch(value, { operationContext } = {}) { if (!Array.isArray(value.mutations) || value.mutations.length < 1 || value.mutations.length > 20) throw new ApiError('Session mutations are invalid.');
+    loadRecurring(value, { signal, operationContext, isCurrent } = {}) { return request(`/api/timetable/sessions/recurring?${query(value)}`, { method: 'GET', signal }, 'Could not load timetable sessions.', mapRecurring, operationContext, isCurrent); },
+    saveRecurring(value, { operationContext, isCurrent } = {}) { return request('/api/timetable/sessions/recurring', { method: 'PUT', headers: JSON_POST_HEADERS,
+      body: JSON.stringify(body(value, { weekId: uuid(value.weekId, 'Week'), expectedRevision: revision(value.expectedRevision), sessions: requestSessions(value.sessions) })) }, 'Could not save timetable sessions.', (payload) => mapSaved(payload), operationContext, isCurrent); },
+    loadDate(value, { signal, operationContext, isCurrent } = {}) { return request(`/api/timetable/sessions/date?${query(value, { weekStartDate: monday(value.weekStartDate) })}`, { method: 'GET', signal }, 'Could not load timetable sessions.', mapDated, operationContext, isCurrent); },
+    saveDate(value, { operationContext, isCurrent } = {}) { return request('/api/timetable/sessions/date', { method: 'PUT', headers: JSON_POST_HEADERS,
+      body: JSON.stringify(body(value, { weekStartDate: monday(value.weekStartDate), expectedRevision: revision(value.expectedRevision), sessions: requestSessions(value.sessions) })) }, 'Could not save timetable sessions.', (payload) => mapSaved(payload, true), operationContext, isCurrent); },
+    removeDate(value, { operationContext, isCurrent } = {}) { const q = query(value, { weekStartDate: monday(value.weekStartDate), expectedRevision: String(revision(value.expectedRevision)) });
+      return request(`/api/timetable/sessions/date?${q}`, { method: 'DELETE' }, 'Could not restore the repeating timetable.', mapDated, operationContext, isCurrent); },
+    saveBatch(value, { operationContext, isCurrent } = {}) { if (!Array.isArray(value.mutations) || value.mutations.length < 1 || value.mutations.length > 20) throw new ApiError('Session mutations are invalid.');
       const targets = new Set(); const mutations = value.mutations.map((mutation) => { if (!['recurring', 'date_override'].includes(mutation.type)) throw new ApiError('Session mutation type is invalid.'); const target = mutation.type === 'recurring' ? `recurring:${mutation.weekId}` : `date:${mutation.weekStartDate}`; if (targets.has(target)) throw new ApiError('Session mutation targets must be unique.'); targets.add(target); return ({ type: mutation.type,
       ...(mutation.type === 'recurring' ? { weekId: uuid(mutation.weekId, 'Week') } : { weekStartDate: monday(mutation.weekStartDate) }),
       sessions: requestSessions(mutation.sessions) }); });
@@ -158,7 +171,7 @@ export function createTimetableSessionApi({ fetchImpl = fetch, getSession = defa
           weekId: uuid(collection.weekId, 'Week'), ...(collection.type === 'date_override' ? { weekStartDate: monday(collection.weekStartDate) } : {}),
           sessions: collection.sessions.map((entry) => publicSession(entry)),
         })) };
-      }, operationContext); },
+      }, operationContext, isCurrent); },
   };
 }
 

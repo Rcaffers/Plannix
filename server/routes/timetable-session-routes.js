@@ -51,7 +51,7 @@ function validateSessions(value) {
   const ids = new Set();
   const slots = new Set();
   return value.map((session) => {
-    if (!onlyKeys(session, new Set(['id', 'day', 'periodId', 'classId', 'title', 'notes']))) {
+    if (!onlyKeys(session, new Set(['id', 'day', 'periodId', 'classId', 'title', 'notes', 'roomId']))) {
       throw publicError(400, 'A timetable session contains unexpected fields.');
     }
     if (session.id != null && !isUuid(session.id)) throw publicError(400, 'Session IDs must be valid UUIDs when supplied.');
@@ -63,6 +63,7 @@ function validateSessions(value) {
     if (typeof session.notes !== 'string' || session.notes.length > 5000) throw publicError(400, 'Session notes must be a string containing no more than 5000 characters.');
     const slot = `${session.day}:${session.periodId}`;
     if (slots.has(slot)) throw publicError(409, 'Timetable session slots must be unique.');
+    if (Object.hasOwn(session,'roomId') && session.roomId !== null && !isUuid(session.roomId)) throw publicError(400, 'Room must be a valid UUID or null.');
     if (session.id) ids.add(session.id);
     slots.add(slot);
     return {
@@ -72,16 +73,18 @@ function validateSessions(value) {
       classId: session.classId,
       title: session.title,
       notes: session.notes,
+      ...(Object.hasOwn(session,'roomId') ? {roomId:session.roomId} : {}),
     };
   });
 }
 
 function validateBaseBody(body, extraKeys) {
   if (!onlyKeys(body, new Set([
-    'organisationId', 'academicYearId', 'timetableId', 'expectedRevision', ...extraKeys,
+    'organisationId', 'academicYearId', 'timetableId', 'expectedRevision', 'includeRooms', ...extraKeys,
   ]))) throw publicError(400, 'Request body contains unexpected fields.');
   const scope = validateScope(body);
-  return { ...scope, expectedRevision: validateRevision(body.expectedRevision) };
+  if (Object.hasOwn(body,'includeRooms') && typeof body.includeRooms !== 'boolean') throw publicError(400,'includeRooms must be boolean.');
+  return { ...scope, expectedRevision: validateRevision(body.expectedRevision), ...(body.includeRooms ? {includeRooms:true} : {}) };
 }
 
 function validateRecurringBody(body) {
@@ -131,11 +134,13 @@ function validateBatchBody(body) {
 }
 
 function validateQuery(query, { dated = false, remove = false } = {}) {
-  const allowed = new Set(['organisationId', 'academicYearId', 'timetableId']);
+  const allowed = new Set(['organisationId', 'academicYearId', 'timetableId', 'includeRooms']);
   if (dated) allowed.add('weekStartDate');
   if (remove) allowed.add('expectedRevision');
   if (!onlyKeys(query, allowed)) throw publicError(400, 'Unexpected query parameters are not allowed.');
   const scope = validateScope(query);
+  if (query.includeRooms !== undefined && query.includeRooms !== 'true') throw publicError(400,'includeRooms must be true.');
+  if (query.includeRooms === 'true') scope.includeRooms = true;
   if (dated && !isMonday(query.weekStartDate)) throw publicError(400, 'weekStartDate must be a Monday in YYYY-MM-DD format.');
   if (remove) {
     if (!/^(?:0|[1-9]\d*)$/.test(query.expectedRevision || '')) throw publicError(400, 'expectedRevision must be a nonnegative safe integer.');
@@ -254,6 +259,7 @@ function mapBatch(row) {
 function mappedError(error, operation) {
   if (error?.code === '40001') return publicError(409, 'Timetable sessions changed since they were loaded. Reload and try again.');
   if (error?.code === '23514' && error.message === 'TIMETABLE_CLASS_FREQUENCY_EXCEEDED') return publicError(409, 'A class exceeds its allowed recurring frequency.');
+  if (error?.code === '23514' && /Archived rooms/.test(error.message || '')) return publicError(422,'This room is archived. Choose an active room or explicitly select No room.');
   if (error?.code === '23505') return publicError(409, 'Timetable session data conflicts with an existing slot.');
   if (error?.code === '22023') return publicError(400, 'Timetable session data is invalid.');
   if (error?.code === '42501') return publicError(403, 'You do not have permission to access these timetable sessions.');
@@ -286,7 +292,7 @@ export function registerTimetableSessionRoutes({
       target_academic_year_id: input.academicYearId,
       target_timetable_id: input.timetableId,
     }, 'load');
-    res.json(mapRecurring(row));
+    res.json(input.includeRooms ? await attachRoomAssignments(createRequestClient(req.auth), input, mapRecurring(row)) : mapRecurring(row));
   });
 
   route('put', '/api/timetable/sessions/recurring', async (req, res) => {
@@ -299,7 +305,7 @@ export function registerTimetableSessionRoutes({
       expected_revision: input.expectedRevision,
       target_sessions: input.sessions,
     }, 'save');
-    res.json(mapSavedCollection(row, 'recurring'));
+    res.json(input.includeRooms ? await attachRoomAssignments(createRequestClient(req.auth), input, mapSavedCollection(row, 'recurring')) : mapSavedCollection(row, 'recurring'));
   });
 
   route('get', '/api/timetable/sessions/date', async (req, res) => {
@@ -310,7 +316,7 @@ export function registerTimetableSessionRoutes({
       target_timetable_id: input.timetableId,
       target_week_start_date: input.weekStartDate,
     }, 'load');
-    res.json(mapDated(row));
+    res.json(input.includeRooms ? await attachRoomAssignments(createRequestClient(req.auth), input, mapDated(row)) : mapDated(row));
   });
 
   route('put', '/api/timetable/sessions/date', async (req, res) => {
@@ -323,7 +329,7 @@ export function registerTimetableSessionRoutes({
       expected_revision: input.expectedRevision,
       target_sessions: input.sessions,
     }, 'save');
-    res.json(mapSavedCollection(row, 'date_override'));
+    res.json(input.includeRooms ? await attachRoomAssignments(createRequestClient(req.auth), input, mapSavedCollection(row, 'date_override')) : mapSavedCollection(row, 'date_override'));
   });
 
   route('delete', '/api/timetable/sessions/date', async (req, res) => {
@@ -335,7 +341,7 @@ export function registerTimetableSessionRoutes({
       target_week_start_date: input.weekStartDate,
       expected_revision: input.expectedRevision,
     }, 'remove');
-    res.json(mapDated(row));
+    res.json(input.includeRooms ? await attachRoomAssignments(createRequestClient(req.auth), input, mapDated(row)) : mapDated(row));
   });
 
   route('put', '/api/timetable/sessions/batch', async (req, res) => {
@@ -347,6 +353,41 @@ export function registerTimetableSessionRoutes({
       expected_revision: input.expectedRevision,
       target_mutations: input.mutations,
     }, 'save');
-    res.json(mapBatch(row));
+    res.json(input.includeRooms ? await attachRoomAssignments(createRequestClient(req.auth), input, mapBatch(row)) : mapBatch(row));
   });
+}
+
+// A failed/incomplete room read never becomes an empty mapping. Revision fencing
+// detects writes between the session snapshot and assignment read.
+export async function attachRoomAssignments(client, scope, payload) {
+  const args={target_organisation_id:scope.organisationId,target_academic_year_id:scope.academicYearId,target_timetable_id:scope.timetableId};
+  const assignments={data:[]};let total=null;
+  for(let offset=0;;){
+    const page=await client.rpc('plannix_get_timetable_room_assignments',args,{count:'exact'}).range(offset,offset+199);
+    if(page.error||!Array.isArray(page.data))throw publicError(503,'Could not confirm room assignments. Reload the timetable before editing.');
+    if(!Number.isSafeInteger(page.count)||page.count<0||(total!==null&&total!==page.count))throw publicError(503,'Room assignment completeness could not be confirmed. Reload the timetable.');
+    total=page.count;assignments.data.push(...page.data);offset+=page.data.length;
+    if(offset===total)break;
+    if(!page.data.length||offset>total)throw publicError(503,'Room assignment data is incomplete. Reload the timetable.');
+  }
+  const byId=new Map(), bySlot=new Map();
+  for(const a of assignments.data){
+    if(!isUuid(a.session_id)||!isUuid(a.collection_id)||!isUuid(a.timetable_week_id)||!isUuid(a.period_id)||!Number.isInteger(a.day)||a.day<0||a.day>4||!['recurring','date_override'].includes(a.collection_type)||!Object.hasOwn(a,'room_id')||(a.room_id!==null&&!isUuid(a.room_id))) throw publicError(503,'Room assignment data is incomplete. Reload the timetable.');
+    const key=`${a.collection_id}:${a.day}:${a.period_id}`;
+    if(byId.has(a.session_id)||bySlot.has(key)) throw publicError(503,'Room assignment data is inconsistent. Reload the timetable.');
+    byId.set(a.session_id,a);bySlot.set(key,a);
+  }
+  const fill=(sessions,collectionId,weekId,inherited=false)=>sessions.map(session=>{
+    const a=inherited ? assignments.data.find(row=>row.collection_type==='recurring'&&row.timetable_week_id===weekId&&row.day===session.day&&row.period_id===session.periodId) : byId.get(session.id);
+    if(!a||a.day!==session.day||a.period_id!==session.periodId||(!inherited&&a.collection_id!==collectionId)) throw publicError(503,'An existing room assignment could not be confirmed. Reload the timetable.');
+    return {...session,roomId:a.room_id};
+  });
+  let result;
+  if(payload.weeks)result={...payload,weeks:payload.weeks.map(w=>({...w,sessions:fill(w.sessions,w.collectionId,w.weekId)}))};
+  else if(payload.collections)result={...payload,collections:payload.collections.map(c=>({...c,sessions:fill(c.sessions,c.collectionId,c.weekId)}))};
+  else result={...payload,sessions:fill(payload.sessions,payload.collectionId,payload.repeatingWeekId,payload.source==='recurring')};
+  const latest=await client.rpc('plannix_get_recurring_timetable_sessions',args);
+  const current=oneRow(latest.data);
+  if(latest.error||!current||Number(current.revision)!==payload.revision) throw publicError(503,'Timetable changed while room assignments were loading. Reload before editing.');
+  return {...result,roomAssignmentsLoaded:true};
 }

@@ -102,3 +102,34 @@ test('production React has no legacy session endpoint or persistence identities'
   assert.match(sessionApi, /sessions\/batch/);
   assert.equal((sessionApi.match(/credentials: 'omit'/g) || []).length, 1);
 });
+
+
+test('room-aware clients require complete confirmed assignments and preserve omitted versus null writes', async () => {
+  let payload={...recurring,roomAssignmentsLoaded:true,weeks:recurring.weeks.map(w=>({...w,sessions:[{...session,roomId:null}]}))};
+  const calls=[];
+  const api=createTimetableSessionApi({getSession:async()=>({access_token:'synthetic'}),fetchImpl:async(url,options)=>{calls.push({url,options});return response(payload);}});
+  assert.equal((await api.loadRecurring({...scope,includeRooms:true})).weeks[0].sessions[0].roomId,null);
+  assert.match(calls[0].url,/includeRooms=true/);
+  payload=recurring;await assert.rejects(api.loadRecurring({...scope,includeRooms:true}),/could not be confirmed/);
+  payload={...recurring,roomAssignmentsLoaded:true};await assert.rejects(api.loadRecurring({...scope,includeRooms:true}),/could not be confirmed/);
+  payload={revision:4,collectionId:ids[7],sessions:[{...session,roomId:null}],roomAssignmentsLoaded:true};
+  for(const value of [undefined,null,ids[8]]){
+    const entry=value===undefined?session:{...session,roomId:value};
+    await api.saveRecurring({...scope,includeRooms:true,weekId:ids[3],expectedRevision:3,sessions:[entry]});
+    const sent=JSON.parse(calls.at(-1).options.body);assert.equal(sent.includeRooms,true);assert.equal(Object.hasOwn(sent.sessions[0],'roomId'),value!==undefined);if(value!==undefined)assert.equal(sent.sessions[0].roomId,value);
+  }
+});
+
+
+test('stale timetable contexts cannot send after delayed authentication or accept a late response',async()=>{
+  let current=true,releaseSession,calls=0;
+  const api=createTimetableSessionApi({getSession:()=>new Promise(resolve=>{releaseSession=resolve;}),fetchImpl:async()=>{calls++;return response(recurring);}});
+  const pending=api.saveRecurring({...scope,weekId:ids[3],expectedRevision:3,sessions:[session]},{isCurrent:()=>current});
+  current=false;releaseSession({access_token:'replacement-account-token'});
+  await assert.rejects(pending,error=>error.name==='AbortError');assert.equal(calls,0);
+  current=true;let releaseBody;
+  const read=createTimetableSessionApi({getSession:async()=>({access_token:'synthetic'}),fetchImpl:async()=>({...response(recurring),json:()=>new Promise(resolve=>{releaseBody=resolve;})})});
+  const late=read.loadRecurring(scope,{isCurrent:()=>current});
+  while(!releaseBody)await new Promise(resolve=>setImmediate(resolve));
+  current=false;releaseBody(recurring);await assert.rejects(late,error=>error.name==='AbortError');
+});

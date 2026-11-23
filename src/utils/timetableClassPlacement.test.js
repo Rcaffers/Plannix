@@ -89,7 +89,8 @@ test('modal fallback, keyboard buttons, Escape, cancel and live announcements re
 test('week changes clear selection and dragging; only existing edit persistence is used', () => {
   assert.match(hook, /setMoving\(null\); setSelected\(null\); endDrag\(\); setStatus\(''\); }, \[weekId, enabled\]/);
   assert.match(hook, /selected\?\.weekId === weekId/);
-  assert.match(card, /save: \(next\) => target && sessionState.edit\(target, next\)/);
+  assert.match(card, /save: saveRoomAwarePlacement/);
+  assert.match(card, /if \(!roomControls\) return sessionState.edit\(target,next\)/);
   assert.doesNotMatch(hook + palette + read('./timetableClassPlacement.js'), /fetch\(|supabase|localStorage|saveRecurringTimetableSessions/);
   assert.match(card, /classPlacementUnavailableReason/);
 });
@@ -147,7 +148,8 @@ test('modal and palette return share validated removal and the existing save cal
   assert.match(hook, /if \(!save\(next.sessions\)\)/);
   assert.match(card, /onClick={removeModalPlacement}>Remove from timetable/);
   assert.match(card, /placement.removeSession\(/);
-  assert.match(card, /save: \(next\) => target && sessionState.edit\(target, next\)/);
+  assert.match(card, /save: saveRoomAwarePlacement/);
+  assert.match(card, /if \(!roomControls\) return sessionState.edit\(target,next\)/);
 });
 
 test('optimistic removal retains failed payload for existing conflict and retry queue', async () => {

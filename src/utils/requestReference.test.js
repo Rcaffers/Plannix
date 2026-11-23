@@ -119,7 +119,7 @@ test('stale recurring and dated results cannot replace a newer load or its suppo
     const datedLoadGeneration = { current: 0 };
     const dependencies = {
       scope: { organisationId: 'organisation', academicYearId: 'year', timetableId: 'timetable' },
-      recurringScopeKey:'scope',
+      recurringScopeKey:'scope', roomRequest:value=>value, setRoomAssignmentsReady:()=>{},
       user: { id: 'user' }, resetSaveQueue: () => {}, recurringLoadGeneration,
       datedLoadGeneration, observeTimetableOperation: () => {}, safeRequestReference,
       serverManagedAuth: false, loadOperationContext: () => null, contextIsCurrent: () => true,
@@ -192,12 +192,12 @@ test('recurring and dated loads ignore stale session outcomes without changing n
         const requests = [];
         const dependencies = {
           scope:{ organisationId:'org', academicYearId:'year', timetableId:'table' },
-          recurringScopeKey:'scope',
+          recurringScopeKey:'scope', roomRequest:value=>value, setRoomAssignmentsReady:()=>{},
           user:{ id:'user' }, resetSaveQueue:() => {},
           recurringLoadGeneration:{ current:0 }, datedLoadGeneration:{ current:0 },
           serverManagedAuth:true,
           loadOperationContext:userId => activeContext?.userId === userId ? activeContext : undefined,
-          contextIsCurrent:context => context === activeContext,
+          contextIsCurrent:context => context == null || context === activeContext,
           observeTimetableOperation:() => {}, safeRequestReference,
           [fetchName]:(_scope, options) => { const request = deferred();
             requests.push(options.operationContext); pending.push(request); return request.promise; },

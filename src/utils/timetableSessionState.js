@@ -9,8 +9,8 @@ export function assertUniqueSessionSlots(sessions) {
 }
 
 export function sameSessions(left, right) {
-  const clean = (items) => items.map(({ id, day, periodId, classId, title, notes }) =>
-    ({ id: id || null, day, periodId, classId, title, notes }));
+  const clean = (items) => items.map(entry =>
+    ({ id: entry.id || null, day:entry.day, periodId:entry.periodId, classId:entry.classId, title:entry.title, notes:entry.notes, ...(Object.hasOwn(entry,'roomId') ? {roomId:entry.roomId} : {}) }));
   return JSON.stringify(clean(left)) === JSON.stringify(clean(right));
 }
 
@@ -80,7 +80,8 @@ export function displayToSession(session, periodIdByIndex) {
   if (!periodId) throw new Error('The selected teaching period is unavailable.');
   return { ...(session.id ? { id: session.id } : {}), day: session.day, periodId,
     classId: session.classId, title: String(session.title || '').trim().slice(0, 200),
-    notes: String(session.notes || '').trim().slice(0, 5000) };
+    notes: String(session.notes || '').trim().slice(0, 5000),
+    ...(Object.hasOwn(session,'roomId') ? {roomId:session.roomId} : {}) };
 }
 
 export function combinedRecurringSessions(weeks) {
