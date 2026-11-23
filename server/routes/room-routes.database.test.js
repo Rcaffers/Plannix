@@ -43,7 +43,7 @@ test(`real RLS room API and class-default compatibility (${authMode}) on explici
         return Promise.resolve(r.status===0?{data:single?data[0]??null:data,error:null}:{data:null,error:{code:r.stderr.match(/ERROR:\s+([A-Z0-9]{5})/)?.[1]||'XX000',message:r.stderr.match(/ERROR:\s+[A-Z0-9]{5}:\s*([^\n]+)/)?.[1]}}).then(resolve,reject);
       }};return q;
     },
-    async rpc(name,input){assert.equal(name,'plannix_save_classes');const r=sql(`BEGIN;set local request.jwt.claim.sub=${literal(userId)};set local role authenticated;select json_agg(r) from public.plannix_save_classes(${literal(input.target_organisation_id)}::uuid,${literal(input.target_academic_year_id)}::uuid,${input.expected_revision},${literal(JSON.stringify(input.target_classes))}::jsonb) r;COMMIT;`);return r.status===0?{data:JSON.parse(r.stdout),error:null}:{error:{code:r.stderr.match(/ERROR:\s+([A-Z0-9]{5})/)?.[1]||'XX000',message:r.stderr.match(/ERROR:\s+[A-Z0-9]{5}:\s*([^\n]+)/)?.[1]}};}
+    async rpc(name,input){assert.ok(['plannix_save_classes','plannix_delete_room'].includes(name));const statement=name==='plannix_delete_room'?`select to_json(public.plannix_delete_room(${literal(input.target_organisation_id)}::uuid,${literal(input.target_room_id)}::uuid))`:`select json_agg(r) from public.plannix_save_classes(${literal(input.target_organisation_id)}::uuid,${literal(input.target_academic_year_id)}::uuid,${input.expected_revision},${literal(JSON.stringify(input.target_classes))}::jsonb) r`;const r=sql(`BEGIN;set local request.jwt.claim.sub=${literal(userId)};set local role authenticated;${statement};COMMIT;`);return r.status===0?{data:JSON.parse(r.stdout),error:null}:{error:{code:r.stderr.match(/ERROR:\s+([A-Z0-9]{5})/)?.[1]||'XX000',message:r.stderr.match(/ERROR:\s+[A-Z0-9]{5}:\s*([^\n]+)/)?.[1]}};}
   };}
   const bearerGuard=createRequireSupabaseAuth({getClient:()=>({auth:{getUser:async token=>({data:{user:{id:owner(Number(token.split('.').at(-1))),email_confirmed_at:'2026-01-01T00:00:00Z'}},error:null})}})});
   let cookieGuard;
@@ -103,7 +103,7 @@ test(`real RLS room API and class-default compatibility (${authMode}) on explici
     const intact=await (await request(path)).json();assert.ok(intact.rooms.some(room=>room.id===added.id),'mismatched request cannot delete the room');
   }
   for(const n of [2,3,4,5])assert.equal((await request(`/api/rooms/${added.id}?organisationId=${org}`,{n,method:'DELETE'})).status,403);
-  for(const id of [room1,room2]){const denied=await request(`/api/rooms/${id}?organisationId=${org}`,{method:'DELETE'});assert.equal(denied.status,422);assert.match((await denied.json()).message,/Remove those assignments/);}
+  for(const id of [room2]){const denied=await request(`/api/rooms/${id}?organisationId=${org}`,{method:'DELETE'});assert.equal(denied.status,422);assert.match((await denied.json()).message,/Remove those assignments/);}
   assert.equal(sql('select json_agg(json_build_array(id,room_id)) from public.plannix_timetable_sessions;').stdout,sessionBefore,'rejected deletion never clears lessons');
   assert.equal((await request(`/api/rooms/${foreign.id}?organisationId=${org}`,{method:'DELETE'})).status,404,'foreign room cannot be deleted through another organisation scope');
   let deleted=await request(`/api/rooms/${added.id}?organisationId=${org}`,{method:'DELETE'});assert.equal(deleted.status,200);assert.deepEqual(await deleted.json(),{deletedRoomId:added.id});
@@ -113,10 +113,13 @@ test(`real RLS room API and class-default compatibility (${authMode}) on explici
   assert.equal((await request(`/api/rooms/${unused.room.id}?organisationId=${org}`,{method:'PATCH',body:{name:'Renamed archived unused room'}})).status,200);
   const archivedReload=await (await request(`/api/rooms?organisationId=${org}`)).json();assert.equal(archivedReload.rooms.find(r=>r.id===unused.room.id).isActive,false);
   assert.equal((await request(`/api/rooms/${unused.room.id}?organisationId=${org}`,{method:'DELETE'})).status,200);
+  const defaultsDeleted=await request(`/api/rooms/${room1}?organisationId=${org}`,{method:'DELETE'});assert.equal(defaultsDeleted.status,200);
+  const cleared=await (await request(classPath)).json();assert.equal(cleared.entries.find(e=>e.name==='New class default').defaultRoomId,null);assert.ok(cleared.revision>classes.revision);
+  assert.equal(sql('select json_agg(json_build_array(id,room_id)) from public.plannix_timetable_sessions;').stdout,sessionBefore);
   if(authMode==='bearer'){
   const classApi=createClassApi({getSession:async()=>({access_token:'synthetic.1'}),fetchImpl:(path,options)=>fetch(`http://127.0.0.1:${server.address().port}${path}`,options)});
-  const clientLoaded=await classApi.load(org,year);assert.equal(clientLoaded.entries.find(e=>e.name==='New class default').defaultRoomId,room1);
-  const clientSaved=await classApi.save(org,year,clientLoaded.revision,clientLoaded.entries);assert.equal(clientSaved.entries.find(e=>e.name==='New class default').defaultRoomId,room1);
+  const clientLoaded=await classApi.load(org,year);assert.equal(clientLoaded.entries.find(e=>e.name==='New class default').defaultRoomId,null);
+  const clientSaved=await classApi.save(org,year,clientLoaded.revision,clientLoaded.entries);assert.equal(clientSaved.entries.find(e=>e.name==='New class default').defaultRoomId,undefined);
   assert.equal(sql('select json_agg(json_build_array(id,room_id)) from public.plannix_timetable_sessions;').stdout,sessionBefore);
   }
 });

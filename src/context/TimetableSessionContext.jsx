@@ -60,6 +60,7 @@ export function TimetableSessionProvider({ children, user }) {
   const generation = useRef(0);
   const recurringLoadGeneration = useRef(0);
   const datedLoadGeneration = useRef(0);
+  const recurringStatusRef = useRef(null); recurringStatusRef.current = {ready:recurringReady,key:loadedRecurringScopeKey};
   const revisionRef = useRef(null);
   const activeRef = useRef(null);
   const activeSessionRef = useRef(null);
@@ -108,8 +109,15 @@ export function TimetableSessionProvider({ children, user }) {
     let outcome = 'stale';
     setIsLoading(true); setError(''); setRequestReference(''); setSaved(false);
     try {
-      const result = await fetchRecurringTimetableSessions(roomRequest(scope), { operationContext, isCurrent:()=>expected === recurringLoadGeneration.current && contextIsCurrent(operationContext) });
+      let result = await fetchRecurringTimetableSessions(roomRequest(scope), { operationContext, isCurrent:()=>expected === recurringLoadGeneration.current && contextIsCurrent(operationContext) });
       if (expected !== recurringLoadGeneration.current || !contextIsCurrent(operationContext)) return false;
+      // A consumer may mount after a legacy read was already sent. Upgrade the
+      // read before publishing it, rather than racing a second initial load.
+      if (roomReaders.current && result.roomAssignmentsLoaded !== true) {
+        result = await fetchRecurringTimetableSessions(roomRequest(scope), { operationContext,
+          isCurrent:()=>expected === recurringLoadGeneration.current && contextIsCurrent(operationContext) });
+        if (expected !== recurringLoadGeneration.current || !contextIsCurrent(operationContext)) return false;
+      }
       setRoomAssignmentsReady(result.roomAssignmentsLoaded === true);
       setRecurring(result.weeks); setRecurringReady(true); setLoadedRecurringScopeKey(recurringScopeKey);
       setRevision(result.revision); setRequestReference('');
@@ -122,9 +130,9 @@ export function TimetableSessionProvider({ children, user }) {
   }, [scope, resetSaveQueue, user?.id, recurringScopeKey, contextIsCurrent]);
 
   const requireRoomAssignments = useCallback(() => {
-    roomReaders.current += 1; setRoomAssignmentsReady(false);
+    roomReaders.current += 1;
     if (pendingRef.current) setError('Save or explicitly reload pending timetable changes before loading room assignments.');
-    else void loadRecurring();
+    else if (recurringStatusRef.current?.ready && recurringStatusRef.current.key === recurringScopeKey) void loadRecurring();
     return () => { roomReaders.current = Math.max(0,roomReaders.current-1); };
   }, [loadRecurring]);
 
@@ -172,7 +180,7 @@ export function TimetableSessionProvider({ children, user }) {
       if (target.type === 'recurring') setRecurring((current) => current.map((week) => week.weekId === target.weekId
         ? { ...week, collectionId: result.collectionId, sessions: result.sessions } : week));
       else setDated((current) => ({ ...current, source: 'override', overrideExists: true,
-        collectionId: result.collectionId, repeatingWeekId: result.repeatingWeekId, sessions: result.sessions, revision: result.revision }));
+        collectionId: result.collectionId, repeatingWeekId: result.repeatingWeekId, sessions: result.sessions, revision: result.revision, roomAssignmentsLoaded:result.roomAssignmentsLoaded === true }));
       setUnsaved(false); setSaved(true);
       setIsSaving(import.meta.env.MODE === 'stage4-timetable-browser-test' && observedId
         ? { value:false, observedId, providerId:testProviderId.current } : false);
@@ -268,40 +276,43 @@ export function TimetableSessionProvider({ children, user }) {
   const removeOverride = useCallback(async () => {
     if (!contextIsCurrent(null) || !scope || !dated?.weekStartDate || revisionRef.current == null || isSaving) return false;
     const operationContext = serverManagedAuth ? captureServerOperationContext(user?.id) : null;
+    const dateGeneration = datedLoadGeneration.current;
     setIsSaving(true); setSaved(false); setError(''); setRequestReference('');
-    try { const result = await removeDatedTimetableOverride(roomRequest({ ...scope, weekStartDate: dated.weekStartDate, expectedRevision: revisionRef.current }), { operationContext, isCurrent:()=>contextIsCurrent(operationContext) });
+    try { const result = await removeDatedTimetableOverride(roomRequest({ ...scope, weekStartDate: dated.weekStartDate, expectedRevision: revisionRef.current }), { operationContext, isCurrent:()=>dateGeneration === datedLoadGeneration.current && contextIsCurrent(operationContext) });
       if (operationContext) assertServerOperationContext(operationContext);
-      if(!contextIsCurrent(operationContext))return false;
+      if(dateGeneration !== datedLoadGeneration.current || !contextIsCurrent(operationContext))return false;
       setDated(result); setRevision(result.revision); setRequestReference(''); setUnsaved(false); setSaved(true); return true;
-    } catch (removeError) { if (contextIsCurrent(operationContext)) {
+    } catch (removeError) { if (dateGeneration === datedLoadGeneration.current && contextIsCurrent(operationContext)) {
       setConflict(removeError.status === 409); setError(removeError.message || 'Could not restore the repeating timetable.'); setRequestReference(safeRequestReference(removeError)); } return false;
-    } finally { if (contextIsCurrent(operationContext)) setIsSaving(false); }
+    } finally { if (dateGeneration === datedLoadGeneration.current && contextIsCurrent(operationContext)) setIsSaving(false); }
   }, [scope, dated?.weekStartDate, isSaving, user?.id, contextIsCurrent]);
 
   const saveBatch = useCallback(async (mutations, operationContext) => {
     if (!contextIsCurrent(null) || !scope || revisionRef.current == null || isSaving) return null;
     if (serverManagedAuth) assertServerOperationContext(operationContext);
+    const dateGeneration = datedLoadGeneration.current;
     setIsSaving(true); setSaved(false); setError(''); setRequestReference('');
-    try { const result = await saveTimetableSessionBatch(roomRequest({ ...scope, expectedRevision: revisionRef.current, mutations }), { operationContext, isCurrent:()=>contextIsCurrent(operationContext) });
+    try { const result = await saveTimetableSessionBatch(roomRequest({ ...scope, expectedRevision: revisionRef.current, mutations }), { operationContext, isCurrent:()=>dateGeneration === datedLoadGeneration.current && contextIsCurrent(operationContext) });
       if (operationContext) assertServerOperationContext(operationContext);
-      if(!contextIsCurrent(operationContext))return null;
+      if(dateGeneration !== datedLoadGeneration.current || !contextIsCurrent(operationContext))return null;
       setRevision(result.revision); setRequestReference(''); setUnsaved(false); setSaved(true);
       const current = result.collections.find((collection) => collection.type === 'date_override'
         && collection.weekStartDate === dated?.weekStartDate);
       if (current) setDated((value) => ({ ...value, revision: result.revision, source: 'override', overrideExists: true,
-        collectionId: current.collectionId, repeatingWeekId: current.weekId, sessions: current.sessions }));
+        collectionId: current.collectionId, repeatingWeekId: current.weekId, sessions: current.sessions, roomAssignmentsLoaded:result.roomAssignmentsLoaded === true }));
       return result;
-    } catch (batchError) { if (contextIsCurrent(operationContext)) {
+    } catch (batchError) { if (dateGeneration === datedLoadGeneration.current && contextIsCurrent(operationContext)) {
       setConflict(batchError.status === 409); setError(batchError.message || 'Could not save timetable sessions.'); setRequestReference(safeRequestReference(batchError)); } return null;
-    } finally { if (contextIsCurrent(operationContext)) setIsSaving(false); }
+    } finally { if (dateGeneration === datedLoadGeneration.current && contextIsCurrent(operationContext)) setIsSaving(false); }
   }, [scope, isSaving, dated?.weekStartDate, contextIsCurrent]);
 
   const loadDateSnapshots = useCallback(async (dates, operationContext) => {
     if (!scope || !contextIsCurrent(null)) return [];
     if (serverManagedAuth) assertServerOperationContext(operationContext);
-    const snapshots = await Promise.all(dates.map((weekStartDate) => fetchDatedTimetableSessions(roomRequest({ ...scope, weekStartDate }), { operationContext, isCurrent:()=>contextIsCurrent(operationContext) })));
+    const dateGeneration = datedLoadGeneration.current;
+    const snapshots = await Promise.all(dates.map((weekStartDate) => fetchDatedTimetableSessions(roomRequest({ ...scope, weekStartDate }), { operationContext, isCurrent:()=>dateGeneration === datedLoadGeneration.current && contextIsCurrent(operationContext) })));
     if (operationContext) assertServerOperationContext(operationContext);
-    if(!contextIsCurrent(operationContext))throw new DOMException('Timetable context changed.','AbortError');
+    if(dateGeneration !== datedLoadGeneration.current || !contextIsCurrent(operationContext))throw new DOMException('Timetable context changed.','AbortError');
     return snapshots;
   }, [scope, contextIsCurrent]);
 

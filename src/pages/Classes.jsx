@@ -31,7 +31,7 @@ export default function Classes() {
     save,
     reload,
   } = useClasses();
-  const rooms = useRooms(roomScope, !isInputPage && !!roomScope?.userId && !!roomScope?.organisationId);
+  const rooms = useRooms(roomScope, !isInputPage && !!roomScope?.userId && !!roomScope?.organisationId, { afterRemove: () => roomScope?.academicYearId ? reload() : true });
   const [inputWeek, setInputWeek] = useState(1);
 
   useEffect(() => {
@@ -64,6 +64,7 @@ export default function Classes() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (rooms.saving || rooms.uncertain) return;
     await save();
   }
 
@@ -148,7 +149,12 @@ export default function Classes() {
                 : ' (one-week: counts are per calendar week).'}
             </p>
 
-            <RoomsCard key={roomScope?.key} collection={rooms} scopeKey={roomScope?.key} />
+            <RoomsCard key={roomScope?.key} scopeKey={roomScope?.key}
+              deletionDisabled={dirty || isSaving || isLoading || (!!roomScope?.academicYearId && !isLoaded)}
+              collection={{ ...rooms,
+                reload: async () => { if (!roomScope?.academicYearId || await reload()) await rooms.reload(); },
+              }} />
+            {dirty && <p className="classes-hint">Save or reload class changes before deleting a room.</p>}
             <form className="classes-form classes-collection-form" onSubmit={handleSubmit}>
               <p className="classes-hint classes-hint--standalone">
                 You can add up to 60 classes. Change weekly vs two-week cycle under Timetable settings.
@@ -172,7 +178,7 @@ export default function Classes() {
                       type="button"
                       className="classes-entry-remove"
                       onClick={() => removeClass(index)}
-                      disabled={isSaving}
+                      disabled={isSaving || rooms.saving}
                     >
                       Remove
                     </button>
@@ -186,7 +192,7 @@ export default function Classes() {
                         value={entry.name}
                         placeholder="e.g. 9A Maths"
                         onChange={(event) => updateEntry(index, { name: event.target.value })}
-                        disabled={isSaving}
+                        disabled={isSaving || rooms.saving}
                       />
                     </div>
                     <div className="classes-field classes-field--inline">
@@ -202,7 +208,7 @@ export default function Classes() {
                         max={50}
                         value={entry.frequency}
                         onChange={(event) => updateEntry(index, { frequency: event.target.value })}
-                        disabled={isSaving}
+                        disabled={isSaving || rooms.saving}
                       />
                     </div>
                     {!rooms.canManage && rooms.loaded && <p className="classes-hint">Default room: {entry.defaultRoomId ? `${rooms.rooms.find(room => room.id === entry.defaultRoomId)?.name || 'Unavailable room'}${rooms.rooms.some(room => room.id === entry.defaultRoomId && !room.isActive) ? ' (Archived)' : ''}` : 'No default room'}</p>}
@@ -226,7 +232,7 @@ export default function Classes() {
                   type="button"
                   className="add-row-button"
                   onClick={addClass}
-                  disabled={!isLoaded || isSaving || entries.length >= 60}
+                  disabled={!isLoaded || isSaving || rooms.saving || entries.length >= 60}
                 >
                   + Add class
                 </button>
@@ -234,14 +240,14 @@ export default function Classes() {
                   type="button"
                   className="add-row-button add-row-button--danger"
                   onClick={handleClearClasses}
-                  disabled={!isLoaded || isSaving || entries.length === 0}
+                  disabled={!isLoaded || isSaving || rooms.saving || entries.length === 0}
                 >
                   Clear classes
                 </button>
               </div>
 
               <div className="classes-actions">
-                <button type="submit" className="classes-save" disabled={!isLoaded || isLoading || isSaving}>
+                <button type="submit" className="classes-save" disabled={!isLoaded || isLoading || isSaving || rooms.saving || rooms.uncertain}>
                   Save classes
                 </button>
               </div>

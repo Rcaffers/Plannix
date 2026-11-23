@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-export default function RoomsCard({ collection, scopeKey }) {
+export default function RoomsCard({ collection, scopeKey, deletionDisabled = false }) {
   const { rooms, loaded, loading, saving, canManage, uncertain, error, message, reload, save, remove } = collection;
   const renameInput = useRef(null), deleteCancel = useRef(null), reloadButton = useRef(null), addInput = useRef(null), renameButtons = useRef(new Map()), deleteButtons = useRef(new Map());
   const currentScope = useRef(scopeKey); currentScope.current = scopeKey;
@@ -57,15 +57,15 @@ export default function RoomsCard({ collection, scopeKey }) {
         <span className="rooms-name">{room.name}{!room.isActive && <span> (Archived)</span>}</span>
         {canManage && <div className="rooms-actions">
           <button ref={button=>{if(button)renameButtons.current.set(room.id,button);else renameButtons.current.delete(room.id);}} type="button" className="add-row-button" disabled={busy || !!deleting || !!editing} aria-label={`Rename room ${room.name}`} onClick={()=>beginRename(room)}>Rename</button>
-          <button ref={button=>{if(button)deleteButtons.current.set(room.id,button);else deleteButtons.current.delete(room.id);}} type="button" className="add-row-button add-row-button--danger" disabled={busy || !!editing || !!deleting} aria-label={`Delete room ${room.name}`} onClick={()=>setDeleting(room.id)}>Delete</button>
+          <button ref={button=>{if(button)deleteButtons.current.set(room.id,button);else deleteButtons.current.delete(room.id);}} type="button" className="add-row-button add-row-button--danger" disabled={busy || deletionDisabled || !!editing || !!deleting} aria-label={`Delete room ${room.name}`} onClick={()=>setDeleting(room.id)}>Delete</button>
         </div>}
       </>}
       {canManage && deleting===room.id && <div className="rooms-delete-confirmation" role="group" aria-labelledby={`room-delete-${room.id}`} onKeyDown={event=>{
         if(event.key==='Escape' && !saving){event.preventDefault();event.stopPropagation();setDeleting(null);returnFocus(room.id,scopeKey,'delete');}
       }}>
         <p id={`room-delete-${room.id}`}>Delete room “{room.name}”?</p>
-        <p className="classes-hint">This permanently deletes the room. Remove any class default and timetable lesson assignments first; deleting a room never clears those assignments.</p>
-        <div className="rooms-actions"><button type="button" className="add-row-button add-row-button--danger rooms-confirm-delete" disabled={busy} onClick={()=>deleteRoom(room)}>Confirm delete</button>
+        <p className="classes-hint">This permanently deletes the room. Any class defaults using it will become “No default room”. If a timetable lesson uses this room, deletion is blocked and nothing changes.</p>
+        <div className="rooms-actions"><button type="button" className="add-row-button add-row-button--danger rooms-confirm-delete" disabled={busy || deletionDisabled} onClick={()=>deleteRoom(room)}>Confirm delete</button>
           <button ref={deleteCancel} type="button" className="add-row-button" disabled={saving} onClick={()=>{setDeleting(null);returnFocus(room.id,scopeKey,'delete');}}>Cancel</button></div>
       </div>}
     </li>)}</ul>}

@@ -7,7 +7,7 @@ const org='10000000-0000-4000-8000-000000000001', id='20000000-0000-4000-8000-00
 async function harness(t,{admin=true,member=true,fail=false,writeError=null,pages=null}={}) {
   const calls=[]; const app=express();app.use(express.json());
   registerRoomRoutes({app,requireAuth(req,res,next){if(!req.headers.authorization)return res.sendStatus(401);req.auth={userId:'verified-owner',accessToken:'synthetic'};next();},
-    createRequestClient(auth){assert.equal(auth.userId,'verified-owner');return {from(table){const c={table,filters:[]};calls.push(c);const q={
+    createRequestClient(auth){assert.equal(auth.userId,'verified-owner');return {async rpc(name,input){calls.push({rpc:name,input,remove:true});return writeError?{error:{code:writeError}}:{data:id};},from(table){const c={table,filters:[]};calls.push(c);const q={
       select(){return q;},eq(k,v){c.filters.push([k,v]);return q;},in(){return q;},order(){return q;},range(a,b){c.range=[a,b];return q;},insert(v){c.write=v;return q;},update(v){c.write=v;return q;},
       delete(){c.remove=true;return q;},maybeSingle(){return q.then(x=>({...x,data:Array.isArray(x.data)?x.data[0]??null:x.data}));},
       then(resolve,reject){const result=fail?{error:{code:'XX000'}}:table==='plannix_organisation_users'?{data:member?{id}:null}:table==='plannix_organisation_user_access_roles'?{data:[{access_role_id:id}]}:table==='plannix_access_roles'?{data:[{name:admin?'Organisation Admin':'Staff'}]}:(c.write||c.remove)&&writeError?{error:{code:writeError}}:{data:pages&&!c.write?pages.slice(c.range[0],c.range[1]+1):[{id,name:c.write?.name??'Lab',is_active:c.write?.is_active??true}]};return Promise.resolve(result).then(resolve,reject);}};return q;}};}});
@@ -25,8 +25,8 @@ test('room listing reads every page without an active-only filter',async t=>{con
 test('delete is admin-only, organisation-scoped, confirms the exact room and preserves foreign-key rejection',async t=>{
  const denied=await harness(t,{admin:false});assert.equal((await denied.request('DELETE','/'+id)).status,403);assert.equal(denied.calls.some(c=>c.remove),false);
  const h=await harness(t);let r=await h.request('DELETE','/'+id);assert.equal(r.status,200);assert.deepEqual(await r.json(),{deletedRoomId:id});
- const deletion=h.calls.find(c=>c.remove);assert.deepEqual(deletion.filters,[['organisation_id',org],['id',id]]);
- for(const [code,status] of [['23503',422],['42501',403],['XX000',503]]){const failed=await harness(t,{writeError:code});r=await failed.request('DELETE','/'+id);assert.equal(r.status,status);if(code==='23503')assert.match((await r.json()).message,/Remove those assignments/);}
+ const deletion=h.calls.find(c=>c.remove);assert.equal(deletion.rpc,'plannix_delete_room');assert.deepEqual(deletion.input,{target_organisation_id:org,target_room_id:id});
+ for(const [code,status] of [['23503',422],['42501',403],['XX000',503],['P0002',404]]){const failed=await harness(t,{writeError:code});r=await failed.request('DELETE','/'+id);assert.equal(r.status,status);if(code==='23503')assert.match((await r.json()).message,/Remove those assignments/);}
  assert.equal((await h.request('DELETE','/not-a-uuid')).status,400);
  assert.equal((await h.request('DELETE','/'+id,{isActive:true})).status,400);
 });

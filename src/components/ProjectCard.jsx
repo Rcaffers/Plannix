@@ -29,6 +29,7 @@ import PlacedLessonCard from './PlacedLessonCard';
 import TimetableEvents from './TimetableEvents';
 import { localCalendarDayDifference } from '../utils/timetableEvents';
 import { classPlacementUnavailableReason } from '../utils/timetableClassPlacement';
+import { timetableRoomText } from '../utils/timetableRoomDisplay';
 import { newPlacementRoom } from '../utils/timetableRooms';
 import { useRooms } from '../hooks/useRooms';
 import { useClassPlacement } from '../hooks/useClassPlacement';
@@ -157,6 +158,7 @@ export default function ProjectCard({
   enableEditing = true,
   enableClassPlacement = false,
   enableRoomSelection = false,
+  showAssignedRooms = false,
   weekMode = 'date',
   enableFixedPhoneSingleDay = false,
   fixedWeekKey = 'cycle-1',
@@ -173,9 +175,8 @@ export default function ProjectCard({
   } = useClasses();
   const sessionState = useTimetableSessions();
   const roomControls = enableRoomSelection && enableEditing && enableClassPlacement && weekMode === 'fixed';
-  const rooms = useRooms(roomScope, roomControls && !!roomScope?.userId);
-  const roomReady = !roomControls || (sessionState.roomAssignmentsReady && rooms.loaded && !rooms.loading && !rooms.error);
-  useEffect(() => { if (roomControls) return sessionState.requireRoomAssignments?.(); }, [roomControls, sessionState.requireRoomAssignments]);
+  const roomDisplay = showAssignedRooms && weekMode === 'date';
+  const roomConsumer = roomControls || roomDisplay;
   const timetableMondayBounds = useMemo(
     () => getAcademicTimetableMondayBounds(academicYear),
     [academicYear],
@@ -187,6 +188,11 @@ export default function ProjectCard({
   }, [dayLabels, isTwoWeekCycle]);
   const dayCount = displayDayLabels.length;
   const [weekStartDate, setWeekStartDate] = useState(() => startOfWeek(new Date()));
+  const catalogueScope = roomDisplay && roomScope ? {...roomScope,key:`${roomScope.key}:${formatDateKeyPart(weekStartDate)}`} : roomScope;
+  const rooms = useRooms(catalogueScope, roomConsumer && !!roomScope?.userId && (roomControls || !!sessionState.scope));
+  const roomReady = !roomControls || (sessionState.roomAssignmentsReady && rooms.loaded && !rooms.loading && !rooms.error);
+  useEffect(() => { if (roomConsumer) return sessionState.requireRoomAssignments?.(); }, [roomConsumer, sessionState.requireRoomAssignments]);
+
   const [weekPickerScope, setWeekPickerScope] = useState(null);
   const weekPickerKey = `${sessionState.userId || ''}:${selectedAcademicYearId || ''}:${academicYear?.startDate || ''}:${academicYear?.endDate || ''}`;
   const canChooseWeek = Boolean(!academicYearLoading && selectedAcademicYearId && academicYear?.id === selectedAcademicYearId
@@ -358,6 +364,21 @@ export default function ProjectCard({
   const target = weekMode === 'date'
     ? { type: 'date', weekStartDate: formatDateKeyPart(weekStartDate) }
     : activeCollection ? { type: 'recurring', weekId: activeCollection.weekId } : null;
+  const displayedDateKey = formatDateKeyPart(weekStartDate);
+  const displayedContextRef = useRef(null);
+  displayedContextRef.current = `${sessionState.recurringScopeKey}:${displayedDateKey}`;
+  const displayAssignmentsReady = !roomDisplay || Boolean(!sessionState.isLoading && !sessionState.error
+    && sessionState.loadedRecurringScopeKey === sessionState.recurringScopeKey
+    && activeCollection?.weekStartDate === displayedDateKey && activeCollection?.roomAssignmentsLoaded === true);
+  const roomCatalogueReady = rooms.loaded && !rooms.loading && !rooms.error;
+  const roomDisplayOptions = {assignmentsReady:displayAssignmentsReady,catalogueReady:roomCatalogueReady,rooms:rooms.rooms};
+  const missingRoomNames = roomDisplay && displayAssignmentsReady && activeCollection.sessions.some(session =>
+    timetableRoomText(session,roomDisplayOptions) === 'Room unavailable');
+  useLayoutEffect(() => {
+    if (roomDisplay && activeCollection?.weekStartDate === displayedDateKey && activeCollection?.roomAssignmentsLoaded)
+      void rooms.reload();
+  }, [roomDisplay, displayedDateKey, activeCollection, rooms.reload]);
+  useLayoutEffect(() => { if (roomDisplay) closeLessonModal(); }, [roomDisplay, sessionState.recurringScopeKey, displayedDateKey]);
   const canRestoreDisplayedWeek = weekMode === 'date' && !sessionState.isLoading && !sessionState.isSaving
     && activeCollection?.weekStartDate === target?.weekStartDate;
   const sessions = useMemo(() => (activeCollection?.sessions || []).map((session, index) =>
@@ -370,14 +391,14 @@ export default function ProjectCard({
   }, [weekMode, weekStartDate, sessionState.scope, sessionState.recurringReady]);
 
   function persistDisplaySessions(next) {
-    if (!target || !roomReady) return false;
+    if (!target || !roomReady || !displayAssignmentsReady) return false;
     try { return sessionState.edit(target, next.map((entry) => displayToSession(entry, periodIdByIndex))); }
     catch { return false; }
   }
 
   function reloadRoomAware() {
-    if(roomControls && sessionState.unsaved && window.__plannixConfirmSessionDiscard?.()===false)return;
-    void (roomControls ? sessionState.reloadRecurring() : sessionState.reload()); if(roomControls)void rooms.reload();
+    if(roomConsumer && sessionState.unsaved && window.__plannixConfirmSessionDiscard?.()===false)return;
+    void (roomControls ? sessionState.reloadRecurring() : roomDisplay ? (!sessionState.recurringReady || sessionState.loadedRecurringScopeKey !== sessionState.recurringScopeKey ? sessionState.reloadRecurring() : sessionState.loadDate(displayedDateKey)) : sessionState.reload()); if(roomConsumer)void rooms.reload();
   }
 
   function updateSessions(update) {
@@ -495,7 +516,7 @@ export default function ProjectCard({
     return value===undefined ? '__choose-room__' : value || '';
   }
   function saveRoomAwarePlacement(next) {
-    if (!target || !roomReady) return false;
+    if (!target || !roomReady || !displayAssignmentsReady) return false;
     if (!roomControls) return sessionState.edit(target,next);
     const current=activeCollection?.sessions || [];
     const inserted=next.find(entry=>!entry.id && !current.some(old=>old.day===entry.day && old.periodId===entry.periodId));
@@ -686,7 +707,7 @@ export default function ProjectCard({
   }
 
   function openLessonModal(dayIndex, rowIndex) {
-    if(roomControls && !roomReady)return;
+    if(!roomReady || !displayAssignmentsReady)return;
     if (weekMode === 'date' && columnHolidayLabels[dayIndex]) return;
     const seg = rowSegments[rowIndex];
     if (!seg || seg.kind !== 'lesson') return;
@@ -726,7 +747,7 @@ export default function ProjectCard({
 
   function saveLessonDetails(event) {
     event.preventDefault();
-    if (modalSlot == null || !roomReady) return;
+    if (modalSlot == null || !roomReady || !displayAssignmentsReady) return;
     const currentSession = findSessionAt(sessions, modalSlot.day, modalSlot.time) ?? null;
     if(roomControls && roomDraft==='__choose-room__' && (classDraft || currentSession)) { setClassLimitError('Choose an active room or explicitly select No room.');return; }
     if(roomControls && roomDraftKey!==roomEditKey){setClassLimitError('Timetable changed. Close and reopen this lesson before saving.');return;}
@@ -813,6 +834,7 @@ export default function ProjectCard({
       const date = new Date(weekStartDate); date.setDate(date.getDate() + offset * 7);
       return formatDateKeyPart(date);
     });
+    const expectedDisplayContext = displayedContextRef.current;
     let snapshots;
     try { snapshots = await prepareTimetableSnapshots(operationContext,
       () => sessionState.loadDateSnapshots(dates, operationContext)); }
@@ -821,6 +843,7 @@ export default function ProjectCard({
       }
       setLessonPushForwardError('Could not load the upcoming weeks.');
       return { ok:false, reason:'LOAD_FAILED' }; }
+    if (displayedContextRef.current !== expectedDisplayContext) return {ok:false,reason:'STALE_SCOPE'};
     const byWeekKey = {};
     snapshots.forEach((snapshot, index) => {
       byWeekKey[dates[index]] = snapshot.sessions.map((session, sessionIndex) =>
@@ -1129,7 +1152,7 @@ export default function ProjectCard({
                 </details>) : null}
               {sessionState.error ? (
                 <><button type="button" className="schedule-edit-toggle" onClick={sessionState.retry}>Retry save</button>
-                {!roomControls && <button type="button" className="schedule-edit-toggle" onClick={sessionState.reload}>Reload</button>}</>
+                {!roomControls && <button type="button" className="schedule-edit-toggle" onClick={roomDisplay ? reloadRoomAware : sessionState.reload}>Reload</button>}</>
               ) : null}
               {enableEditing ? <><button type="button" className="schedule-edit-toggle" onClick={toggleEditMode}>
                 {isEditingClasses ? 'Finish editing' : 'Edit classes'}
@@ -1235,9 +1258,22 @@ export default function ProjectCard({
                       const sessionClassName = resolveSessionClass(session);
                       const trimmedTitle = session ? String(session.title ?? '').trim() : '';
                       const trimmedNotes = session ? String(session.notes ?? '').trim() : '';
-                      const ariaLabel =
+                      const assignedRoomText = roomDisplay ? timetableRoomText(session,roomDisplayOptions) : null;
+                      const baseAriaLabel =
                         lessonAriaLabel(session ? { ...session, class: sessionClassName } : session) ??
                         `Assign class for ${day} at ${seg.rangeLabel}`;
+                      const ariaLabel = assignedRoomText ? `${baseAriaLabel}; ${assignedRoomText}` : baseAriaLabel;
+
+                      const classHeading = roomDisplay ? (
+                        <span className="session-heading">
+                          <span className="session-class">{sessionClassName}</span>
+                          {assignedRoomText && (
+                            <span className="session-room" aria-label={assignedRoomText}>
+                              {assignedRoomText.replace(/^Room: /, '')}
+                            </span>
+                          )}
+                        </span>
+                      ) : <span className="session-class">{sessionClassName}</span>;
 
                       return (
                         <div key={seg.rowIndex} className={`slot${placementStyle}`} {...placementEvents}>
@@ -1247,7 +1283,7 @@ export default function ProjectCard({
                                 dragging={placement.isDragging(placementSlot)} label={ariaLabel}
                                 onDragStart={(event) => placement.dragSession(event, placementSlot)}
                                 onDragEnd={placement.endDrag} onOpen={() => openLessonModal(dayIndex, seg.rowIndex)}>
-                                <span className="session-class">{sessionClassName}</span>
+                                {classHeading}
                                 <span>{seg.rangeLabel}</span>
                                 {trimmedTitle ? <span className="session-lesson-title">{trimmedTitle}</span> : null}
                                 {trimmedNotes ? <span className="session-lesson-notes">{trimmedNotes}</span> : null}
@@ -1267,7 +1303,7 @@ export default function ProjectCard({
                             >
                               {session ? (
                                 <>
-                                  <span className="session-class">{sessionClassName}</span>
+                                  {classHeading}
                                   <span>{seg.rangeLabel}</span>
                                   {trimmedTitle ? (
                                     <span className="session-lesson-title">{trimmedTitle}</span>
@@ -1318,6 +1354,10 @@ export default function ProjectCard({
       {weekMode === 'date' && !isSingleDayTimetable && canChooseWeek && weekPickerScope === weekPickerKey
         ? <TimetableWeekPicker displayedWeek={formatDateKeyPart(weekStartDate)} min={academicYear.startDate} max={academicYear.endDate}
             onChoose={chooseWeek} onClose={() => setWeekPickerScope(null)} /> : null}
+      {roomDisplay && sessionState.scope && (!displayAssignmentsReady || !roomCatalogueReady || missingRoomNames) && <div className="class-placement-instructions timetable-room-status" role="status">
+        <p>{sessionState.isLoading || rooms.loading ? 'Loading room information…' : 'Room information is unavailable. Existing room assignments are preserved.'}</p>
+        <button type="button" className="schedule-edit-toggle" disabled={sessionState.isLoading || sessionState.isSaving || rooms.loading} onClick={reloadRoomAware}>Retry room information</button>
+      </div>}
       {roomControls && (!roomReady || rooms.error || sessionState.error) && <div className="class-placement-instructions" role="status">
         <p>{rooms.error || (sessionState.error ? 'Reload to confirm the current room assignments.' : 'Loading and confirming room assignments…')}</p>
         <button type="button" disabled={sessionState.isLoading || sessionState.isSaving || rooms.loading} onClick={reloadRoomAware}>Reload timetable and rooms</button>
@@ -1375,7 +1415,7 @@ export default function ProjectCard({
 
                   {roomControls && <>
                     <label htmlFor="lesson-room-input">Room</label>
-                    <select id="lesson-room-input" value={roomReady ? roomDraft : '__choose-room__'} disabled={!roomReady || sessionState.isSaving || (roomControls && !!(sessionState.error || sessionState.conflict || sessionState.unsaved))}
+                    <select id="lesson-room-input" value={roomReady ? roomDraft : '__choose-room__'} disabled={!roomReady || !displayAssignmentsReady || sessionState.isSaving || (roomControls && !!(sessionState.error || sessionState.conflict || sessionState.unsaved))}
                       onChange={event=>{setRoomDraft(event.target.value);setClassLimitError('');}}>
                       <option value="__choose-room__" disabled>Choose a room or No room</option>
                       <option value="">No room</option>
@@ -1452,7 +1492,7 @@ export default function ProjectCard({
                     <button type="button" className="lesson-modal-cancel" onClick={closeLessonModal}>
                       Cancel
                     </button>
-                    <button type="submit" className="lesson-modal-save" disabled={!roomReady || sessionState.isSaving || (roomControls && !!(sessionState.error || sessionState.conflict || sessionState.unsaved))}>
+                    <button type="submit" className="lesson-modal-save" disabled={!roomReady || !displayAssignmentsReady || sessionState.isSaving || (roomControls && !!(sessionState.error || sessionState.conflict || sessionState.unsaved))}>
                       Save
                     </button>
                   </div>

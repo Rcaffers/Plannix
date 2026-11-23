@@ -288,5 +288,10 @@
   .rooms-card .classes-field input[type='text'] { font-size: 1rem; }
 }
 
-.rooms-delete-confirmation { flex: 1 1 100%; min-width: 0; display: grid; gap: 10px; }
+.rooms-delete-confirmation { flex: 1 1 100%; width: 100%; min-width: 0; box-sizing: border-box; display: grid; gap: 10px; }
 .rooms-delete-confirmation > p { margin: 0; overflow-wrap: anywhere; }
+
+@media (max-width: 480px) {
+  .rooms-list li { flex-wrap: nowrap; align-items: stretch; }
+  .rooms-delete-confirmation { flex-basis: auto; }
+}

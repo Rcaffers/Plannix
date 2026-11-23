@@ -193,11 +193,50 @@ try {
   assert.equal(await evaluate("document.querySelector('.rooms-card .classes-saved')===null"),true);const roleChangeWrites=await evaluate('__roomWrites');
   await evaluate('window.__loseRoleAfterDelete=false;window.__loseReadbackRole=false');await evaluate("[...document.querySelectorAll('.rooms-card button')].find(b=>b.textContent==='Reload rooms').click()");
   await waitFor("!document.querySelector('.rooms-card [role=alert]') && !document.querySelector('[aria-label=\"Delete room Role-change delete room\"]')");assert.equal(await evaluate('__roomWrites'),roleChangeWrites);
+  // Default-only deletion clears saved defaults and refreshes the actual class provider.
+  await change('#room-name','Default-only room');await evaluate("document.querySelector('.rooms-editor').requestSubmit()");
+  await waitFor("document.querySelector('[aria-label=\"Delete room Default-only room\"]')?.disabled===false");
+  const defaultRoom=await evaluate("window.__rooms.a.find(r=>r.name==='Default-only room').id");
+  await change('#class-room-0',defaultRoom);await evaluate("document.querySelector('.classes-collection-form').requestSubmit()");
+  await waitFor("document.querySelector('[aria-label=\"Delete room Default-only room\"]')?.disabled===false");
+  await evaluate("document.querySelector('[aria-label=\"Delete room Default-only room\"]').click()");
+  await waitFor("document.querySelector('.rooms-confirm-delete')!==null");
+  assert.equal(await evaluate("document.querySelector('.rooms-delete-confirmation').textContent.includes('No default room')"),true);
+  for(const width of [1280,390]){
+    await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390},sessionId);await renderedBarrier();
+    assert.equal(await evaluate("(()=>{const card=document.querySelector('.rooms-card').getBoundingClientRect(),confirmation=document.querySelector('.rooms-delete-confirmation').getBoundingClientRect();return confirmation.left>=card.left && confirmation.right<=card.right && [...document.querySelectorAll('.rooms-delete-confirmation button')].every(b=>b.getBoundingClientRect().right<=card.right);})()"),true,'named deletion confirmation and actions stay inside the card at desktop and phone widths');
+  }
+  await evaluate("document.querySelector('.rooms-confirm-delete').click()");
+  await waitFor("!document.querySelector('[aria-label=\"Delete room Default-only room\"]') && document.querySelector('#class-room-0').value==='' && document.querySelector('.rooms-card [role=status]')?.textContent==='Room deleted.'");
+  // A confirmed deletion with failed class refresh stays uncertain until explicit readback.
+  await change('#room-name','Class-refresh failure room');await evaluate("document.querySelector('.rooms-editor').requestSubmit()");
+  await waitFor("document.querySelector('[aria-label=\"Delete room Class-refresh failure room\"]')?.disabled===false");
+  await change('#class-room-0',await evaluate("window.__rooms.a.find(r=>r.name==='Class-refresh failure room').id"));
+  await evaluate("document.querySelector('.classes-collection-form').requestSubmit()");
+  await waitFor("document.querySelector('[aria-label=\"Delete room Class-refresh failure room\"]')?.disabled===false");
+  await evaluate("window.__failClassRead=true;document.querySelector('[aria-label=\"Delete room Class-refresh failure room\"]').click()");
+  await waitFor("document.querySelector('.rooms-confirm-delete')!==null");await evaluate("document.querySelector('.rooms-confirm-delete').click()");
+  await waitFor("document.querySelector('.rooms-card [role=alert]')?.textContent.includes('deletion could not be confirmed')");
+  assert.equal(await evaluate("document.querySelector('.classes-collection-form .classes-save').disabled"),true);
+  const classRefreshWrites=await evaluate('__roomWrites');
+  await evaluate('window.__failClassRead=false');await evaluate("[...document.querySelectorAll('.rooms-card button')].find(b=>b.textContent==='Reload rooms').click()");
+  await waitFor("!document.querySelector('.rooms-card [role=alert]') && document.querySelector('#class-room-0')?.value===''");
+  assert.equal(await evaluate('__roomWrites'),classRefreshWrites,'failed class refresh recovery only reads, never replays deletion');
   await evaluate('window.__setYear(null)');
   await waitFor("document.querySelector('.rooms-editor')!==null && document.querySelector('.rooms-card').getAttribute('aria-busy')==='false'");
   await waitFor("document.querySelectorAll('.classes-entry-card').length===0 && document.querySelector('.rooms-editor input')?.disabled===false");
   assert.equal(await evaluate("document.querySelector('.classes-collection-form .classes-save').disabled"),true,'year is required for classes, not organisation-wide room management');
   assert.deepEqual(await evaluate('window.__testErrors'),[]);
+  await change('#room-name','No-year recovery room');await evaluate('window.__uncertainWrite=true');await evaluate("document.querySelector('.rooms-editor').requestSubmit()");
+  await waitFor("document.querySelector('.rooms-card [role=alert]')!==null");
+  await evaluate('window.__uncertainWrite=false');await evaluate("[...document.querySelectorAll('.rooms-card button')].find(b=>b.textContent==='Reload rooms').click()");
+  await waitFor("!document.querySelector('.rooms-card [role=alert]') && document.querySelector('.rooms-list').textContent.includes('No-year recovery room')");
+  // Organisation-wide deletion is usable without selecting an academic year.
+  await evaluate("window.__failClassRead=true;document.querySelector('[aria-label=\"Delete room No-year recovery room\"]').click()");
+  await waitFor("document.querySelector('.rooms-confirm-delete')!==null");await evaluate("document.querySelector('.rooms-confirm-delete').click()");
+  await waitFor("!document.querySelector('[aria-label=\"Delete room No-year recovery room\"]') && document.querySelector('.rooms-card [role=status]')?.textContent==='Room deleted.'");
+  assert.equal(await evaluate("document.querySelectorAll('.classes-entry-card').length"),0);
+  await evaluate('window.__failClassRead=false');
   console.log('Rendered room management, readback recovery, default persistence, archived selection, account/year/session races and desktop/phone layout passed.');
 } finally {
   try{socket?.close();}catch{ /* Browser is closing. */ }

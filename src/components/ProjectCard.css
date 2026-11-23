@@ -1088,3 +1088,8 @@
 @media (max-width: 480px) {
   .lesson-modal-form input, .lesson-modal-form select { font-size: 1rem; }
 }
+
+.session-heading { display: flex; align-items: baseline; gap: 6px; width: 100%; min-width: 0; }
+.session-heading .session-class { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+.session-room { display: block; flex: 0 1 50%; min-width: 0; max-width: 50%; margin-left: auto; text-align: right; overflow-wrap: anywhere; white-space: normal; font-size: .66rem; line-height: 1.35; font-weight: 700; color: #315b53; }
+.timetable-room-status { margin: 12px 0; }

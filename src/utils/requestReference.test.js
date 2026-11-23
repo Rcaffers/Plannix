@@ -119,7 +119,7 @@ test('stale recurring and dated results cannot replace a newer load or its suppo
     const datedLoadGeneration = { current: 0 };
     const dependencies = {
       scope: { organisationId: 'organisation', academicYearId: 'year', timetableId: 'timetable' },
-      recurringScopeKey:'scope', roomRequest:value=>value, setRoomAssignmentsReady:()=>{},
+      recurringScopeKey:'scope', roomRequest:value=>value, roomReaders:{current:0}, setRoomAssignmentsReady:()=>{},
       user: { id: 'user' }, resetSaveQueue: () => {}, recurringLoadGeneration,
       datedLoadGeneration, observeTimetableOperation: () => {}, safeRequestReference,
       serverManagedAuth: false, loadOperationContext: () => null, contextIsCurrent: () => true,
@@ -192,7 +192,7 @@ test('recurring and dated loads ignore stale session outcomes without changing n
         const requests = [];
         const dependencies = {
           scope:{ organisationId:'org', academicYearId:'year', timetableId:'table' },
-          recurringScopeKey:'scope', roomRequest:value=>value, setRoomAssignmentsReady:()=>{},
+          recurringScopeKey:'scope', roomRequest:value=>value, roomReaders:{current:0}, setRoomAssignmentsReady:()=>{},
           user:{ id:'user' }, resetSaveQueue:() => {},
           recurringLoadGeneration:{ current:0 }, datedLoadGeneration:{ current:0 },
           serverManagedAuth:true,
@@ -285,5 +285,32 @@ test('academic-year load clears a failed reference on retry and ignores stale ou
     else rejectRequest(Object.assign(new Error('Stale failure'), { requestId: '50000000-0000-4000-8000-000000000001' }));
     await pending;
     assert.deepEqual(state, { error: 'Newer failure', reference: requestId });
+  }
+});
+
+test('a room consumer joining an in-flight legacy read upgrades it before publishing readiness',async()=>{
+  const source=await fs.readFile(new URL('../context/TimetableSessionContext.jsx',import.meta.url),'utf8');
+  const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
+  const start=source.indexOf('const loadRecurring = useCallback(')+'const loadRecurring = useCallback('.length;
+  const callback=source.slice(start,source.indexOf('\n  },',start)+4).replaceAll('import.meta.env.MODE',JSON.stringify('test'));
+  for(const failure of [false,true]){
+    const requests=[],roomReaders={current:0},state={};
+    const dependencies={scope:{organisationId:'org',academicYearId:'year',timetableId:'table'},user:{id:'user'},
+      recurringScopeKey:'scope',roomReaders,roomRequest:value=>roomReaders.current?{...value,includeRooms:true}:value,
+      resetSaveQueue:()=>{},recurringLoadGeneration:{current:0},datedLoadGeneration:{current:0},
+      serverManagedAuth:false,loadOperationContext:()=>null,contextIsCurrent:()=>true,
+      observeTimetableOperation:()=>{},safeRequestReference,
+      fetchRecurringTimetableSessions:scope=>{const result=deferred();requests.push({scope,...result});return result.promise;},
+      ...Object.fromEntries(['setRecurringReady','setLoadedRecurringScopeKey','setIsLoading','setError','setRequestReference','setSaved','setDated','setRoomAssignmentsReady','setRecurring','setRevision','setConflict','setUnsaved'].map(key=>[key,value=>{state[key]=value;}]))};
+    const load=new Function(...Object.keys(dependencies),`return (${callback});`)(...Object.values(dependencies));
+    const work=load();assert.equal(requests.length,1);assert.equal(requests[0].scope.includeRooms,undefined);
+    roomReaders.current=1;requests[0].resolve({revision:1,weeks:[{weekId:'legacy'}]});
+    await new Promise(resolve=>setImmediate(resolve));assert.equal(requests.length,2);assert.equal(requests[1].scope.includeRooms,true);
+    assert.equal(state.setRecurringReady,false);assert.equal(state.setRecurring,undefined,'legacy data is not exposed as room-ready');
+    if(failure)requests[1].reject(Error('Room read unavailable'));
+    else requests[1].resolve({revision:2,weeks:[{weekId:'confirmed'}],roomAssignmentsLoaded:true});
+    assert.equal(await work,!failure);
+    if(failure){assert.equal(state.setRecurringReady,false);assert.equal(state.setRecurring,undefined);assert.match(state.setError,/Room read unavailable/);}
+    else{assert.equal(state.setRoomAssignmentsReady,true);assert.deepEqual(state.setRecurring,[{weekId:'confirmed'}]);}
   }
 });

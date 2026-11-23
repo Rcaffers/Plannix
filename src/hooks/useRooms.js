@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchRooms, saveRoom, deleteRoom } from '../utils/roomApi';
 const empty = { rooms:[], canManage:false, loaded:false, loading:false, saving:false, uncertain:false, error:'', message:'' };
-export function useRooms(scope, enabled) {
+export function useRooms(scope, enabled, { afterRemove } = {}) {
   const key = enabled ? scope?.key : null;
   const current = useRef(key); current.current = key;
   const sequence = useRef(0), busy = useRef(null);
@@ -37,6 +37,8 @@ export function useRooms(scope, enabled) {
       if (current.current !== key || request !== sequence.current) return false;
       const confirmed = result.rooms.find(r => r.id === (remove ? saved : saved.id));
       if (remove ? (!result.canManage || !!confirmed) : (!confirmed || (Object.hasOwn(patch,'name') && confirmed.name !== patch.name.trim()) || (Object.hasOwn(patch,'isActive') && confirmed.isActive !== patch.isActive))) throw Error('Readback mismatch');
+      if (remove && afterRemove && !await afterRemove()) throw Error('Class refresh failed');
+      if (current.current !== key || request !== sequence.current) return false;
       setState({ ...empty, ...result, key, loaded:true, message:remove ? 'Room deleted.' : 'Room saved.' });
       return true;
     } catch (error) {

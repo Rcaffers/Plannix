@@ -67,17 +67,15 @@ export function registerRoomRoutes({ app, requireAuth = requireSupabaseAuth, cre
     if (req.body && Object.keys(req.body).length) throw fail(400, 'Unexpected room fields.');
     const client = createRequestClient(req.auth);
     if (!await roomAccess(client, req.auth.userId, org)) throw fail(403, 'Organisation Admin access is required to manage rooms.');
-    // Domain validation uses 422; the cookie transport reserves 409 for session mismatch.
-    // The existing deferred foreign keys reject referenced rooms at commit.
-    // Never clear references or cascade lesson deletion to make this succeed.
-    const result = await client.from('plannix_rooms').delete().eq('organisation_id', org)
-      .eq('id', req.params.id).select('id').maybeSingle();
-    if (result.error?.code === '23503') throw fail(422, 'This room is assigned to a class default or timetable lesson. Remove those assignments before deleting it.');
+    // One user-scoped RPC transaction; session references reject the whole operation.
+    // Domain errors use 422; 409 remains reserved for authentication mismatches.
+    const result = await client.rpc('plannix_delete_room', { target_organisation_id: org, target_room_id: req.params.id });
+    if (result.error?.code === '23503') throw fail(422, 'This room is assigned to a timetable lesson. Remove those assignments before deleting it; class defaults have not changed.');
     if (result.error?.code === '42501') throw fail(403, 'You do not have permission to delete this room.');
-    if (result.error) throw fail(503, 'Could not confirm the deletion. Reload rooms before trying again; it may already have been deleted.');
-    if (!result.data) throw fail(404, 'Room was not found or access changed.');
-    if (result.data.id !== req.params.id) throw fail(503, 'Could not confirm the deletion. Reload rooms before trying again.');
-    res.json({ deletedRoomId: result.data.id });
+    if (result.error?.code === 'P0002') throw fail(404, 'Room was not found or access changed.');
+    if (result.error) throw fail(503, 'Could not confirm the deletion. Reload rooms and classes before trying again; it may already have been deleted.');
+    if (result.data !== req.params.id) throw fail(503, 'Could not confirm the deletion. Reload rooms and classes before trying again.');
+    res.json({ deletedRoomId: result.data });
   }));
 
 }

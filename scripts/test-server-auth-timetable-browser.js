@@ -210,9 +210,11 @@ try {
       heldMemberships.push({release:()=>res.json({memberships:[]})});return;}
     res.json({memberships:[]});
   });
+  app.get('/api/rooms',requireAuth,(_req,res)=>res.json({rooms:[],canManage:false}));
   let initialWeek;
   registerTimetableSessionRoutes({app,requireAuth,createRequestClient(auth){return {
     rpc(name,args){
+      const work=()=>{
       const write=name.startsWith('plannix_save_')||name==='plannix_apply_timetable_session_batch';
       const item={id:auth.fixtureId,name,owner:auth.userId,token:auth.accessToken,args,
         expectedSession:auth.expectedSession,selectedSessionName:auth.selectedSessionName};
@@ -220,6 +222,7 @@ try {
       if(name==='plannix_get_dated_timetable_sessions'&&!initialWeek)
         initialWeek=args.target_week_start_date;
       const finish=()=>{
+        if(name==='plannix_get_timetable_room_assignments')return {data:[{session_id:ids.lesson,collection_id:ids.collection,collection_type:'recurring',timetable_week_id:ids.week,week_start_date:null,day:0,period_id:ids.period,room_id:null}],error:null};
         if(!write&&name==='plannix_get_recurring_timetable_sessions'&&failNextRecurring){
           failNextRecurring=false;return {data:null,error:{code:'40001',message:'Synthetic recurring failure'}};}
         if(write&&failNextSave){failNextSave=false;
@@ -239,6 +242,8 @@ try {
       if(write&&holdSave)
         return new Promise(resolve=>heldWrites.push({item,release:()=>resolve(finish())}));
       return Promise.resolve(finish());
+      };
+      return {then:(resolve,reject)=>work().then(resolve,reject),range:(from,to)=>work().then(result=>({...result,...(Array.isArray(result.data)?{data:result.data.slice(from,to+1),count:result.data.length}:{})}))};
     },
   };}});
   app.get('/api/events',requireAuth,(_req,res)=>res.json({events:[]}));
