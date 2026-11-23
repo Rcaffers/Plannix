@@ -44,3 +44,5 @@ function Fixture(){const [user,setUser]=useState(ids.user),[enabled,setEnabled]=
  return <TimetableSessionProvider user={{id:user,organisationId:window.__org}}><SessionObserver /><ProjectCard project={{title:'Synthetic timetable'}} weekMode="fixed" fixedWeekKey={window.__inputWeek} enableEditing enableClassPlacement enableRoomSelection={enabled} /></TimetableSessionProvider>;
 }
 createRoot(document.getElementById('root')).render(<Fixture />);
+
+export async function deleteRoom(){throw Error('Room deletion must not be called by this fixture');}

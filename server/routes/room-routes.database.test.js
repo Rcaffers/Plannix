@@ -28,11 +28,12 @@ test(`real RLS room API and class-default compatibility (${authMode}) on explici
     from(table){
       assert.ok(['plannix_rooms','plannix_organisation_users','plannix_organisation_user_access_roles','plannix_access_roles','plannix_academic_years'].includes(table));
       const filters=[];let action=null,values=null,single=false,limit='',order='';
-      const q={select(){return q;},eq(k,v){assert.match(k,/^[a-z_]+$/);filters.push(`${k}=${literal(v)}`);return q;},in(k,vs){assert.match(k,/^[a-z_]+$/);filters.push(`${k} in (${vs.map(literal).join(',')})`);return q;},order(k,opts){if(!opts?.referencedTable){assert.match(k,/^[a-z_]+$/);order=` order by ${k}`;}return q;},range(a,b){assert.ok(Number.isInteger(a)&&Number.isInteger(b));limit=` limit ${b-a+1} offset ${a}`;return q;},insert(v){action='insert';values=v;return q;},update(v){action='update';values=v;return q;},maybeSingle(){single=true;return q;},
+      const q={select(){return q;},eq(k,v){assert.match(k,/^[a-z_]+$/);filters.push(`${k}=${literal(v)}`);return q;},in(k,vs){assert.match(k,/^[a-z_]+$/);filters.push(`${k} in (${vs.map(literal).join(',')})`);return q;},order(k,opts){if(!opts?.referencedTable){assert.match(k,/^[a-z_]+$/);order=` order by ${k}`;}return q;},range(a,b){assert.ok(Number.isInteger(a)&&Number.isInteger(b));limit=` limit ${b-a+1} offset ${a}`;return q;},insert(v){action='insert';values=v;return q;},update(v){action='update';values=v;return q;},delete(){action='delete';return q;},maybeSingle(){single=true;return q;},
       then(resolve,reject){
         const where=filters.length?' where '+filters.join(' and '):'';
         let statement;
         if(action==='insert')statement=`insert into public.${table} (${Object.keys(values).join(',')}) values (${Object.values(values).map(literal).join(',')}) returning *`;
+        else if(action==='delete')statement=`delete from public.${table}${where} returning *`;
         else if(action==='update')statement=`update public.${table} set ${Object.entries(values).map(([k,v])=>`${k}=${literal(v)}`).join(',')}${where} returning *`;
         else if(table==='plannix_academic_years')statement=`select id,classes_revision,(select coalesce(json_agg(c order by c.sort_order,c.id),'[]') from public.plannix_classes c where c.academic_year_id=plannix_academic_years.id) classes from public.${table}${where}`;
         else statement=`select * from public.${table}${where}${order}${limit}`;
@@ -96,7 +97,22 @@ test(`real RLS room API and class-default compatibility (${authMode}) on explici
   r=await save([...classes.entries,{name:'New class default',frequency:1,defaultRoomId:room1}]);assert.equal(r.status,200);classes=await r.json();
   const reloaded=await (await request(classPath)).json();assert.equal(reloaded.entries.find(e=>e.name==='New class default').defaultRoomId,room1);
   assert.equal(sql('select json_agg(json_build_array(id,room_id)) from public.plannix_timetable_sessions;').stdout,sessionBefore);
-  assert.equal((await request(`/api/rooms/${added.id}?organisationId=${org}`,{method:'DELETE'})).status,404,'No permanent-delete endpoint is exposed');
+  if(authMode==='server'){
+    const mismatch=await request(`/api/rooms/${added.id}?organisationId=${org}`,{method:'DELETE',override:{'X-Plannix-Expected-Session':'__Host-plannix-s-99'}});
+    assert.equal(mismatch.status,409,'genuine session mismatch is not converted to room validation');
+    const intact=await (await request(path)).json();assert.ok(intact.rooms.some(room=>room.id===added.id),'mismatched request cannot delete the room');
+  }
+  for(const n of [2,3,4,5])assert.equal((await request(`/api/rooms/${added.id}?organisationId=${org}`,{n,method:'DELETE'})).status,403);
+  for(const id of [room1,room2]){const denied=await request(`/api/rooms/${id}?organisationId=${org}`,{method:'DELETE'});assert.equal(denied.status,422);assert.match((await denied.json()).message,/Remove those assignments/);}
+  assert.equal(sql('select json_agg(json_build_array(id,room_id)) from public.plannix_timetable_sessions;').stdout,sessionBefore,'rejected deletion never clears lessons');
+  assert.equal((await request(`/api/rooms/${foreign.id}?organisationId=${org}`,{method:'DELETE'})).status,404,'foreign room cannot be deleted through another organisation scope');
+  let deleted=await request(`/api/rooms/${added.id}?organisationId=${org}`,{method:'DELETE'});assert.equal(deleted.status,200);assert.deepEqual(await deleted.json(),{deletedRoomId:added.id});
+  assert.equal((await request(`/api/rooms/${added.id}?organisationId=${org}`,{method:'DELETE'})).status,404);
+  const unused=await (await request(`/api/rooms?organisationId=${org}`,{method:'POST',body:{name:'Archived unused room'}})).json();
+  assert.equal((await request(`/api/rooms/${unused.room.id}?organisationId=${org}`,{method:'PATCH',body:{isActive:false}})).status,200);
+  assert.equal((await request(`/api/rooms/${unused.room.id}?organisationId=${org}`,{method:'PATCH',body:{name:'Renamed archived unused room'}})).status,200);
+  const archivedReload=await (await request(`/api/rooms?organisationId=${org}`)).json();assert.equal(archivedReload.rooms.find(r=>r.id===unused.room.id).isActive,false);
+  assert.equal((await request(`/api/rooms/${unused.room.id}?organisationId=${org}`,{method:'DELETE'})).status,200);
   if(authMode==='bearer'){
   const classApi=createClassApi({getSession:async()=>({access_token:'synthetic.1'}),fetchImpl:(path,options)=>fetch(`http://127.0.0.1:${server.address().port}${path}`,options)});
   const clientLoaded=await classApi.load(org,year);assert.equal(clientLoaded.entries.find(e=>e.name==='New class default').defaultRoomId,room1);

@@ -253,3 +253,31 @@ for (const replacement of ['different account','same-account replacement']) {
     } finally {await f.close();}
   });
 }
+
+test('room validation rejects deletion and duplicate rename without invalidating the ordinary session',async()=>{
+  const f=await fixture();
+  try {
+    f.selectA();const context=f.transport.captureServerOperationContext(A);let calls=0;
+    const api=f.rooms.createRoomApi({fetchImpl:async(_url,init)=>{
+      calls++;assert.equal(init.credentials,'same-origin');assert.equal(init.headers.has('Authorization'),false);
+      assert.equal(init.headers.get('X-Plannix-Expected-Session'),SESSION_A);
+      assert.equal(init.headers.get('X-Plannix-CSRF'),CSRF_A);
+      return Response.json({message:'Room validation failed.'},{status:422});
+    }});
+    await assert.rejects(api.remove({organisationId:YEAR,userId:A},YEAR),error=>error.status===422);
+    assert.doesNotThrow(()=>f.transport.assertServerOperationContext(context));
+    await assert.rejects(api.save({organisationId:YEAR,userId:A},YEAR,{name:'Duplicate'}),error=>error.status===422);
+    assert.doesNotThrow(()=>f.transport.assertServerOperationContext(context));assert.equal(calls,2);
+  } finally {await f.close();}
+});
+
+
+test('a genuine room DELETE session mismatch retains 409 handling and never replays',async()=>{
+  const f=await fixture();
+  try {
+    f.selectA();const context=f.transport.captureServerOperationContext(A);let calls=0;
+    const api=f.rooms.createRoomApi({fetchImpl:async()=>{calls++;return Response.json({message:'Authentication changed. Reload and try again.'},{status:409});}});
+    await assert.rejects(api.remove({organisationId:YEAR,userId:A},YEAR),changed);
+    assert.throws(()=>f.transport.assertServerOperationContext(context),changed);assert.equal(calls,1);
+  } finally {await f.close();}
+});

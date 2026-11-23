@@ -53,7 +53,7 @@ export function registerRoomRoutes({ app, requireAuth = requireSupabaseAuth, cre
     let query = client.from('plannix_rooms');
     query = isNew ? query.insert({ ...patch, organisation_id: org }) : query.update(patch).eq('organisation_id', org).eq('id', req.params.id);
     const result = await query.select(fields).maybeSingle();
-    if (result.error?.code === '23505') throw fail(409, 'A room with this name already exists, including archived rooms.');
+    if (result.error?.code === '23505') throw fail(422, 'A room with this name already exists, including archived rooms.');
     if (result.error?.code === '42501') throw fail(403, 'You do not have permission to manage this room.');
     if (result.error) throw fail(503, 'Could not confirm the save. Reload rooms before trying again.');
     if (!result.data) throw fail(404, 'Room was not found or access changed.');
@@ -61,4 +61,23 @@ export function registerRoomRoutes({ app, requireAuth = requireSupabaseAuth, cre
   });
   app.post('/api/rooms', requireAuth, write(true));
   app.patch('/api/rooms/:id', requireAuth, write(false));
+  app.delete('/api/rooms/:id', requireAuth, handle(async (req, res) => {
+    const org = scope(req);
+    if (!UUID.test(req.params.id || '')) throw fail(400, 'Room ID is invalid.');
+    if (req.body && Object.keys(req.body).length) throw fail(400, 'Unexpected room fields.');
+    const client = createRequestClient(req.auth);
+    if (!await roomAccess(client, req.auth.userId, org)) throw fail(403, 'Organisation Admin access is required to manage rooms.');
+    // Domain validation uses 422; the cookie transport reserves 409 for session mismatch.
+    // The existing deferred foreign keys reject referenced rooms at commit.
+    // Never clear references or cascade lesson deletion to make this succeed.
+    const result = await client.from('plannix_rooms').delete().eq('organisation_id', org)
+      .eq('id', req.params.id).select('id').maybeSingle();
+    if (result.error?.code === '23503') throw fail(422, 'This room is assigned to a class default or timetable lesson. Remove those assignments before deleting it.');
+    if (result.error?.code === '42501') throw fail(403, 'You do not have permission to delete this room.');
+    if (result.error) throw fail(503, 'Could not confirm the deletion. Reload rooms before trying again; it may already have been deleted.');
+    if (!result.data) throw fail(404, 'Room was not found or access changed.');
+    if (result.data.id !== req.params.id) throw fail(503, 'Could not confirm the deletion. Reload rooms before trying again.');
+    res.json({ deletedRoomId: result.data.id });
+  }));
+
 }

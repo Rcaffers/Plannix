@@ -276,3 +276,17 @@
 
 .classes-entry-grid > .classes-field { min-width: 0; }
 .classes-field--room { grid-column: 1 / -1; }
+
+.rooms-inline-editor { display: flex; flex: 1 1 100%; align-items: flex-end; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.rooms-inline-editor .classes-field { flex: 1 1 220px; min-width: 0; }
+.rooms-card .classes-field input[type='text'] { max-width: 100%; min-height: 44px; box-sizing: border-box; }
+.rooms-editor { margin-top: 8px; }
+.rooms-inline-editor .rooms-actions { padding-bottom: 1px; }
+@media (max-width: 480px) {
+  .rooms-inline-editor { width: 100%; }
+  .rooms-inline-editor .classes-field { flex-basis: 100%; }
+  .rooms-card .classes-field input[type='text'] { font-size: 1rem; }
+}
+
+.rooms-delete-confirmation { flex: 1 1 100%; min-width: 0; display: grid; gap: 10px; }
+.rooms-delete-confirmation > p { margin: 0; overflow-wrap: anywhere; }
